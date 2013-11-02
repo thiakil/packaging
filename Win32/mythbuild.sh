@@ -282,7 +282,7 @@ function myhelp() {
     echo "MYTHDIR         Build tree root [current directory]"
     echo "MYTHWORK        Directory to unpack and build packages [${MYTHWORK#$MYTHDIR/}]"
     echo "MYTHPATCHES     Patches to apply [$MYTHPATCHES]"
-    echo "MYTHVER         MythTV version [$MYTHVER]"
+    echo "MYTHVER         MythTV version (WITHOUT fixes/ prefix) [$MYTHVER]"
     echo "DXVA2           Windows DXVA2 support [$DXVA2]"
     echo "MYTHGIT         Myth git repository [$MYTHGIT]"
     echo "MYTHREPO        Primary mirror [$MYTHREPO]"
