@@ -1,0 +1,51 @@
+From 7011e0ea5ccdf58c2e39a96e4205f60dea0c2880 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 2 Jan 2013 19:54:01 +0000
+Subject: [PATCH 157/285] TV: re-map channelup/dn to zoom in/out for ease of
+ use with R/C
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/tv_play.cpp |   16 ++++++----------
+ 1 file changed, 6 insertions(+), 10 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/tv_play.cpp b/mythtv/libs/libmythtv/tv_play.cpp
+index aff5f62..dfcde5c 100644
+--- a/mythtv/libs/libmythtv/tv_play.cpp
++++ b/mythtv/libs/libmythtv/tv_play.cpp
+@@ -3734,16 +3734,10 @@ bool TV::ManualZoomHandleAction(PlayerContext *actx, const QStringList &actions)
+ 
+     bool end_manual_zoom = false;
+     bool handled = true;
+-    if (has_action("UP", actions) ||
+-        has_action("CHANNELUP", actions))
+-    {
++    if (has_action("UP", actions))
+         actx->player->Zoom(kZoomUp);
+-    }
+-    else if (has_action("DOWN", actions) ||
+-             has_action("CHANNELDOWN", actions))
+-    {
++    else if (has_action("DOWN", actions))
+         actx->player->Zoom(kZoomDown);
+-    }
+     else if (has_action("LEFT", actions))
+         actx->player->Zoom(kZoomLeft);
+     else if (has_action("RIGHT", actions))
+@@ -3760,9 +3754,11 @@ bool TV::ManualZoomHandleAction(PlayerContext *actx, const QStringList &actions)
+     }
+     else if (has_action("SELECT", actions))
+         SetManualZoom(actx, false, tr("Zoom Committed"));
+-    else if (has_action("JUMPFFWD", actions))
++    else if (has_action("JUMPFFWD", actions) ||
++        has_action("CHANNELUP", actions))
+         actx->player->Zoom(kZoomIn);
+-    else if (has_action("JUMPRWND", actions))
++    else if (has_action("JUMPRWND", actions) ||
++             has_action("CHANNELDOWN", actions))
+         actx->player->Zoom(kZoomOut);
+     else
+     {
+-- 
+1.7.9.5
+

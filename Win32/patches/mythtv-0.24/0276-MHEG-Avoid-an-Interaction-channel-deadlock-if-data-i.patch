@@ -1,0 +1,42 @@
+From 3906df46ae0570f673a6ed6871ab9c143ec6e5b7 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 21 Aug 2013 13:58:34 +0100
+Subject: [PATCH 276/285] MHEG: Avoid an Interaction channel deadlock if data
+ is cached
+
+If a request to NetStream is pending when a 2nd is requested that can be
+resolved from the cache then a deadlock occurs if the 1st request
+finishes while the cached request is processed.
+
+This patch releases the MHInteractionChannel mutex while the
+synchronous request for cached data is processed.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mhegic.cpp |    3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/mhegic.cpp b/mythtv/libs/libmythtv/mhegic.cpp
+index 3d2988e..39084c5 100644
+--- a/mythtv/libs/libmythtv/mhegic.cpp
++++ b/mythtv/libs/libmythtv/mhegic.cpp
+@@ -131,6 +131,8 @@ MHInteractionChannel::GetFile(const QString &csPath, QByteArray &data,
+     {
+         VERBOSE(VB_MHEG|VB_EXTRA, LOC + QString("GetFile cache read %1").arg(csPath) );
+ 
++        locker.unlock();
++
+         NetStream req(url, NetStream::kAlwaysCache);
+         if (req.WaitTillFinished(3000) && req.GetError() == QNetworkReply::NoError)
+         {
+@@ -143,6 +145,7 @@ MHInteractionChannel::GetFile(const QString &csPath, QByteArray &data,
+         VERBOSE(VB_MHEG, LOC + QString("GetFile cache read failed %1").arg(csPath) );
+         //return kError;
+         // Retry
++        locker.relock();
+     }
+ 
+     // Queue a download
+-- 
+1.7.9.5
+

@@ -1,0 +1,35 @@
+From 54acd0852d322d42ed91b266c2eacfb70260b4e5 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 20 Aug 2013 21:32:05 +0100
+Subject: [PATCH 209/227] NVR: Stop audio device on exit to ensure audio
+ thread terminates promptly
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/NuppelVideoRecorder.cpp |    3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/NuppelVideoRecorder.cpp b/mythtv/libs/libmythtv/NuppelVideoRecorder.cpp
+index a9fbad8..de04ce9 100644
+--- a/mythtv/libs/libmythtv/NuppelVideoRecorder.cpp
++++ b/mythtv/libs/libmythtv/NuppelVideoRecorder.cpp
+@@ -1670,7 +1670,7 @@ again:
+              resetcapture = false;
+         }
+ 
+-        tv.tv_sec = 5;
++        tv.tv_sec = 2;
+         tv.tv_usec = 0;
+         FD_ZERO(&rdset);
+         FD_SET(fd, &rdset);
+@@ -1933,6 +1933,7 @@ void NuppelVideoRecorder::KillChildren(void)
+ 
+     if (audio_thread)
+     {
++        if (audio_device) audio_device->Stop();
+         audio_thread->wait();
+         delete audio_thread;
+         audio_thread = NULL;
+-- 
+1.7.9.5
+

@@ -1,0 +1,43 @@
+From 72132b8ee50d27a4bf93b42a72b3ca4150dcc63e Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 20 Dec 2012 17:52:14 +0000
+Subject: [PATCH 156/285] AFD: Restore streams after calling
+ av_estimate_timings
+
+AvFormatDecoder::OpenFile calls FFMPEG av_estimate_timings when handling local
+files to determine playback duration.  This function seeks close to EOF to
+read the last few PTS.  However, liveTV recordings can extend past the end
+of the main feature and while seeking for the last PTS, changes in the PMT
+can occur which result in the starting streams being changed.  Then when
+playback starts codecs can't be assigned.
+
+This fix pragmatically reads the 1st frame which should be sufficient to
+restore the starting streams.  Ideally the FFMPEG library should be fixed
+to preserve stream info.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |    7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index 4f038d5..608244e 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -969,6 +969,13 @@ int AvFormatDecoder::OpenFile(RingBuffer *rbuffer, bool novideo,
+         // generate timings based on the video stream to avoid bogus ffmpeg
+         // values for duration and bitrate
+         av_update_stream_timings_video(ic);
++
++        // av_estimate_timings seeks to end of file and may encounter changes
++        // in the PMT resulting in the initial streams being changed.  So read
++        // the 1st packet to ensure that the starting streams are correct.
++        AVPacket pkt;
++        av_read_frame(ic, &pkt);
++        av_free_packet(&pkt);
+     }
+ 
+     // Scan for the initial A/V streams
+-- 
+1.7.9.5
+

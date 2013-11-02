@@ -1,0 +1,53 @@
+From 232d16ca0984f56fc02a1f0826851ad4ee1a8989 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 4 May 2011 09:57:49 +0200
+Subject: [PATCH 032/285] MythCenter-wide: Fix OSD starttime overwriting title
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/themes/MythCenter-wide/osd.xml |   12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/mythtv/themes/MythCenter-wide/osd.xml b/mythtv/themes/MythCenter-wide/osd.xml
+index a230606..49387cb 100644
+--- a/mythtv/themes/MythCenter-wide/osd.xml
++++ b/mythtv/themes/MythCenter-wide/osd.xml
+@@ -198,29 +198,29 @@
+         </shape>
+         <textarea name="title">
+             <font>medium</font>
+-            <area>10,10,870,40</area>
++            <area>10,10,626,40</area>
+             <align>left,vcenter</align>
+         </textarea>
+         <textarea name="description">
+             <font>small</font>
+-            <area>10,50,870,40</area>
++            <area>10,50,876,40</area>
+             <align>left,vcenter</align>
+             <template>%"|SUBTITLE|" %%LONGREPEAT%%(|STARS|) %%DESCRIPTION%</template>
+         </textarea>
+         <textarea name="starttime">
+             <font>medium</font>
+-            <area>10,10,870,40</area>
+-            <align>right,top</align>
++            <area>636,10,252,40</area>
++            <align>center,top</align>
+             <template>%STARTTIME%-%ENDTIME%</template>
+         </textarea>
+         <textarea name="channum">
+-            <area>900,10,95,80</area>
++            <area>894,10,142,80</area>
+             <font>large</font>
+             <align>hcenter,vcenter</align>
+             <value>%CHANNUM%</value>
+         </textarea>
+         <imagetype name="iconpath">
+-            <area>1015,10,125,80</area>
++            <area>1036,10,125,80</area>
+         </imagetype>
+     </window>
+ 
+-- 
+1.7.9.5
+

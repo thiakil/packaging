@@ -1,0 +1,79 @@
+# Fix for no S_ISLNK && S_ISSOCK in mingw
+# & small configure change to remove -mwindows from link as this stops exe's running on Win
+diff -purN libcdio-0.82.orig/configure libcdio-0.82/configure
+--- libcdio-0.82.orig/configure	2009-10-27 12:26:57.000000000 +0100
++++ libcdio-0.82/configure	2010-12-05 16:17:50.000000000 +0100
+@@ -7791,7 +7791,7 @@ case "(($ac_try" in
+ esac
+ eval ac_try_echo="\"\$as_me:$LINENO: $ac_try_echo\""
+ $as_echo "$ac_try_echo") >&5
+-  (eval "$ac_compile") 2>conftest.er1
++  (eval "$ac_link") 2>conftest.er1
+   ac_status=$?
+   grep -v '^ *+' conftest.er1 >conftest.err
+   rm -f conftest.er1
+@@ -7846,7 +7846,7 @@ case "(($ac_try" in
+ esac
+ eval ac_try_echo="\"\$as_me:$LINENO: $ac_try_echo\""
+ $as_echo "$ac_try_echo") >&5
+-  (eval "$ac_compile") 2>conftest.er1
++  (eval "$ac_link") 2>conftest.er1
+   ac_status=$?
+   grep -v '^ *+' conftest.er1 >conftest.err
+   rm -f conftest.er1
+@@ -19843,7 +19843,7 @@ cat >>confdefs.h <<\_ACEOF
+ #define HAVE_WIN32_CDROM 1
+ _ACEOF
+ 
+- 	LIBS="$LIBS -lwinmm -mwindows"
++ 	LIBS="$LIBS -lwinmm"
+  	LT_NO_UNDEFINED="-no-undefined"
+   	cd_drivers="${cd_drivers}, MinGW "
+ 	;;
+diff -purN libcdio-0.82.orig/lib/driver/MSWindows/win32.c libcdio-0.82/lib/driver/MSWindows/win32.c
+--- libcdio-0.82.orig/lib/driver/MSWindows/win32.c	2008-11-29 05:52:43.000000000 +0100
++++ libcdio-0.82/lib/driver/MSWindows/win32.c	2010-12-05 16:17:50.000000000 +0100
+@@ -220,7 +220,7 @@ str_to_access_mode_win32(const char *psz
+   if (!strcmp(psz_access_mode, "ioctl"))
+     return _AM_IOCTL;
+   else if (!strcmp(psz_access_mode, "ASPI")) {
+-#ifdef _XBOX
++#ifndef _XBOX
+     return _AM_ASPI;
+ #else 
+     cdio_warn ("XBOX doesn't support access type: %s. Default used instead.", 
+diff -purN libcdio-0.82.orig/lib/iso9660/rock.c libcdio-0.82/lib/iso9660/rock.c
+--- libcdio-0.82.orig/lib/iso9660/rock.c	2008-11-29 05:52:43.000000000 +0100
++++ libcdio-0.82/lib/iso9660/rock.c	2010-12-05 16:17:50.000000000 +0100
+@@ -42,6 +42,13 @@
+ 
+ #define CDIO_MKDEV(ma,mi)	((ma)<<16 | (mi))
+ 
++#ifndef HAVE_S_ISLNK
++#define S_ISLNK(s) ((void)s,0)
++#endif
++#ifndef HAVE_S_ISSOCK
++#define S_ISSOCK(s) ((void)s,0)
++#endif
++
+ enum iso_rock_enums iso_rock_enums;
+ iso_rock_nm_flag_t iso_rock_nm_flag;
+ iso_rock_sl_flag_t iso_rock_sl_flag;
+diff -purN libcdio-0.82.orig/src/util.c libcdio-0.82/src/util.c
+--- libcdio-0.82.orig/src/util.c	2009-07-13 01:21:30.000000000 +0200
++++ libcdio-0.82/src/util.c	2010-12-05 16:17:50.000000000 +0100
+@@ -27,6 +27,13 @@
+ # include <sys/stat.h>
+ #endif
+ 
++#ifndef HAVE_S_ISLNK
++#define S_ISLNK(s) ((void)s,0)
++#endif
++#ifndef HAVE_S_ISSOCK
++#define S_ISSOCK(s) ((void)s,0)
++#endif
++
+ cdio_log_handler_t gl_default_cdio_log_handler = NULL;
+ char *source_name = NULL;
+ char *program_name;
+

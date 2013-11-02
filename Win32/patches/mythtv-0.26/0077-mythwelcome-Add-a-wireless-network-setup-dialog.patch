@@ -1,0 +1,505 @@
+From 8ee44dbe41aec239d607128d272ebcd11014c246 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 30 Mar 2012 21:15:07 +0200
+Subject: [PATCH 077/227] mythwelcome: Add a wireless network setup dialog
+
+This is a bit of a hack to enable turnkey MythTV systems without any
+window manager to show a UI to select a wifi network and password.
+
+The wireless setup dialog can be invoked from the command line:
+	mythwelcome -w [--wifi]
+or by pressing 9 in the welcome screen.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythwelcome/commandlineparser.cpp |    2 +
+ mythtv/programs/mythwelcome/main.cpp              |    8 +
+ mythtv/programs/mythwelcome/welcomedialog.cpp     |    4 +
+ mythtv/programs/mythwelcome/welcomesettings.cpp   |  327 +++++++++++++++++++++
+ mythtv/programs/mythwelcome/welcomesettings.h     |   68 +++++
+ 5 files changed, 409 insertions(+)
+
+diff --git a/mythtv/programs/mythwelcome/commandlineparser.cpp b/mythtv/programs/mythwelcome/commandlineparser.cpp
+index 32099dd..e397d7e 100644
+--- a/mythtv/programs/mythwelcome/commandlineparser.cpp
++++ b/mythtv/programs/mythwelcome/commandlineparser.cpp
+@@ -25,5 +25,7 @@ void MythWelcomeCommandLineParser::LoadArguments(void)
+ 
+     add(QStringList( QStringList() << "-s" << "--setup" ), "setup", false,
+             "Run setup for mythshutdown.", "");
++    add(QStringList( QStringList() << "-W" << "--wifi" ), "wifi", false,
++            "Run WiFi setup.", "");
+ }
+ 
+diff --git a/mythtv/programs/mythwelcome/main.cpp b/mythtv/programs/mythwelcome/main.cpp
+index 41acc33..9129bbb 100644
+--- a/mythtv/programs/mythwelcome/main.cpp
++++ b/mythtv/programs/mythwelcome/main.cpp
+@@ -44,6 +44,7 @@ static void initKeys(void)
+ int main(int argc, char **argv)
+ {
+     bool bShowSettings = false;
++    bool bShowWifi = false;
+ 
+     MythWelcomeCommandLineParser cmdline;
+     if (!cmdline.Parse(argc, argv))
+@@ -74,6 +75,9 @@ int main(int argc, char **argv)
+     if (cmdline.toBool("setup"))
+         bShowSettings = true;
+ 
++    if (cmdline.toBool("wifi"))
++        bShowWifi = true;
++
+ #ifndef _WIN32
+     QList<int> signallist;
+     signallist << SIGINT << SIGTERM << SIGSEGV << SIGABRT << SIGBUS << SIGFPE
+@@ -121,6 +125,10 @@ int main(int argc, char **argv)
+         MythShutdownSettings settings;
+         settings.exec();
+     }
++    else if (bShowWifi)
++    {
++        MythWirelessSettings().exec();
++    }
+     else
+     {
+         MythScreenStack *mainStack = GetMythMainWindow()->GetMainStack();
+diff --git a/mythtv/programs/mythwelcome/welcomedialog.cpp b/mythtv/programs/mythwelcome/welcomedialog.cpp
+index 73495be..9028b33 100644
+--- a/mythtv/programs/mythwelcome/welcomedialog.cpp
++++ b/mythtv/programs/mythwelcome/welcomedialog.cpp
+@@ -264,6 +264,10 @@ bool WelcomeDialog::keyPressEvent(QKeyEvent *event)
+             if (kDialogCodeAccepted == settings.exec())
+                 gCoreContext->SendMessage("CLEAR_SETTINGS_CACHE");
+         }
++        else if (action == "9")
++        {
++            MythWirelessSettings().exec();
++        }
+         else if (action == "0")
+         {
+             QString mythshutdown_status =
+diff --git a/mythtv/programs/mythwelcome/welcomesettings.cpp b/mythtv/programs/mythwelcome/welcomesettings.cpp
+index 719bafa..f50566d 100644
+--- a/mythtv/programs/mythwelcome/welcomesettings.cpp
++++ b/mythtv/programs/mythwelcome/welcomesettings.cpp
+@@ -1,8 +1,11 @@
+ #include <unistd.h>
++#include <QFile>
+ 
+ #include "welcomesettings.h"
+ #include "mythcorecontext.h"
+ #include "mythdirs.h"
++#include "mythsystem.h"
++#include "mythprogressdialog.h"
+ 
+ ///////////////////////////////////////////////////////////////////
+ //  daily wakeup/shutdown settings
+@@ -213,3 +216,327 @@ MythShutdownSettings::MythShutdownSettings()
+ 
+     addChild(vcg);
+ }
++
++///////////////////////////////////////////////////////////////////
++//  wireless settings
++///////////////////////////////////////////////////////////////////
++MythWirelessSettings::MythWirelessSettings() : m_settings(new WifiSettings())
++{
++    addChild(m_settings);
++}
++
++// virtual
++void MythWirelessSettings::Load(void)
++{
++    ConfigurationWizard::Load();
++    m_settings->Mark();
++}
++
++// virtual
++void MythWirelessSettings::Save(void)
++{
++    ConfigurationWizard::Save();
++
++    if (m_settings->isChanged())
++    {
++        MythUIBusyDialog *busy = ShowBusyPopup(
++            QObject::tr("Updating wireless network settings. Please Wait ..."));
++
++        QString cmd = QString("sudo -n myth_wifi setup %1 '%2' '%3'")
++            .arg(m_settings->getIface()).arg(m_settings->getSSID())
++            .arg(m_settings->getAuth());
++
++        if (m_settings->getAuth().toLower() != "none"
++                && !m_settings->getPass().isEmpty())
++        {
++            cmd += QString(" '%1'").arg(m_settings->getPass());
++        }
++
++        unsigned ret = myth_system(cmd,
++            kMSDontBlockInputDevs | kMSProcessEvents | kMSDontDisableDrawing);
++
++        busy->Close();
++
++        if (ret)
++        {
++            MythPopupBox::showOkPopup(GetMythMainWindow(), QObject::tr("Error"),
++                QObject::tr("Failed to update system settings"));
++        }
++    }
++}
++
++WifiSettings::WifiSettings() :
++    VerticalConfigurationGroup(false, true, false, false),
++    m_iface(new HostComboBox("WifiInterface")),
++    m_mac(new TransLabelSetting()),
++    m_ssid(new HostComboBox("WifiNetwork")),
++    m_quality(new TransLabelSetting()),
++    m_level(new TransLabelSetting()),
++    m_mode(new TransLabelSetting()),
++    m_auth(new HostComboBox("WifiSecurity")),
++    m_pass(new HostLineEdit("WiFiPassword")),
++    m_bScanned(false)
++{
++    setLabel(QObject::tr("Wireless Settings"));
++    setUseLabel(false);
++
++    // Rescan button
++    TransButtonSetting *rescan = new TransButtonSetting("rescan");
++    rescan->setLabel(QObject::tr("Scan"));
++    rescan->setHelpText(QObject::tr("Scan for wireless networks."));
++    addChild(rescan);
++    connect(rescan, SIGNAL(pressed()), this, SLOT(Rescan()));
++
++    ConfigurationGroup *group1 = new HorizontalConfigurationGroup(false,false,true,false);
++    addChild(group1);
++
++    m_iface->setLabel(QObject::tr("Interface"));
++    m_iface->setHelpText(QObject::tr("The wireless interface name."));
++    group1->addChild(m_iface);
++    connect(m_iface, SIGNAL(valueChanged(const QString&)),
++        this, SLOT(UpdateIface(const QString&)));
++
++    m_mac->setLabel(QObject::tr("MAC address"));
++    group1->addChild(m_mac);
++
++    m_ssid->setLabel(QObject::tr("SSID"));
++    m_ssid->setHelpText(QObject::tr("The wireless network name."));
++    addChild(m_ssid);
++    connect(m_ssid, SIGNAL(valueChanged(const QString&)),
++        this, SLOT(UpdateSsid(const QString&)));
++
++    m_mode->setLabel(QObject::tr("Mode"));
++    addChild(m_mode);
++
++    ConfigurationGroup *group2 = new HorizontalConfigurationGroup(true, true);
++    group2->setLabel(QObject::tr("Signal"));
++    addChild(group2);
++
++    m_quality->setLabel(QObject::tr("Quality"));
++    group2->addChild(m_quality);
++    m_level->setLabel(QObject::tr("Level"));
++    group2->addChild(m_level);
++
++    m_auth->setLabel(QObject::tr("Security"));
++    m_auth->setHelpText(QObject::tr("The wireless security method."));
++    addChild(m_auth);
++    connect(m_auth, SIGNAL(valueChanged(const QString&)),
++        this, SLOT(UpdateSec(const QString&)));
++
++    m_pass->setLabel(QObject::tr("Password"));
++    m_pass->setHelpText(QObject::tr("The wireless security password."));
++    addChild(m_pass);
++}
++
++void WifiSettings::Mark()
++{
++    m_ifaceVal = m_iface->getValue();
++    m_ssidVal = m_ssid->getValue();
++    m_authVal = m_auth->getValue();
++    m_passVal = m_pass->getValue();
++}
++
++bool WifiSettings::isChanged() const
++{
++    return m_bScanned
++        || m_ifaceVal != m_iface->getValue()
++        || m_ssidVal != m_ssid->getValue()
++        || m_authVal != m_auth->getValue()
++        || m_passVal != m_pass->getValue();
++}
++
++void WifiSettings::Rescan()
++{
++    if (!slotlock.tryLock())
++        return;
++
++    MythUIBusyDialog *busy = ShowBusyPopup(
++        QObject::tr("Scanning for active networks. Please Wait ..."));
++
++    bool bHaveWireless = false;
++
++    // NB an active scan requires root privilege
++    const char* cmd = "sudo -n myth_wifi scan";
++    for (int i = 0; i < 2; ++i, cmd = "myth_wifi scan")
++    {
++        m_cells.clear();
++
++        LOG(VB_GENERAL, LOG_INFO, QString("WifiSettings running '%1'").arg(cmd));
++        FILE *fp = popen(cmd, "r");
++        if (!fp)
++        {
++            LOG(VB_GENERAL, LOG_WARNING, "WifiSettings failed to start scan");
++            break;
++        }
++
++        Cell cell;
++        char buf[256];
++        while (fgets(buf, sizeof buf, fp))
++        {
++            int n;
++            char s[64];
++
++            n = 0;
++            if (1 <= sscanf(buf, "%63s Scan completed%n", s, &n) && n > 0)
++            {
++                // New interface
++                bHaveWireless = true;
++                if (!cell.ssid.isEmpty())
++                    m_cells.insertMulti(cell.ssid, cell);
++                cell = Cell(QString(s));
++            }
++            else if (1 == sscanf(buf, " Cell %d", &n))
++            {
++                // New cell
++                if (!cell.ssid.isEmpty())
++                {
++                    m_cells.insertMulti(cell.ssid, cell);
++                    QString iface = cell.iface;
++                    cell = Cell(iface);
++                }
++            }
++            else if (2 == sscanf(buf, " Quality = %63s Signal level = %d", s, &n))
++            {
++                cell.quality = s;
++                cell.level = QString("%1 dBm").arg(n);
++            }
++            else if (1 == sscanf(buf, " Signal level = %s", s))
++            {
++                cell.level = s;
++            }
++            else if (1 == sscanf(buf, " ESSID : \"%63[^\"]", s))
++            {
++                cell.ssid = s;
++            }
++            else if (1 == sscanf(buf, " Mode : %63s", s))
++            {
++                cell.mode = s;
++            }
++            else if (1 == sscanf(buf, " Encryption key : %63s", s))
++            {
++                cell.enc = 0 == strcmp("on", s);
++            }
++            else if (strstr(buf, "WPA2"))
++            {
++                cell.enc = true;
++                cell.wpa2 = true;
++            }
++            else if (strstr(buf, "WPA"))
++            {
++                cell.enc = true;
++                cell.wpa = true;
++            }
++        } // while
++
++        if (!cell.ssid.isEmpty())
++            m_cells.insertMulti(cell.ssid, cell);
++
++        if (pclose(fp) == 0)
++        {
++            LOG(VB_GENERAL, LOG_INFO, "WifiSettings scan complete");
++            break;
++        }
++
++        LOG(VB_GENERAL, LOG_WARNING, "WifiSettings retrying scan");
++        // retry
++    } // for
++
++    busy->Close();
++
++    m_bScanned |= m_cells.count() > 0;
++
++    // Update the list of interfaces
++    QString iface = m_iface->getValue();
++
++    m_iface->clearSelections();
++    for (cell_t::const_iterator i = m_cells.constBegin();
++        i != m_cells.constEnd(); ++i)
++    {
++        LOG(VB_GENERAL, LOG_INFO, "Found: " + i->toString());
++        m_iface->addSelection(i->iface);
++    }
++
++    if (m_cells.count() == 0 && !iface.isEmpty())
++        m_iface->addSelection(iface);
++
++    m_iface->setValue(iface);
++
++    slotlock.unlock();
++
++    if (m_cells.count() == 0)
++    {
++        MythPopupBox::showOkPopup(GetMythMainWindow(), QObject::tr("Error"),
++            bHaveWireless ? QObject::tr("No wireless networks found")
++                : QObject::tr("No wireless interfaces found") );
++    }
++}
++
++void WifiSettings::UpdateIface(const QString &iface)
++{
++    //LOG(VB_GENERAL, LOG_INFO, "WifiSettings UpdateIface: " + iface);
++
++    QFile file("/sys/class/net/" + iface + "/address");
++    if (file.open(QIODevice::ReadOnly | QIODevice::Text))
++    {
++        QString mac = file.readLine();
++        m_mac->setValue(mac.trimmed());
++     }
++
++    QString ssid = m_ssid->getValue();
++
++    // Update the list of networks
++    m_ssid->clearSelections();
++    for (cell_t::const_iterator i = m_cells.constBegin();
++        i != m_cells.constEnd(); ++i)
++    {
++        if (i->iface == iface)
++            m_ssid->addSelection(i->ssid);
++    }
++
++    if (m_cells.count() == 0 && !ssid.isEmpty())
++        m_ssid->addSelection(ssid);
++
++    m_ssid->setValue(ssid);
++}
++
++void WifiSettings::UpdateSsid(const QString &ssid)
++{
++    //LOG(VB_GENERAL, LOG_INFO, "WifiSettings UpdateSsid: " + ssid);
++
++    Cell cell = m_cells.value(ssid);
++
++    //Quality, Signal level
++    m_level->setValue(cell.level);
++    m_quality->setValue(cell.quality);
++
++    // Mode master, ad-hoc managed
++    m_mode->setValue(cell.mode);
++
++    // Update the list of authorization methods
++    QString auth = m_auth->getValue();
++    m_auth->clearSelections();
++    if (cell.ssid.isEmpty())
++    {
++        if (!auth.isEmpty())
++            m_auth->addSelection(auth);
++    }
++    else if (!cell.enc)
++        m_auth->addSelection("None");
++    else if (!cell.wpa && !cell.wpa2)
++        m_auth->addSelection("WEP");
++    else
++    {
++        if (cell.wpa)
++            m_auth->addSelection("WPA-PSK");
++        if (cell.wpa2)
++            m_auth->addSelection("WPA2-PSK");
++    }
++
++    m_auth->setValue(auth);
++}
++
++void WifiSettings::UpdateSec(const QString &sec)
++{
++    //LOG(VB_GENERAL, LOG_INFO, QString("WifiSettings UpdateSec: %1").arg(sec));
++    m_pass->setEnabled(sec != "None");
++}
+diff --git a/mythtv/programs/mythwelcome/welcomesettings.h b/mythtv/programs/mythwelcome/welcomesettings.h
+index 8e50cb8..f713619 100644
+--- a/mythtv/programs/mythwelcome/welcomesettings.h
++++ b/mythtv/programs/mythwelcome/welcomesettings.h
+@@ -23,4 +23,72 @@ class MythShutdownSettings : public ConfigurationWizard
+     MythShutdownSettings();
+ };
+ 
++class WifiSettings;
++class MythWirelessSettings : public ConfigurationWizard
++{
++  public:
++    MythWirelessSettings();
++    virtual void Load(void);
++    virtual void Save(void);
++
++  protected:
++    WifiSettings * const m_settings;
++};
++
++class WifiSettings : public VerticalConfigurationGroup
++{
++    Q_OBJECT
++
++  public:
++    WifiSettings();
++    QString getIface() const { return m_iface->getValue(); }
++    QString getSSID() const { return m_ssid->getValue(); }
++    QString getAuth() const { return m_auth->getValue(); }
++    QString getPass() const { return m_pass->getValue(); }
++
++    void Mark();
++    bool isChanged() const;
++
++  private slots:
++    void Rescan();
++    void UpdateIface(const QString &);
++    void UpdateSsid(const QString &);
++    void UpdateSec(const QString &);
++
++  private:
++    HostComboBox * const m_iface;
++    TransLabelSetting * const m_mac;
++    HostComboBox * const m_ssid;
++    TransLabelSetting * const m_quality;
++    TransLabelSetting * const m_level;
++    TransLabelSetting * const m_mode;
++    HostComboBox * const m_auth;
++    HostLineEdit * const m_pass;
++    QMutex mutable slotlock;
++
++    QString m_ifaceVal, m_ssidVal, m_authVal, m_passVal;
++    bool m_bScanned;
++
++    struct Cell
++    {
++        Cell(const QString &_iface = "") : iface(_iface), enc(false), wpa(false), wpa2(false) {}
++        QString toString() const
++        {
++            return QString("Interface:%1, '%2' mode:%3, quality=%4, signal=%5 %7 %8")
++                .arg(iface).arg(ssid).arg(mode).arg(quality).arg(level)
++                .arg(!enc ? "unencrypted" : wpa ? "wpa" : "wep").arg(wpa2 ? "wpa2" : "");
++        }
++        QString iface;
++        QString ssid;
++        QString mode;
++        QString quality;
++        QString level;
++        bool enc;
++        bool wpa;
++        bool wpa2;
++    };
++    typedef QMap < QString, Cell > cell_t;
++    cell_t m_cells;
++};
++
+ #endif
+-- 
+1.7.9.5
+

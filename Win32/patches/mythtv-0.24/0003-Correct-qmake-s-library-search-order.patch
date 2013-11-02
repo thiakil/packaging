@@ -1,0 +1,41 @@
+From 778401a6ef753cefb10d8724d312cc152f900017 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 14 Mar 2011 12:02:27 +0100
+Subject: [PATCH 003/285] Correct qmake's library search order
+
+When changes to mythtv library components affect the symbols exported, it
+is important that future re-builds use the correct -L paths to avoid
+linking with old libraries.  This is most important if Qt and MythTV are
+installed with the same prefix.  The mythtv configure script has some code
+to deal with this situation:
+
+QMAKE_LIBDIR_QT-=${sysroot}${libdir}
+
+This removes the extra-libs path from the front of the search path and
+later appends it to the end.  However, with Qt 4.7.x (maybe others) the
+Qmake variable QMAKE_LIBDIR also affects the search order.  This patch applies
+the same logic to that variable.  The resulting Makefiles then have the
+correct path order for LIBS.
+
+Ticket URL: <http://code.mythtv.org/trac/ticket/9469>
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/configure |    1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/mythtv/configure b/mythtv/configure
+index df0e51e..44040e2 100755
+--- a/mythtv/configure
++++ b/mythtv/configure
+@@ -4745,6 +4745,7 @@ cat <<EOF >> $MYTH_CONFIG_MAK
+ # Note: Qt uses QMAKE_INCDIR_QT to build an absolute path for include
+ #       directories, it cannot be modified.
+ QMAKE_LIBDIR_QT-=${sysroot}${libdir}
++QMAKE_LIBDIR-=${sysroot}${libdir}
+ LATE_LIBS+=-L${sysroot}${libdir}
+ EOF
+ 
+-- 
+1.7.9.5
+

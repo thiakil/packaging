@@ -1,0 +1,59 @@
+From ce2a65d11907b3594d95bf06838e470bc6507783 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 22 Oct 2013 17:12:16 +0100
+Subject: [PATCH 206/207] BE: Add VB_IDLE log output in
+ MainServer::isClientConnected
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythbackend/mainserver.cpp |   18 ++++++++++++++++--
+ 1 file changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/programs/mythbackend/mainserver.cpp b/mythtv/programs/mythbackend/mainserver.cpp
+index 0278664..109bb0e 100644
+--- a/mythtv/programs/mythbackend/mainserver.cpp
++++ b/mythtv/programs/mythbackend/mainserver.cpp
+@@ -5888,6 +5888,9 @@ void MainServer::connectionClosed(MythSocket *socket)
+                 }
+             }
+ 
++            LOG(VB_GENERAL, LOG_INFO, QString("%1 sock '%2' disconnected")
++                .arg(pbs->getBlockShutdown() ? "Playback" : "Monitor")
++                .arg(pbs->getHostname()) );
+             pbs->SetDisconnected();
+             playbackList.erase(it);
+ 
+@@ -6301,17 +6304,28 @@ bool MainServer::isClientConnected(bool onlyBlockingClients)
+     sockListLock.lockForRead();
+ 
+     foundClient |= !fileTransferList.empty();
++    if (foundClient)
++        LOG(VB_IDLE, LOG_INFO, "Filetransfer client(s) connected");
++
++    LOG(VB_IDLE, LOG_INFO, LOC + QString("isClientConnected %1 clients")
++        .arg(playbackList.size()) );
+ 
+     vector<PlaybackSock *>::iterator it = playbackList.begin();
+     for (; !foundClient && (it != playbackList.end()); ++it)
+     {
++        PlaybackSock *pbs = *it;
++
+         // Ignore slave backends
+-        if ((*it)->isSlaveBackend())
++        if (pbs->isSlaveBackend())
+             continue;
+ 
++        LOG(VB_IDLE, LOG_INFO, LOC + QString("%1 client '%2'")
++            .arg(pbs->getBlockShutdown() ? "Playback" : "Monitor")
++            .arg(pbs->getHostname()) );
++
+         // If we are only interested in blocking clients then ignore
+         // non-blocking ones
+-        if (onlyBlockingClients && !(*it)->getBlockShutdown())
++        if (onlyBlockingClients && !pbs->getBlockShutdown())
+             continue;
+ 
+         foundClient = true;
+-- 
+1.7.9.5
+

@@ -1,0 +1,206 @@
+From 5dfc004536ff08bcf59aa6218761397a18b4f9f9 Mon Sep 17 00:00:00 2001
+From: David Matthews <dm@prolingua.co.uk>
+Date: Mon, 22 Aug 2011 21:04:59 +0100
+Subject: [PATCH 155/285] Modify MHEG to use sourceid instead of cardid
+
+This patch modifies the code used to get a channel index to use the
+source ID rather than card ID. It simplifies the code a bit but it also
+fixes a small problem which only seems to have appeared in the current
+git HEAD. When viewing recordings from BBC1, at least, a periodic
+message would come up saying "Due to technical difficulties...". This
+appears because the BBC MHEG code checks to see which regional variation
+it is running on by looking up various transport and service IDs. If the
+look-up fails it produces this message. The patch solves this problem.
+
+Signed-off-by: Stuart Morgan <smorgan@mythtv.org>
+---
+ mythtv/libs/libmythtv/interactivetv.cpp |    4 ++--
+ mythtv/libs/libmythtv/interactivetv.h   |    2 +-
+ mythtv/libs/libmythtv/mhi.cpp           |   34 +++++++++++++------------------
+ mythtv/libs/libmythtv/mhi.h             |    4 ++--
+ mythtv/libs/libmythtv/tv_play.cpp       |   11 +++++-----
+ 5 files changed, 25 insertions(+), 30 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/interactivetv.cpp b/mythtv/libs/libmythtv/interactivetv.cpp
+index 3d588d9..a745215 100644
+--- a/mythtv/libs/libmythtv/interactivetv.cpp
++++ b/mythtv/libs/libmythtv/interactivetv.cpp
+@@ -33,9 +33,9 @@ InteractiveTV::~InteractiveTV()
+ }
+ 
+ // Start or restart the MHEG engine.
+-void InteractiveTV::Restart(uint chanid, uint cardid, bool isLive)
++void InteractiveTV::Restart(uint chanid, uint sourceid, bool isLive)
+ {
+-    m_context->Restart(chanid, cardid, isLive);
++    m_context->Restart(chanid, sourceid, isLive);
+ }
+ 
+ // Called by the video player to see if the image needs to be updated
+diff --git a/mythtv/libs/libmythtv/interactivetv.h b/mythtv/libs/libmythtv/interactivetv.h
+index 52818dd..ba426de 100644
+--- a/mythtv/libs/libmythtv/interactivetv.h
++++ b/mythtv/libs/libmythtv/interactivetv.h
+@@ -17,7 +17,7 @@ class InteractiveTV
+     InteractiveTV(MythPlayer *nvp);
+     virtual ~InteractiveTV();
+ 
+-    void Restart(uint chanid, uint cardid, bool isLive);
++    void Restart(uint chanid, uint sourceid, bool isLive);
+     // Process an incoming DSMCC packet.
+     void ProcessDSMCCSection(unsigned char *data, int length,
+                              int componentTag, unsigned carouselId,
+diff --git a/mythtv/libs/libmythtv/mhi.cpp b/mythtv/libs/libmythtv/mhi.cpp
+index 153a08f..9006ba7 100644
+--- a/mythtv/libs/libmythtv/mhi.cpp
++++ b/mythtv/libs/libmythtv/mhi.cpp
+@@ -58,7 +58,7 @@ MHIContext::MHIContext(InteractiveTV *parent)
+       m_stopped(true),      m_updated(false),
+       m_face_loaded(false), m_engineThread(kNullThread),
+       m_currentChannel(-1), m_currentStream(-1),
+-      m_isLive(false),      m_currentCard(0),
++      m_isLive(false),      m_currentSource(-1),
+       m_audioTag(-1),       m_videoTag(-1),
+       m_lastNbiVersion(NBI_VERSION_UNSET)
+ {
+@@ -157,16 +157,16 @@ void MHIContext::StopEngine()
+ 
+ 
+ // Start or restart the MHEG engine.
+-void MHIContext::Restart(uint chanid, uint cardid, bool isLive)
++void MHIContext::Restart(uint chanid, uint sourceid, bool isLive)
+ {
+     int tuneinfo = m_tuneinfo.isEmpty() ? 0 : m_tuneinfo.takeFirst();
+ 
+     VERBOSE(VB_GENERAL,
+-         QString("[mhi] Restart(%5) ch=%1 card=%2 live=%3 tuneinfo=0x%4")
+-        .arg((int)chanid).arg((int)cardid).arg(isLive).arg(tuneinfo,0,16)
++         QString("[mhi] Restart(%5) ch=%1 source=%2 live=%3 tuneinfo=0x%4")
++        .arg((int)chanid).arg((int)sourceid).arg(isLive).arg(tuneinfo,0,16)
+         .arg((quintptr)this,0,16) );
+ 
+-    m_currentCard = cardid;
++    m_currentSource = sourceid;
+     m_currentStream = (chanid) ? (int)chanid : -1;
+     if (!(tuneinfo & kTuneKeepChnl))
+         m_currentChannel = m_currentStream;
+@@ -779,18 +779,16 @@ int MHIContext::GetChannelIndex(const QString &str)
+         int serviceID = list[2].toInt(&ok, 16);
+         if (!ok)
+             break;
+-        // We only return channels that match the current capture card.
++        // We only return channels that match the current capture source.
+         if (list[1].isEmpty()) // TransportID is not specified
+         {
+             query.prepare(
+                 "SELECT chanid "
+-                "FROM channel, dtv_multiplex, cardinput, capturecard "
++                "FROM channel, dtv_multiplex "
+                 "WHERE networkid        = :NETID AND"
+                 "      channel.mplexid  = dtv_multiplex.mplexid AND "
+                 "      serviceid        = :SERVICEID AND "
+-                "      channel.sourceid = cardinput.sourceid AND "
+-                "      cardinput.cardid = capturecard.cardid AND "
+-                "      cardinput.cardid = :CARDID");
++                "      channel.sourceid = :SOURCEID");
+         }
+         else
+         {
+@@ -799,19 +797,17 @@ int MHIContext::GetChannelIndex(const QString &str)
+                 break;
+             query.prepare(
+                 "SELECT chanid "
+-                "FROM channel, dtv_multiplex, cardinput, capturecard "
++                "FROM channel, dtv_multiplex "
+                 "WHERE networkid        = :NETID AND"
+                 "      channel.mplexid  = dtv_multiplex.mplexid AND "
+                 "      serviceid        = :SERVICEID AND "
+                 "      transportid      = :TRANSID AND "
+-                "      channel.sourceid = cardinput.sourceid AND "
+-                "      cardinput.cardid = capturecard.cardid AND "
+-                "      cardinput.cardid = :CARDID");
++                "      channel.sourceid = :SOURCEID");
+             query.bindValue(":TRANSID", transportID);
+         }
+         query.bindValue(":NETID", netID);
+         query.bindValue(":SERVICEID", serviceID);
+-        query.bindValue(":CARDID", m_currentCard);
++        query.bindValue(":SOURCEID", m_currentSource);
+         if (query.exec() && query.isActive() && query.next())
+             nResult = query.value(0).toInt();
+     }
+@@ -824,13 +820,11 @@ int MHIContext::GetChannelIndex(const QString &str)
+             break;
+         MSqlQuery query(MSqlQuery::InitCon());
+         query.prepare("SELECT chanid "
+-                      "FROM channel, cardinput, capturecard "
++                      "FROM channel "
+                       "WHERE channum = :CHAN AND "
+-                      "      channel.sourceid = cardinput.sourceid AND "
+-                      "      cardinput.cardid = capturecard.cardid AND "
+-                      "      cardinput.cardid = :CARDID");
++                      "      channel.sourceid = :SOURCEID");
+         query.bindValue(":CHAN", channelNo);
+-        query.bindValue(":CARDID", m_currentCard);
++        query.bindValue(":SOURCEID", m_currentSource);
+         if (query.exec() && query.isActive() && query.next())
+             nResult = query.value(0).toInt();
+     }
+diff --git a/mythtv/libs/libmythtv/mhi.h b/mythtv/libs/libmythtv/mhi.h
+index 48862c8..3dd6fc8 100644
+--- a/mythtv/libs/libmythtv/mhi.h
++++ b/mythtv/libs/libmythtv/mhi.h
+@@ -54,7 +54,7 @@ class MHIContext : public MHContext
+     // A NetworkBootInfo sub-descriptor is present in the PMT.
+     void SetNetBootInfo(const unsigned char *data, uint length);
+     /// Restart the MHEG engine.
+-    void Restart(uint chanid, uint cardid, bool isLive);
++    void Restart(uint chanid, uint sourceid, bool isLive);
+     // Offer a key press.  Returns true if it accepts it.
+     // This will depend on the current profile.
+     bool OfferKey(QString key);
+@@ -199,7 +199,7 @@ class MHIContext : public MHContext
+     int              m_currentChannel;
+     int              m_currentStream;
+     bool             m_isLive;
+-    int              m_currentCard;
++    int              m_currentSource;
+ 
+     int              m_audioTag;
+     int              m_videoTag;
+diff --git a/mythtv/libs/libmythtv/tv_play.cpp b/mythtv/libs/libmythtv/tv_play.cpp
+index 303f92b..aff5f62 100644
+--- a/mythtv/libs/libmythtv/tv_play.cpp
++++ b/mythtv/libs/libmythtv/tv_play.cpp
+@@ -11226,22 +11226,23 @@ void TV::UnpauseLiveTV(PlayerContext *ctx, bool bQuietly /*=false*/)
+  */
+ void TV::ITVRestart(PlayerContext *ctx, bool isLive)
+ {
+-    uint chanid = 0;
+-    uint cardid = 0;
++    uint chanid = -1;
++    uint sourceid = -1;
+ 
+     if (ContextIsPaused(ctx, __FILE__, __LINE__))
+         return;
+ 
+     ctx->LockPlayingInfo(__FILE__, __LINE__);
+     if (ctx->playingInfo)
++    {
+         chanid = ctx->playingInfo->GetChanID();
++        sourceid = ChannelUtil::GetSourceIDForChannel(chanid);
++    }
+     ctx->UnlockPlayingInfo(__FILE__, __LINE__);
+ 
+-    cardid = ctx->GetCardID();
+-
+     ctx->LockDeletePlayer(__FILE__, __LINE__);
+     if (ctx->player)
+-        ctx->player->ITVRestart(chanid, cardid, isLive);
++        ctx->player->ITVRestart(chanid, sourceid, isLive);
+     ctx->UnlockDeletePlayer(__FILE__, __LINE__);
+ }
+ 
+-- 
+1.7.9.5
+

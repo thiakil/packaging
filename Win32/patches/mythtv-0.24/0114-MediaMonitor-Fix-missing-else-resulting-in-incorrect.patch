@@ -1,0 +1,27 @@
+From 8f2a3b59d66cf7d1556c42784861ac53f1327cf2 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 28 May 2012 15:23:05 +0200
+Subject: [PATCH 114/285] MediaMonitor: Fix missing else resulting in
+ incorrect log output
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/mythcdrom.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmyth/mythcdrom.cpp b/mythtv/libs/libmyth/mythcdrom.cpp
+index d215398..0a0f49f 100644
+--- a/mythtv/libs/libmyth/mythcdrom.cpp
++++ b/mythtv/libs/libmyth/mythcdrom.cpp
+@@ -78,7 +78,7 @@ void MythCDROM::onDeviceMounted()
+         m_MediaType = MEDIATYPE_DVD;
+         m_Status = MEDIASTAT_USEABLE; 
+     }
+-    if (bd.exists())
++    else if (bd.exists())
+     {
+         VERBOSE(VB_MEDIA, "Probable Blu-ray detected.");
+         m_MediaType = MEDIATYPE_BD;
+-- 
+1.7.9.5
+

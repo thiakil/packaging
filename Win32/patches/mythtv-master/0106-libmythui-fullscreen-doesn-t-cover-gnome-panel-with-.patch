@@ -1,0 +1,41 @@
+From 87c2ca90be44511960862244f10924536adc6794 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 14 Mar 2011 14:02:11 +0100
+Subject: [PATCH 106/202] libmythui: fullscreen doesn't cover gnome panel with
+ compiz
+
+It's been a bit of an annoyance for me and the source of several past bug
+reports that when mythfrontend is run fullscreen on a Gnome desktop using
+Compiz effects then the upper and lower panels are not covered, unless
+auto-hiding is enabled.
+
+The problem can be overcome by installing  CompizConfig settings and
+enabling "Legacy Fullscreen Support" in workarounds - implying that this
+is a MythTV bug.  However, on investigation it appears that it's actually
+a Compiz bug that's easily worked around by making the window visible
+before setting the fullscreen state.  The attached one-line patch does
+this.
+
+Ticket URL: <http://code.mythtv.org/trac/ticket/9589>
+---
+ mythtv/libs/libmythui/mythmainwindow.cpp |    4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/mythtv/libs/libmythui/mythmainwindow.cpp b/mythtv/libs/libmythui/mythmainwindow.cpp
+index fb6cff9..f0593ce 100644
+--- a/mythtv/libs/libmythui/mythmainwindow.cpp
++++ b/mythtv/libs/libmythui/mythmainwindow.cpp
+@@ -984,6 +984,10 @@ void MythMainWindow::Init(QString forcedpainter)
+     if (d->does_fill_screen && !GetMythUI()->IsGeometryOverridden())
+     {
+         LOG(VB_GENERAL, LOG_INFO, "Using Full Screen Window");
++#ifdef Q_WS_X11
++        // BUG: with Compiz the window must be visible before setting state
++        show();
++#endif
+         setWindowState(Qt::WindowFullScreen);
+     }
+ 
+-- 
+1.7.9.5
+

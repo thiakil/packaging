@@ -1,0 +1,35 @@
+From 43c83622c6c17add1d88ce3728c796a15ece1eb1 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 21 Jan 2012 17:12:30 +0100
+Subject: [PATCH 085/285] mythfrontend: Fix remote screen shot for mythweb
+
+Grab the Myth main window when mythweb requests a screenshot.
+
+This ensures that a remote frontend screenshot is always available
+even if MythTV isn't the current active window.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythui/mythmainwindow.cpp |    5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/mythtv/libs/libmythui/mythmainwindow.cpp b/mythtv/libs/libmythui/mythmainwindow.cpp
+index 952336b..48907b8 100644
+--- a/mythtv/libs/libmythui/mythmainwindow.cpp
++++ b/mythtv/libs/libmythui/mythmainwindow.cpp
+@@ -785,10 +785,9 @@ bool MythMainWindow::screenShot(int x, int y, int x2, int y2)
+ 
+ bool MythMainWindow::screenShot(QString fname, int w, int h)
+ {
+-    QWidget *active = QApplication::activeWindow();
+-    if (active)
++    if (mainWin)
+     {
+-        QRect sLoc = active->geometry();
++        QRect sLoc = mainWin->geometry();
+         return screenShot(fname, sLoc.left(),sLoc.top(),
+                           sLoc.width(), sLoc.height(), w, h);
+     }
+-- 
+1.7.9.5
+

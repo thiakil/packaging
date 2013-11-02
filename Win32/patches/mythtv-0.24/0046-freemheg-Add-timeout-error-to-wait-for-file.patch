@@ -1,0 +1,113 @@
+From 5bd4fe9e858c9a57271b2eaaa098d4d8706c8f19 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 24 Jun 2011 19:59:40 +0200
+Subject: [PATCH 046/285] freemheg: Add timeout error to wait for file
+
+This fix adds timeouts and EngineEvents to all waits for carousel data.
+This prevents the MHEG interface hanging in the event of missing files.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythfreemheg/Engine.cpp |   22 ++++++++++++++++++++--
+ mythtv/libs/libmythfreemheg/Engine.h   |    2 ++
+ mythtv/libs/libmythtv/mhi.cpp          |    3 +++
+ 3 files changed, 25 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythfreemheg/Engine.cpp b/mythtv/libs/libmythfreemheg/Engine.cpp
+index 1284d2d..dc3e201 100644
+--- a/mythtv/libs/libmythfreemheg/Engine.cpp
++++ b/mythtv/libs/libmythfreemheg/Engine.cpp
+@@ -193,7 +193,12 @@ bool MHEngine::Launch(const MHObjectRef &target, bool fIsSpawn)
+     QByteArray text;
+     // Check that the file exists before we commit to the transition.
+     // This may block if we cannot be sure whether the object is present.
+-    if (! m_Context->GetCarouselData(csPath, text)) return false;
++    if (! m_Context->GetCarouselData(csPath, text))
++    {
++        if (CurrentApp())
++            EventTriggered(CurrentApp(), EventEngineEvent, 2); // GroupIDRefError
++        return false;
++    }
+ 
+     // Clear the action queue of anything pending.
+     m_ActionStack.clear();
+@@ -281,7 +286,11 @@ void MHEngine::TransitionToScene(const MHObjectRef &target)
+     QString csPath = GetPathName(target.m_GroupId);
+     QByteArray text;
+     // Check that the file exists before we commit to the transition.
+-    if (! m_Context->GetCarouselData(csPath, text)) return;
++    if (! m_Context->GetCarouselData(csPath, text))
++    {
++        EventTriggered(CurrentApp(), EventEngineEvent, 2); // GroupIDRefError
++        return;
++    }
+ 
+     // Parse and run the file.
+     MHGroup *pProgram = ParseProgram(text);
+@@ -683,6 +692,7 @@ void MHEngine::RequestExternalContent(MHIngredient *pRequester)
+         MHExternContent *pContent = new MHExternContent;
+         pContent->m_FileName = csPath;
+         pContent->m_pRequester = pRequester;
++        pContent->m_time.start();
+         m_ExternContentTable.append(pContent);
+     }
+ }
+@@ -730,6 +740,14 @@ void MHEngine::CheckContentRequests()
+             delete pContent;
+             it = m_ExternContentTable.erase(it);
+         }
++        else if (pContent->m_time.elapsed() > 60000) // TODO Get this from carousel
++        {
++            MHLOG(MHLogWarning, QString("CheckContentRequests %1 timed out")
++                .arg(pContent->m_FileName));
++            delete pContent;
++            it = m_ExternContentTable.erase(it);
++            EventTriggered(CurrentApp(), EventEngineEvent, 3); // ContentRefError
++        }
+         else
+             ++it;
+     }
+diff --git a/mythtv/libs/libmythfreemheg/Engine.h b/mythtv/libs/libmythfreemheg/Engine.h
+index 4612aa8..34cf4c7 100644
+--- a/mythtv/libs/libmythfreemheg/Engine.h
++++ b/mythtv/libs/libmythfreemheg/Engine.h
+@@ -36,6 +36,7 @@
+ #include <QList>
+ #include <QStack>
+ #include <QQueue>
++#include <QTime>
+ 
+ class MHDLADisplay;
+ 
+@@ -62,6 +63,7 @@ class MHExternContent {
+ public:
+     QString m_FileName;
+     MHIngredient *m_pRequester; 
++    QTime m_time;
+ };
+ 
+ class MHInteractible;
+diff --git a/mythtv/libs/libmythtv/mhi.cpp b/mythtv/libs/libmythtv/mhi.cpp
+index a4fe3c3..fe27721 100644
+--- a/mythtv/libs/libmythtv/mhi.cpp
++++ b/mythtv/libs/libmythtv/mhi.cpp
+@@ -381,6 +381,7 @@ bool MHIContext::GetCarouselData(QString objectPath, QByteArray &result)
+     // same thread this is safe.  Otherwise we need to make a deep copy of
+     // the result.
+ 
++    QTime t; t.start();
+     while (!m_stop)
+     {
+         int res = m_dsmcc->GetDSMCCObject(path, result);
+@@ -388,6 +389,8 @@ bool MHIContext::GetCarouselData(QString objectPath, QByteArray &result)
+             return true; // Found it
+         else if (res < 0)
+             return false; // Not there.
++        else if (t.elapsed() > 60000) // TODO get this from carousel info
++            return false; // Not there.
+         // Otherwise we block.
+         // Process DSMCC packets then block for a second or until we receive
+         // some more packets.  We should eventually find out if this item is
+-- 
+1.7.9.5
+

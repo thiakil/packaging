@@ -1,0 +1,26 @@
+From ad50c907b1a6a00d627632554954ec8fce19b1e5 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 30 Aug 2012 10:12:00 +0200
+Subject: [PATCH 092/202] Mythgallery: Add .mts files to list of supported
+ movies
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../mythgallery/mythgallery/galleryutil.cpp        |    1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/mythplugins/mythgallery/mythgallery/galleryutil.cpp b/mythplugins/mythgallery/mythgallery/galleryutil.cpp
+index 1a31f1a..06e545a 100644
+--- a/mythplugins/mythgallery/mythgallery/galleryutil.cpp
++++ b/mythplugins/mythgallery/mythgallery/galleryutil.cpp
+@@ -80,6 +80,7 @@ QStringList GalleryUtil::GetMovieFilter(void)
+     filt.push_back("*.m4v");
+     filt.push_back("*.mpeg");
+     filt.push_back("*.mov");
++    filt.push_back("*.mts");
+     filt.push_back("*.wmv");
+     filt.push_back("*.3gp");
+     filt.push_back("*.wmv");
+-- 
+1.7.9.5
+

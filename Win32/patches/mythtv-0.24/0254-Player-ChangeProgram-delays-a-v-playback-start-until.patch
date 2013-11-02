@@ -1,0 +1,59 @@
+From 7f008021f9b91482f1c9d929c89e0ec3bf5f45c9 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 8 Jul 2013 10:54:28 +0100
+Subject: [PATCH 254/285] Player: ChangeProgram delays a/v playback start
+ until ringbuffer ready to read
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/RingBuffer.cpp |    6 ++++++
+ mythtv/libs/libmythtv/RingBuffer.h   |    1 +
+ mythtv/libs/libmythtv/mythplayer.cpp |    3 ++-
+ 3 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/RingBuffer.cpp b/mythtv/libs/libmythtv/RingBuffer.cpp
+index 7e05d0f..7f63c04 100644
+--- a/mythtv/libs/libmythtv/RingBuffer.cpp
++++ b/mythtv/libs/libmythtv/RingBuffer.cpp
+@@ -961,6 +961,12 @@ void RingBuffer::CalcReadAheadThresh(void)
+             .arg(fill_min/1024).arg(readblocksize/1024));
+ }
+ 
++bool RingBuffer::IsReadyToRead() const
++{
++    QReadLocker lock(&rwlock);
++    return readsallowed;
++}
++
+ bool RingBuffer::IsNearEnd(double fps, uint vvf) const
+ {
+     rwlock.lockForRead();
+diff --git a/mythtv/libs/libmythtv/RingBuffer.h b/mythtv/libs/libmythtv/RingBuffer.h
+index 9c108e1..0fd5d9e 100644
+--- a/mythtv/libs/libmythtv/RingBuffer.h
++++ b/mythtv/libs/libmythtv/RingBuffer.h
+@@ -53,6 +53,7 @@ class MPUBLIC RingBuffer : protected QThread
+     long long GetRealFileSize(void)  const;
+     bool      IsOpen(void)           const;
+     bool      IsNearEnd(double fps, uint vvf) const;
++    bool      IsReadyToRead()        const;
+ 
+     // General Commands
+     void OpenFile(const QString &lfilename,
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index c1ca082..8baceb0 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -2367,7 +2367,8 @@ void MythPlayer::ChangeProgram(bool bJump)
+         // This avoids stutters during initial few secs on remote frontends
+         do
+             usleep(10000);
+-        while (!noVideoTracks && !PrebufferEnoughFrames(false) && !IsErrored());
++        while (!player_ctx->buffer->IsReadyToRead() ||
++            (!noVideoTracks && !PrebufferEnoughFrames(false) && !IsErrored()) );
+     }
+     else if (!decoder)
+     {
+-- 
+1.7.9.5
+

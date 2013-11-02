@@ -1,0 +1,52 @@
+diff -uprN qt-everywhere-opensource-src-4.7.0.orig/configure qt-everywhere-opensource-src-4.7.0/configure
+--- qt-everywhere-opensource-src-4.7.0.orig/configure	2010-09-10 11:04:46.000000000 +0200
++++ qt-everywhere-opensource-src-4.7.0/configure	2010-11-09 14:54:05.000000000 +0100
+@@ -6745,7 +6745,8 @@ if [ "$PLATFORM_X11" = "yes" ]; then
+ fi
+ 
+ [ '!' -z "$D_FLAGS" ] && QMakeVar add DEFINES "$D_FLAGS"
+-[ '!' -z "$L_FLAGS" ] && QMakeVar add QMAKE_LIBDIR_FLAGS "$L_FLAGS"
++#[ '!' -z "$L_FLAGS" ] && QMakeVar add QMAKE_LIBDIR_FLAGS "$L_FLAGS"
++[ '!' -z "$L_FLAGS" ] && QMakeVar add QMAKE_LIBDIR `echo "$L_FLAGS" | sed 's,-L,,'`
+ [ '!' -z "$l_FLAGS" ] && QMakeVar add LIBS "$l_FLAGS"
+ 
+ if [ "$PLATFORM_MAC" = "yes" ]; then
+--- qt-everywhere-opensource-src-4.7.0.orig/qmake/generators/win32/mingw_make.cpp	2010-09-10 11:04:41.000000000 +0200
++++ qt-everywhere-opensource-src-4.7.0/qmake/generators/win32/mingw_make.cpp	2010-11-11 16:20:47.000000000 +0100
+@@ -278,6 +278,11 @@ void MingwMakefileGenerator::init()
+                                                          + project->first("TARGET_VERSION_EXT") + ".a");
+ 	project->values("QMAKE_LFLAGS").append(QString("-Wl,--out-implib,") + project->first("MINGW_IMPORT_LIB"));
+     }
++    if (project->isActiveConfig("plugin")) {
++        project->values("QMAKE_CFLAGS") += project->values("QMAKE_CFLAGS_PLUGIN");
++        project->values("QMAKE_CXXFLAGS") += project->values("QMAKE_CXXFLAGS_PLUGIN");
++        project->values("QMAKE_LFLAGS") += project->values("QMAKE_LFLAGS_PLUGIN");
++    }
+ 
+     if(!project->values("DEF_FILE").isEmpty())
+         project->values("QMAKE_LFLAGS").append(QString("-Wl,") + project->first("DEF_FILE"));
+@@ -318,6 +323,8 @@ void MingwMakefileGenerator::fixTargetEx
+         project->values("TARGET_EXT").append(".a");
+         project->values("QMAKE_LFLAGS").append("-static");
+         project->values("TARGET").first() =  "lib" + project->first("TARGET");
++    } else if (project->isActiveConfig("plugin")) {
++        project->values("TARGET_EXT").append(".dll");
+     } else {
+         Win32MakefileGenerator::fixTargetExt();
+     }
+@@ -377,6 +384,7 @@ void MingwMakefileGenerator::writeObject
+         if (ar_cmd.isEmpty())
+             ar_cmd = "ar";
+         objectsLinkLine = ar_cmd + " -M < " + ar_script_file;
++        project->values("QMAKE_DISTCLEAN").append(ar_script_file);
+     } else {
+         QString ld_script_file = var("QMAKE_LINK_OBJECT_SCRIPT") + "." + var("TARGET");
+ 	if (!var("BUILD_NAME").isEmpty()) {
+@@ -384,6 +392,7 @@ void MingwMakefileGenerator::writeObject
+ 	}
+ 	createLdObjectScriptFile(ld_script_file, project->values("OBJECTS"));
+         objectsLinkLine = ld_script_file;
++        project->values("QMAKE_DISTCLEAN").append(ld_script_file);
+     }
+     Win32MakefileGenerator::writeObjectsPart(t);
+ }

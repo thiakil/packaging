@@ -1,0 +1,27 @@
+From 97e1a8c7bc6350d0f8cd1085a162b81bc0076049 Mon Sep 17 00:00:00 2001
+From: Stuart Auchterlonie <stuarta@squashedfrog.net>
+Date: Wed, 31 Jul 2013 11:19:27 +0100
+Subject: [PATCH 265/285] UK EIT Fixup: remove 'New: ' from Titles.
+
+Refs #11715
+(cherry picked from commit 2c7357f7be50b27975fe47c45f8dede3c62d7aaa)
+---
+ mythtv/libs/libmythtv/eitfixup.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/eitfixup.cpp b/mythtv/libs/libmythtv/eitfixup.cpp
+index 864176c..06aeb74 100644
+--- a/mythtv/libs/libmythtv/eitfixup.cpp
++++ b/mythtv/libs/libmythtv/eitfixup.cpp
+@@ -34,7 +34,7 @@ EITFixUp::EITFixUp()
+       m_dishPPVCode("\\s*\\(([A-Z]|[0-9]){5}\\)\\s*$"),
+       m_ukThen("\\s*(Then|Followed by) 60 Seconds\\.", Qt::CaseInsensitive),
+       m_ukNew("(New\\.|\\s*(Brand New|New)\\s*(Series|Episode)\\s*[:\\.\\-])",Qt::CaseInsensitive),
+-      m_ukNewTitle("^Brand New\\s*",Qt::CaseInsensitive),
++      m_ukNewTitle("^(Brand New|New:)\\s*",Qt::CaseInsensitive),
+       m_ukCEPQ("[:\\!\\.\\?]"),
+       m_ukColonPeriod("[:\\.]"),
+       m_ukDotSpaceStart("^\\. "),
+-- 
+1.7.9.5
+

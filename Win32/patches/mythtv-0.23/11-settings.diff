@@ -1,0 +1,13 @@
+diff --git a/mythtv/settings.pro b/mythtv/settings.pro
+index 6b6d6d2..b912922 100644
+--- mythtv/settings.pro
++++ mythtv/settings.pro
+@@ -123,6 +123,8 @@ ALSA_LIBS = $$CONFIG_AUDIO_ALSA_LIBS
+ JACK_LIBS = $$CONFIG_AUDIO_JACK_LIBS
+ PULSE_LIBS = $$CONFIG_AUDIO_PULSE_LIBS
+ 
++EXTRA_LIBS  = $$EXTRALIBS
++
+ EXTRA_LIBS += $$FREETYPE_LIBS
+ EXTRA_LIBS += $$CONFIG_FIREWIRE_LIBS
+ EXTRA_LIBS += $$CONFIG_DIRECTFB_LIBS

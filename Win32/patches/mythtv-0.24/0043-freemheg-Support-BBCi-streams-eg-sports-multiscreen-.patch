@@ -1,0 +1,1874 @@
+From f69a7461dea8107aee133d01c96d0bc94ecd51ef Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 24 Jun 2011 11:32:10 +0200
+Subject: [PATCH 043/285] freemheg: Support BBCi streams (eg sports
+ multiscreen) using LifecycleExtension
+
+- Add support for MHEG LifecycleExtension as described in ETSI ES 202 184
+  V2.1.1.  This requires interpreting the tuneinfo from the SI_TuneIndexInfo
+  resident program, preserving the running application across the re-tune and
+  generating a NonDestructiveTuneOK EngineEvent when the re-tune completes.
+  LifecycleExtension is required to run the interactive content from the BBC
+  sports multiscreen stream.
+
+- Support SetData of running stream elements.  This allows the stream source
+  to be changed whilst it is live.  Required for some BBCi MHEG e.g. returning
+  from a fullscreen sports feed to the sports multiscreen.
+
+- Additional logging in freemheg around critical events.
+
+- Fix a bug in dsmcc that mis-matched file data blocks.
+
+- Drop dsmcc packets and ignore key presses if the MHEG engine terminates.
+  This prevents a potential memory exhaustion bug.
+
+- Many more tests in dsmcc for correctly formatted blocks and detection of
+  unexpected structures.  Improved error handling in may functions.
+
+- Move some dsmcc logging to extra and increase the detail in important events.
+  This quietens the constant stream of logging when dsmcc is enabled but shows
+  the important events in better detail.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythfreemheg/Engine.cpp     |   21 ++-
+ mythtv/libs/libmythfreemheg/Engine.h       |    4 +
+ mythtv/libs/libmythfreemheg/Groups.cpp     |    1 +
+ mythtv/libs/libmythfreemheg/Groups.h       |    1 +
+ mythtv/libs/libmythfreemheg/Presentable.h  |    2 +-
+ mythtv/libs/libmythfreemheg/Programs.cpp   |   24 ++-
+ mythtv/libs/libmythfreemheg/Stream.cpp     |    9 +-
+ mythtv/libs/libmythfreemheg/Stream.h       |    4 +-
+ mythtv/libs/libmythfreemheg/Variables.cpp  |    2 +-
+ mythtv/libs/libmythfreemheg/freemheg.h     |    3 +-
+ mythtv/libs/libmythtv/dsmcc.cpp            |  224 ++++++++++++++++++---------
+ mythtv/libs/libmythtv/dsmccbiop.cpp        |  230 +++++++++++++++++++++-------
+ mythtv/libs/libmythtv/dsmcccache.cpp       |   28 ++--
+ mythtv/libs/libmythtv/dsmccobjcarousel.cpp |  134 ++++++++--------
+ mythtv/libs/libmythtv/dsmccobjcarousel.h   |    3 +-
+ mythtv/libs/libmythtv/mhi.cpp              |  127 +++++++++++----
+ mythtv/libs/libmythtv/mhi.h                |    6 +-
+ 17 files changed, 563 insertions(+), 260 deletions(-)
+
+diff --git a/mythtv/libs/libmythfreemheg/Engine.cpp b/mythtv/libs/libmythfreemheg/Engine.cpp
+index fce1ea9..1284d2d 100644
+--- a/mythtv/libs/libmythfreemheg/Engine.cpp
++++ b/mythtv/libs/libmythfreemheg/Engine.cpp
+@@ -90,7 +90,10 @@ int MHEngine::RunAll()
+         {
+              startObj.m_GroupId.Copy(MHOctetString("~//startup"));
+              if (! Launch(startObj))
++             {
++                 MHLOG(MHLogWarning, "MHEG engine auto-boot failed");
+                  return -1;
++             }
+         }
+         m_fBooting = false;
+     }
+@@ -110,10 +113,7 @@ int MHEngine::RunAll()
+         CheckContentRequests();
+ 
+         // Check the timers.  This may result in timer events being raised.
+-        if (CurrentScene()) {
+-            int next = CurrentScene()->CheckTimers(this);
+-            if (nNextTime == 0 || nNextTime > next) nNextTime = next;
+-        }
++        nNextTime = CurrentScene() ? CurrentScene()->CheckTimers(this) : 0;
+         if (CurrentApp()) {
+             // The UK MHEG profile allows applications to have timers.
+             int nAppTime = CurrentApp()->CheckTimers(this);
+@@ -651,6 +651,11 @@ void MHEngine::GenerateUserAction(int nCode)
+     else EventTriggered(pScene, EventUserInput, nCode);
+ }
+ 
++void MHEngine::EngineEvent(int nCode)
++{
++    EventTriggered(CurrentApp(), EventEngineEvent, nCode);
++}
++
+ // Called by an ingredient wanting external content.
+ void MHEngine::RequestExternalContent(MHIngredient *pRequester)
+ {
+@@ -663,7 +668,10 @@ void MHEngine::RequestExternalContent(MHIngredient *pRequester)
+     // Is this actually a carousel object?  It could be a stream.  We should deal
+     // with that separately.
+     if (csPath.isEmpty())
++    {
++        MHLOG(MHLogWarning, "RequestExternalContent empty path");
+         return;
++    }
+     QByteArray text;
+     if (m_Context->CheckCarouselObject(csPath) && m_Context->GetCarouselData(csPath, text)) {
+         // Available now - pass it to the ingredient.
+@@ -671,6 +679,7 @@ void MHEngine::RequestExternalContent(MHIngredient *pRequester)
+     }
+     else {
+         // Need to record this and check later.
++        MHLOG(MHLogLinks, QString("RequestExternalContent %1 pending").arg(csPath));
+         MHExternContent *pContent = new MHExternContent;
+         pContent->m_FileName = csPath;
+         pContent->m_pRequester = pRequester;
+@@ -710,6 +719,8 @@ void MHEngine::CheckContentRequests()
+         {
+             // If the content is not recognized catch the exception and continue
+             try {
++                MHLOG(MHLogLinks, QString("CheckContentRequests %1 arrived")
++                    .arg(pContent->m_FileName));
+                 pContent->m_pRequester->ContentArrived((const unsigned char *)text.data(),
+                                                        text.size(), this);
+             }
+@@ -824,7 +835,7 @@ bool MHEngine::GetEngineSupport(const MHOctetString &feature)
+         else return false;
+     }
+ 
+-    if (strings[0] == "UKEngineProfile" || strings[0] == "UEP") {
++    if (strings[0] == "UKEngineProfile" || strings[0] == "UniversalEngineProfile" || strings[0] == "UEP") {
+         if (strings.count() < 2) return false;
+         if (strings[1] == MHEGEngineProviderIdString)
+             return true;
+diff --git a/mythtv/libs/libmythfreemheg/Engine.h b/mythtv/libs/libmythfreemheg/Engine.h
+index 5c847b9..4612aa8 100644
+--- a/mythtv/libs/libmythfreemheg/Engine.h
++++ b/mythtv/libs/libmythfreemheg/Engine.h
+@@ -114,6 +114,7 @@ public:
+     void RunActions();
+     // Generate a UserAction event i.e. a key press.
+     virtual void GenerateUserAction(int nCode);
++    virtual void EngineEvent(int nCode);
+ 
+     // Called from an ingredient to request a load of external content.
+     void RequestExternalContent(MHIngredient *pRequester);
+@@ -155,6 +156,9 @@ public:
+     MHInteractible *GetInteraction(void) { return m_Interacting; }
+     void SetInteraction(MHInteractible *p) { m_Interacting = p; }
+ 
++    int GetTuneInfo() { return CurrentApp() ? CurrentApp()->m_tuneinfo : 0; }
++    void SetTuneInfo(int tuneinfo) { if (CurrentApp()) CurrentApp()->m_tuneinfo = tuneinfo; }
++
+ protected:
+     void CheckLinks(const MHObjectRef &sourceRef, enum EventType ev, const MHUnion &un);
+     MHGroup *ParseProgram(QByteArray &text);
+diff --git a/mythtv/libs/libmythfreemheg/Groups.cpp b/mythtv/libs/libmythfreemheg/Groups.cpp
+index 8b9a42c..a4d6266 100644
+--- a/mythtv/libs/libmythfreemheg/Groups.cpp
++++ b/mythtv/libs/libmythfreemheg/Groups.cpp
+@@ -275,6 +275,7 @@ MHApplication::MHApplication()
+     m_nStrCHook = 0;
+     m_nBitmapCHook = 0; 
+     m_nLineArtCHook = 0;
++    m_tuneinfo = 0;
+ 
+     m_pCurrentScene = NULL;
+     m_nLockCount = 0;
+diff --git a/mythtv/libs/libmythfreemheg/Groups.h b/mythtv/libs/libmythfreemheg/Groups.h
+index 447a4b8..d767f4b 100644
+--- a/mythtv/libs/libmythfreemheg/Groups.h
++++ b/mythtv/libs/libmythfreemheg/Groups.h
+@@ -122,6 +122,7 @@ protected:
+     int         m_nTextCHook, m_nIPCHook, m_nStrCHook, m_nBitmapCHook, m_nLineArtCHook;
+     MHFontBody  m_Font;
+     MHOctetString   m_FontAttrs;
++    int         m_tuneinfo;
+ 
+     // Internal attributes and additional state
+     int  m_nLockCount; // Count for locking the screen
+diff --git a/mythtv/libs/libmythfreemheg/Presentable.h b/mythtv/libs/libmythfreemheg/Presentable.h
+index 5198266..c08e4ed 100644
+--- a/mythtv/libs/libmythfreemheg/Presentable.h
++++ b/mythtv/libs/libmythfreemheg/Presentable.h
+@@ -43,7 +43,7 @@ public:
+     virtual void Stop(MHEngine *engine);
+ 
+     // Additional actions for stream components.
+-    virtual void SetStreamRef(const MHContentRef &) {}
++    virtual void SetStreamRef(MHEngine *, const MHContentRef &) {}
+     virtual void BeginPlaying(MHEngine *) {}
+     virtual void StopPlaying(MHEngine *) {}
+ };
+diff --git a/mythtv/libs/libmythfreemheg/Programs.cpp b/mythtv/libs/libmythfreemheg/Programs.cpp
+index b0117f2..e059ec2 100644
+--- a/mythtv/libs/libmythfreemheg/Programs.cpp
++++ b/mythtv/libs/libmythfreemheg/Programs.cpp
+@@ -374,8 +374,7 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
+                 QString str = QString::fromUtf8((const char *)string.Bytes(), string.Size());
+                 int nResult = engine->GetContext()->GetChannelIndex(str);
+                 engine->FindObject(*(pResInt->GetReference()))->SetVariableValue(nResult);
+-                MHLOG(MHLogDetail, QString("Get service index for %1 - result %2").arg(string.Printable()).arg(nResult));
+-                SetSuccessFlag(success, true, engine);
++                SetSuccessFlag(success, nResult >= 0, engine);
+             }
+             else SetSuccessFlag(success, false, engine);
+         }
+@@ -384,14 +383,20 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
+             // Tunes to an index returned by GSI
+             if (args.Size() == 1) {
+                 int nChannel = GetInt(args.GetAt(0), engine);
+-                bool res = engine->GetContext()->TuneTo(nChannel);
++                bool res = nChannel >= 0 ? engine->GetContext()->TuneTo(
++                    nChannel, engine->GetTuneInfo()) : false;
+                 SetSuccessFlag(success, res, engine);
+             }
+             else SetSuccessFlag(success, false, engine);
+         }
+         else if (m_Name.Equal("TII")) { // SI_TuneIndexInfo
+             // Indicates whether to perform a subsequent TIn quietly or normally. 
+-            MHERROR("SI_TuneIndexInfo ResidentProgram is not implemented");
++            if (args.Size() == 1) {
++                int tuneinfo = GetInt(args.GetAt(0), engine);
++                engine->SetTuneInfo(tuneinfo);
++                SetSuccessFlag(success, true, engine);
++            }
++            else SetSuccessFlag(success, false, engine);
+         }
+         else if (m_Name.Equal("BSI")) { // SI_GetBasicSI
+             // Returns basic SI information about the service indicated by an index
+@@ -517,6 +522,17 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
+             MHLOG(MHLogNotifications, message);
+         }
+ 
++        else if (m_Name.Equal("SBI")) { // SetBroadcastInterrupt
++            // Required for InteractionChannelExtension
++            // En/dis/able program interruptions e.g. green button
++            MHERROR("SetBroadcastInterrupt ResidentProgram is not implemented");
++        }
++
++        else if (m_Name.Equal("GIS")) { // GetICStatus
++            // Required for NativeApplicationExtension
++            MHERROR("GetICStatus ResidentProgram is not implemented");
++        }
++
+         else {
+             MHERROR(QString("Unknown ResidentProgram %1").arg(m_Name.Printable()));
+         }
+diff --git a/mythtv/libs/libmythfreemheg/Stream.cpp b/mythtv/libs/libmythfreemheg/Stream.cpp
+index a25bee7..5c0fdf0 100644
+--- a/mythtv/libs/libmythfreemheg/Stream.cpp
++++ b/mythtv/libs/libmythfreemheg/Stream.cpp
+@@ -121,12 +121,11 @@ void MHStream::Deactivation(MHEngine *engine)
+ 
+ // The MHEG corrigendum allows SetData to be targeted to a stream so
+ // the content ref could change while the stream is playing.
+-// Not currently handled.
+ void MHStream::ContentPreparation(MHEngine *engine)
+ {
+     engine->EventTriggered(this, EventContentAvailable); // Perhaps test for the streams being available?
+     for (int i = 0; i < m_Multiplex.Size(); i++)
+-        m_Multiplex.GetAt(i)->SetStreamRef(m_ContentRef);
++        m_Multiplex.GetAt(i)->SetStreamRef(engine, m_ContentRef);
+ }
+ 
+ // TODO: Generate StreamPlaying and StreamStopped events.  These are supposed
+@@ -198,9 +197,10 @@ void MHAudio::Deactivation(MHEngine *engine)
+     MHPresentable::Deactivation(engine);
+ }
+ 
+-void MHAudio::SetStreamRef(const MHContentRef &cr)
++void MHAudio::SetStreamRef(MHEngine *engine, const MHContentRef &cr)
+ {
+     m_streamContentRef.Copy(cr);
++    if (m_fStreamPlaying) BeginPlaying(engine);
+ }
+ 
+ void MHAudio::BeginPlaying(MHEngine *engine)
+@@ -340,9 +340,10 @@ void MHVideo::Deactivation(MHEngine *engine)
+     if (m_fStreamPlaying) engine->GetContext()->StopVideo();
+ }
+ 
+-void MHVideo::SetStreamRef(const MHContentRef &cr)
++void MHVideo::SetStreamRef(MHEngine *engine, const MHContentRef &cr)
+ {
+     m_streamContentRef.Copy(cr);
++    if (m_fStreamPlaying) BeginPlaying(engine);
+ }
+ 
+ void MHVideo::BeginPlaying(MHEngine *engine)
+diff --git a/mythtv/libs/libmythfreemheg/Stream.h b/mythtv/libs/libmythfreemheg/Stream.h
+index 752c3ae..16f36dd 100644
+--- a/mythtv/libs/libmythfreemheg/Stream.h
++++ b/mythtv/libs/libmythfreemheg/Stream.h
+@@ -62,7 +62,7 @@ public:
+     virtual void Activation(MHEngine *engine);
+     virtual void Deactivation(MHEngine *engine);
+ 
+-    virtual void SetStreamRef(const MHContentRef &);
++    virtual void SetStreamRef(MHEngine *, const MHContentRef &);
+     virtual void BeginPlaying(MHEngine *engine);
+     virtual void StopPlaying(MHEngine *engine);
+ 
+@@ -97,7 +97,7 @@ public:
+     virtual void SetVideoDecodeOffset(int newXOffset, int newYOffset, MHEngine *);
+     virtual void GetVideoDecodeOffset(MHRoot *pXOffset, MHRoot *pYOffset, MHEngine *);
+ 
+-    virtual void SetStreamRef(const MHContentRef &);
++    virtual void SetStreamRef(MHEngine *, const MHContentRef &);
+     virtual void BeginPlaying(MHEngine *engine);
+     virtual void StopPlaying(MHEngine *engine);
+ 
+diff --git a/mythtv/libs/libmythfreemheg/Variables.cpp b/mythtv/libs/libmythfreemheg/Variables.cpp
+index da813c5..b6eac43 100644
+--- a/mythtv/libs/libmythfreemheg/Variables.cpp
++++ b/mythtv/libs/libmythfreemheg/Variables.cpp
+@@ -246,7 +246,7 @@ void MHOctetStrVar::SetVariableValue(const MHUnion &value)
+         m_Value.Copy(value.m_StrVal);
+     }
+     // Debug
+-    MHOctetString sample(m_Value, 0, 10);
++    MHOctetString sample(m_Value, 0, 60);
+     MHLOG(MHLogDetail, QString("Update %1 := %2").arg(m_ObjectReference.Printable())
+         .arg(sample.Printable()));
+ }
+diff --git a/mythtv/libs/libmythfreemheg/freemheg.h b/mythtv/libs/libmythfreemheg/freemheg.h
+index 86d4edc..6421c22 100644
+--- a/mythtv/libs/libmythfreemheg/freemheg.h
++++ b/mythtv/libs/libmythfreemheg/freemheg.h
+@@ -50,6 +50,7 @@ public:
+     virtual int RunAll(void) = 0;
+     // Generate a UserAction event i.e. a key press.
+     virtual void GenerateUserAction(int nCode) = 0;
++    virtual void EngineEvent(int) = 0;
+ };
+ 
+ // Logging control
+@@ -121,7 +122,7 @@ public:
+     virtual bool GetServiceInfo(int channelId, int &netId, int &origNetId,
+                                 int &transportId, int &serviceId) = 0;
+     // Tune to an index returned by GetChannelIndex
+-    virtual bool TuneTo(int channel) = 0;
++    virtual bool TuneTo(int channel, int tuneinfo) = 0;
+ 
+     // Check whether we have requested a stop.  Returns true and signals
+     // the m_stopped condition if we have.
+diff --git a/mythtv/libs/libmythtv/dsmcc.cpp b/mythtv/libs/libmythtv/dsmcc.cpp
+index 7db2150..9009f50 100644
+--- a/mythtv/libs/libmythtv/dsmcc.cpp
++++ b/mythtv/libs/libmythtv/dsmcc.cpp
+@@ -85,16 +85,14 @@ ObjCarousel *Dsmcc::AddTap(unsigned short componentTag, unsigned carouselId)
+     for (it = car->m_Tags.begin(); it != car->m_Tags.end(); ++it)
+     {
+         if (*it == componentTag)
+-            break;
++            return car;
+     }
+ 
+-    if (it == car->m_Tags.end())
+-    { // Not there.
+-        car->m_Tags.push_back(componentTag);
+-        VERBOSE(VB_DSMCC, QString("[dsmcc] Adding tap for stream "
+-                                  "tag %1 with carousel %2")
+-                .arg(componentTag).arg(carouselId));
+-    }
++    // Not there.
++    car->m_Tags.push_back(componentTag);
++    VERBOSE(VB_DSMCC, QString("[dsmcc] Adding tap for stream "
++                              "tag %1 with carousel %2")
++            .arg(componentTag).arg(carouselId));
+ 
+     return car;
+ }
+@@ -112,7 +110,7 @@ bool Dsmcc::ProcessSectionHeader(DsmccSectionHeader *header,
+      * else skip packet */
+     if (((header->flags[0] & 0x80) == 0) || (header->flags[0] & 0x40) != 0)
+     {
+-        VERBOSE(VB_DSMCC, "[dsmcc] Invalid section\n");
++        VERBOSE(VB_DSMCC, "[dsmcc] WARN Invalid section header\n");
+         return false;
+     }
+ 
+@@ -144,67 +142,110 @@ bool Dsmcc::ProcessSectionHeader(DsmccSectionHeader *header,
+ void Dsmcc::ProcessDownloadServerInitiate(const unsigned char *data,
+                                           int length)
+ {
+-    (void) length;
+-
+-    int off = 0, ret;
+-
+     /* 0-19 Server id = 20 * 0xFF */
++    int off;
++    for (off = 0; off < 20; ++off)
++    {
++        if (data[off] != 0xff)
++        {
++            VERBOSE(VB_DSMCC, QString("[dsmcc] WARN DSI invalid serverID"
++                    " index %1: 0x%2").arg(off).arg(data[off],0,16));
++            return;
++        }
++    }
+ 
+     /* 20,21 compatibilitydescriptorlength = 0x0000 */
++    if (data[off++] != 0 || data[off++] != 0)
++    {
++        VERBOSE(VB_DSMCC, "[dsmcc] WARN DSI non zero compatibilityDescriptorLen");
++        return;
++    }
+ 
+-    off = 22;
+-    //unsigned short data_len = (data[off] << 8) | data[off+1];
+-
++    // 22,23 privateData length
++    int data_len = (data[off] << 8) | data[off+1];
+     off += 2;
++    if (data_len + off > length)
++    {
++        VERBOSE(VB_DSMCC, "[dsmcc] WARN DSI ServiceGatewayInfo too big");
++        return;
++    }
+ 
++    // 24.. IOP::IOR
+     BiopIor gatewayProfile;
+-    ret = gatewayProfile.Process(data+DSMCC_BIOP_OFFSET);
+-    if (ret > 0)
++    int ret = gatewayProfile.Process(data+DSMCC_BIOP_OFFSET);
++    if (ret <= 0)
++        return; /* error */
++    if (strcmp(gatewayProfile.type_id, "srg"))
+     {
+-        off += ret;
++        VERBOSE(VB_DSMCC, QString("[dsmcc] WARN IOR unexpected type_id: '%1'")
++            .arg(gatewayProfile.type_id));
++        return; /* error */
+     }
+-    else
++    if (ret + 4 > data_len)
+     {
+-        return; /* TODO error */
++        VERBOSE(VB_DSMCC, "[dsmcc] WARN DSI IOP:IOR too big");
++        return; /* error */
+     }
+ 
+-    VERBOSE(VB_DSMCC, QString("[dsmcc] Gateway Module %1 on carousel %2")
+-            .arg(gatewayProfile.m_profile_body->GetReference()->m_nModuleId)
+-            .arg(gatewayProfile.m_profile_body->
+-                 GetReference()->m_nCarouselId));
++    off += ret;
+ 
+-    // This provides us with a map from component tag to carousel ID.
+-    ProfileBodyFull *full = (ProfileBodyFull*)gatewayProfile.m_profile_body;
++    // Process any new taps
++    gatewayProfile.AddTap(this);
+ 
+-    VERBOSE(VB_DSMCC, QString("[dsmcc] DSI tap identifies "
+-                              "tag %1 with carousel %2")
+-            .arg(full->dsm_conn.tap.assoc_tag)
+-            .arg(gatewayProfile.m_profile_body->
+-                 GetReference()->m_nCarouselId));
++    DSMCCCacheReference *ref = gatewayProfile.m_profile_body->GetReference();
++    unsigned carouselId = ref->m_nCarouselId;
++    ObjCarousel *car = GetCarouselById(carouselId);
+ 
+-    // Add the tap to the map and create a new carousel if necessary.
+-    unsigned int carouselId =
+-        gatewayProfile.m_profile_body->GetReference()->m_nCarouselId;
++    // This provides us with a map from component tag to carousel ID.
++    ProfileBodyFull *full = dynamic_cast<ProfileBodyFull*>(gatewayProfile.m_profile_body);
++    if (full)
++    {
++        VERBOSE(VB_DSMCC|VB_EXTRA, QString("[dsmcc] DSI ServiceGateway"
++                    " carousel %1 tag %2 module %3 key %4")
++                .arg(carouselId).arg(full->dsm_conn.tap.assoc_tag)
++                .arg(ref->m_nModuleId).arg(ref->m_Key.toString()));
+ 
+-    ObjCarousel *car = AddTap(full->dsm_conn.tap.assoc_tag, carouselId);
++        // Add the tap to the map and create a new carousel if necessary.
++        car = AddTap(full->dsm_conn.tap.assoc_tag, carouselId);
++    }
++    else
++    {
++        VERBOSE(VB_DSMCC, QString("[dsmcc] DSI ServiceGateway"
++                    " carousel %1 module %2 key %3")
++                .arg(carouselId).arg(ref->m_nModuleId)
++                .arg(ref->m_Key.toString()));
++    }
++
++    // Set the gateway (if it isn't already set).
++    if (car)
++        car->filecache.SetGateway(*ref);
+ 
+     // The UK profile says that we can have the file to boot in
+     // the serviceContextList but in practice this seems not to
+-
+     // be used and all these counts are zero.
+     unsigned short downloadTapsCount = data[off];
+     off++;
+-    off += downloadTapsCount;
++    if (downloadTapsCount)
++    {
++        VERBOSE(VB_DSMCC, "[dsmcc] WARN DSI unexpected downloadTap");
++        // TODO off += downloadTapsCount * sizeof(DSM::Tap);
++    }
++
+     unsigned short serviceContextListCount = data[off];
+     off++;
+-    off += serviceContextListCount;
++    if (serviceContextListCount)
++    {
++        VERBOSE(VB_DSMCC, "[dsmcc] WARN DSI unexpected serviceContextList");
++        // TODO off += serviceContextListCount * sizeof serviceContextList;
++    }
++
+     unsigned short userInfoLength = (data[off] << 8) | data[off+1];
+     off += 2;
+-    off += userInfoLength;
+-
+-    // Set the gateway (if it isn't already set).
+-    car->filecache.SetGateway(
+-        *(gatewayProfile.m_profile_body->GetReference()));
++    if (userInfoLength)
++    {
++        VERBOSE(VB_DSMCC, "[dsmcc] WARN DSI unexpected userInfo");
++        off += userInfoLength;
++    }
+ }
+ 
+ void Dsmcc::ProcessDownloadInfoIndication(const unsigned char *data,
+@@ -253,7 +294,7 @@ void Dsmcc::ProcessDownloadInfoIndication(const unsigned char *data,
+         dii.modules[i].module_version  = data[off++];
+         dii.modules[i].module_info_len = data[off++];
+ 
+-        VERBOSE(VB_DSMCC, QString("[dsmcc] Module %1 -> "
++        VERBOSE(VB_DSMCC|VB_EXTRA, QString("[dsmcc] Module %1 -> "
+                                   "Size = %2 Version = %3")
+                 .arg(dii.modules[i].module_id)
+                 .arg(dii.modules[i].module_size)
+@@ -289,13 +330,21 @@ void Dsmcc::ProcessSectionIndication(const unsigned char *data,
+ 
+     unsigned char protocol = hdrData[0];
+     if (protocol != 0x11)
++    {
++        VERBOSE(VB_DSMCC, QString("[dsmcc] WARN Server/Info invalid protocol %1")
++                .arg(protocol));
+         return;
++    }
+ 
+     unsigned char header_type = hdrData[1];
+     if (header_type != 0x03)
++    {
++        VERBOSE(VB_DSMCC, QString("[dsmcc] WARN Server/Info invalid header type %1")
++                .arg(header_type));
+         return;
++    }
+ 
+-    unsigned short message_id = (hdrData[2] << 8) | hdrData[3];
++    unsigned message_id = (hdrData[2] << 8) | hdrData[3];
+ 
+ //    unsigned long transaction_id = (hdrData[4] << 24) | (hdrData[5] << 16) |
+ //                             (hdrData[6] << 8) | hdrData[7];
+@@ -303,13 +352,17 @@ void Dsmcc::ProcessSectionIndication(const unsigned char *data,
+     /* Data[8] - reserved */
+     /* Data[9] - adapationLength 0x00 */
+ 
+-    unsigned short message_len = (hdrData[10] << 8) | hdrData[11];
++    unsigned message_len = (hdrData[10] << 8) | hdrData[11];
+     if (message_len > 4076) // Beyond valid length
++    {
++        VERBOSE(VB_DSMCC, QString("[dsmcc] WARN Server/Info invalid length %1")
++                .arg(message_len));
+         return;
++    }
+ 
+     if (message_id == DSMCC_MESSAGE_DSI)
+     {
+-        VERBOSE(VB_DSMCC, "[dsmcc] Server Gateway");
++        VERBOSE(VB_DSMCC|VB_EXTRA, "[dsmcc] Server Gateway");
+         // We only process DSI messages if they are received on the initial
+         // stream. Because we add taps eagerly we could see a DSI on a
+         // different stream before we see the one we actually want.
+@@ -320,19 +373,19 @@ void Dsmcc::ProcessSectionIndication(const unsigned char *data,
+         }
+         else
+         {
+-            VERBOSE(VB_DSMCC, QString("[dsmcc] Discarding DSI from tag %1")
++            VERBOSE(VB_DSMCC, QString("[dsmcc] WARN Discarding DSI from tag %1")
+                     .arg(streamTag));
+         }
+         // Otherwise discard it.
+     }
+     else if (message_id == DSMCC_MESSAGE_DII)
+     {
+-        VERBOSE(VB_DSMCC, "[dsmcc] Module Info");
++        VERBOSE(VB_DSMCC|VB_EXTRA, "[dsmcc] Module Info");
+         ProcessDownloadInfoIndication(data + DSMCC_DII_OFFSET, streamTag);
+     }
+     else
+     {
+-        VERBOSE(VB_DSMCC, "[dsmcc] Unknown section");
++        VERBOSE(VB_DSMCC, "[dsmcc] WARN Unknown section");
+         /* Error */
+     }
+ 
+@@ -347,14 +400,34 @@ void Dsmcc::ProcessSectionData(const unsigned char *data, int length)
+ 
+     const unsigned char *hdrData = data + DSMCC_DATAHDR_OFFSET;
+ 
+-//    char protocol = hdrData[0];
+-//    char header_type = hdrData[1];
+-//    unsigned short message_id = (hdrData[2] << 8) | hdrData[3];
++    unsigned char protocol = hdrData[0];
++    if (protocol != 0x11)
++    {
++        VERBOSE(VB_DSMCC, QString("[dsmcc] WARN Data invalid protocol %1")
++                .arg(protocol));
++        return;
++    }
++
++    unsigned char header_type = hdrData[1];
++    if (header_type != 0x03)
++    {
++        VERBOSE(VB_DSMCC, QString("[dsmcc] WARN Data invalid header type %1")
++                .arg(header_type));
++        return;
++    }
++
++    unsigned message_id = (hdrData[2] << 8) | hdrData[3];
++    if (message_id != DSMCC_MESSAGE_DDB)
++    {
++        VERBOSE(VB_DSMCC, "[dsmcc] WARN Data unknown section");
++        return;
++    }
++
+     unsigned long download_id = ((hdrData[4] << 24) | (hdrData[5] << 16) |
+                                  (hdrData[6] <<  8) | (hdrData[7]));
+     /* skip reserved byte */
+ //    char adaptation_len = hdrData[9];
+-    unsigned short message_len = (hdrData[10] << 8) | hdrData[11];
++    unsigned message_len = (hdrData[10] << 8) | hdrData[11];
+ 
+     const unsigned char *blockData = data + DSMCC_DDB_OFFSET;
+     DsmccDb ddb;
+@@ -365,12 +438,16 @@ void Dsmcc::ProcessSectionData(const unsigned char *data, int length)
+     ddb.block_number   = (blockData[4] << 8) | blockData[5];
+     ddb.len = message_len - 6;
+ 
+-    VERBOSE(VB_DSMCC, QString("[dsmcc] Data Block ModID %1 Pos %2 Version %3")
++    VERBOSE(VB_DSMCC|VB_EXTRA, QString("[dsmcc] Data Block ModID %1 Pos %2 Version %3")
+             .arg(ddb.module_id).arg(ddb.block_number).arg(ddb.module_version));
+ 
+     ObjCarousel *car = GetCarouselById(download_id);
+     if (car != NULL)
+-        car->AddModuleData(download_id, &ddb, blockData + 6);
++        car->AddModuleData(&ddb, blockData + 6);
++    else
++        VERBOSE(VB_DSMCC, QString("[dsmcc] WARN Data Block ModID %1 Pos %2"
++                " unknown carousel %3")
++                .arg(ddb.module_id).arg(ddb.block_number).arg(download_id));
+ 
+     return;
+ }
+@@ -390,17 +467,16 @@ void Dsmcc::ProcessSection(const unsigned char *data, int length,
+ {
+     // Does this component tag match one of our carousels?
+     QLinkedList<ObjCarousel*>::iterator it = carousels.begin();
+-    ObjCarousel *car = NULL;
+ 
+-    VERBOSE(VB_DSMCC, QString("[dsmcc] Read block size %1 from tag %2 "
+-                              "carousel id %3 data broadcast Id %4")
++    VERBOSE(VB_DSMCC|VB_EXTRA, QString("[dsmcc] Read block size %1 from tag %2 "
++                              "carouselID %3 dataBroadcastID 0x%4")
+             .arg(length).arg(componentTag)
+-            .arg(carouselId).arg(dataBroadcastId));
++            .arg(carouselId).arg(dataBroadcastId,0,16));
+ 
+     bool found = false;
+     for (; it != carousels.end(); ++it)
+     {
+-        car = *it;
++        ObjCarousel *car = *it;
+         // Is the component tag one of the ones we know?
+         vector<unsigned short>::iterator it2;
+         for (it2 = car->m_Tags.begin(); it2 != car->m_Tags.end(); ++it2)
+@@ -419,17 +495,19 @@ void Dsmcc::ProcessSection(const unsigned char *data, int length,
+         // We haven't seen this stream before but it has the correct
+         // data_broadcast_id. Create a carousel for it.
+         // This will only happen at start-up
+-        car = AddTap(componentTag, carouselId);
+-        m_startTag = componentTag;
+-        found = true;
++        if (AddTap(componentTag, carouselId))
++        {
++            m_startTag = componentTag;
++            found = true;
++        }
+     }
+ 
+-    (void) car; // <- we don't currently use this but may in the future.
+-
+     if (!found)
+     {
+-        VERBOSE(VB_DSMCC, QString("[dsmcc] Dropping block from tag %1")
+-                .arg(componentTag));
++        VERBOSE(VB_DSMCC, QString("[dsmcc] Dropping block size %1 with tag %2"
++                                  ", carouselID %3, dataBroadcastID 0x%4")
++                .arg(length).arg(componentTag).arg(carouselId)
++                .arg(dataBroadcastId,0,16));
+ 
+         return; // Ignore this stream.
+     }
+@@ -442,7 +520,7 @@ void Dsmcc::ProcessSection(const unsigned char *data, int length,
+     if (crc32_decode != 0)
+     {
+         VERBOSE(VB_DSMCC,
+-                QString("[dsmcc] Dropping corrupt section (Got %1)")
++                QString("[dsmcc] WARN Dropping corrupt section (Got %1)")
+                 .arg(crc32_decode));
+         return;
+     }
+@@ -450,11 +528,11 @@ void Dsmcc::ProcessSection(const unsigned char *data, int length,
+     switch (data[0])
+     {
+         case DSMCC_SECTION_INDICATION:
+-            VERBOSE(VB_DSMCC, "[dsmcc] Server/Info Section");
++            VERBOSE(VB_DSMCC|VB_EXTRA, "[dsmcc] Server/Info Section");
+             ProcessSectionIndication(data, length, componentTag);
+             break;
+         case DSMCC_SECTION_DATA:
+-            VERBOSE(VB_DSMCC, "[dsmcc] Data Section");
++            VERBOSE(VB_DSMCC|VB_EXTRA, "[dsmcc] Data Section");
+             ProcessSectionData(data, length);
+             break;
+         case DSMCC_SECTION_DESCR:
+@@ -462,7 +540,7 @@ void Dsmcc::ProcessSection(const unsigned char *data, int length,
+             ProcessSectionDesc(data, length);
+             break;
+         default:
+-            VERBOSE(VB_DSMCC, QString("[dsmcc] Unknown Section %1")
++            VERBOSE(VB_DSMCC, QString("[dsmcc] WARN Unknown Section %1")
+                     .arg(data[0]));
+             break;
+     }
+diff --git a/mythtv/libs/libmythtv/dsmccbiop.cpp b/mythtv/libs/libmythtv/dsmccbiop.cpp
+index f15071f..5c55dbe 100644
+--- a/mythtv/libs/libmythtv/dsmccbiop.cpp
++++ b/mythtv/libs/libmythtv/dsmccbiop.cpp
+@@ -55,6 +55,8 @@ int BiopName::Process(const unsigned char *data)
+ {
+     int off = 0;
+     m_comp_count = data[0];
++    if (m_comp_count != 1)
++        VERBOSE(VB_DSMCC,"[biop] WARN Expected one name");
+     off++;
+     m_comps = new BiopNameComp[m_comp_count];
+ 
+@@ -64,7 +66,7 @@ int BiopName::Process(const unsigned char *data)
+         if (ret > 0)
+             off += ret;
+         else
+-            return off; // Error
++            return ret; // Error
+     }
+ 
+     return off;
+@@ -78,7 +80,7 @@ int BiopBinding::Process(const unsigned char *data)
+     if (ret > 0)
+         off += ret;
+     else
+-        return off; // Error
++        return ret; // Error
+ 
+     m_binding_type = data[off++];
+     ret = m_ior.Process(data + off);
+@@ -86,7 +88,7 @@ int BiopBinding::Process(const unsigned char *data)
+     if (ret > 0)
+         off += ret;
+     else
+-        return off; // Error
++        return ret; // Error
+ 
+     m_objinfo_len = (data[off] << 8) | data[off + 1];
+     off += 2;
+@@ -115,7 +117,7 @@ bool BiopMessage::Process(DSMCCCacheModuleData *cachep, DSMCCCache *filecache,
+     // Parse header
+     if (! ProcessMsgHdr(data, curp))
+     {
+-        VERBOSE(VB_DSMCC,"[biop] Invalid biop header, "
++        VERBOSE(VB_DSMCC,"[biop] WARN Invalid biop header, "
+                 "dropping rest of module");
+ 
+         /* not valid, skip rest of data */
+@@ -125,23 +127,23 @@ bool BiopMessage::Process(DSMCCCacheModuleData *cachep, DSMCCCache *filecache,
+     // Handle each message type
+     if (strcmp(m_objkind, "fil") == 0)
+     {
+-        VERBOSE(VB_DSMCC,"[biop] Processing file");
++        VERBOSE(VB_DSMCC|VB_EXTRA,"[biop] Processing file");
+         return ProcessFile(cachep, filecache, data, curp);
+     }
+     else if (strcmp(m_objkind, "dir") == 0)
+     {
+-        VERBOSE(VB_DSMCC,"[biop] Processing directory");
++        VERBOSE(VB_DSMCC|VB_EXTRA,"[biop] Processing directory");
+         return ProcessDir(false, cachep, filecache, data, curp);
+     }
+     else if (strcmp(m_objkind, "srg") == 0)
+     {
+-        VERBOSE(VB_DSMCC,"[biop] Processing gateway");
++        VERBOSE(VB_DSMCC|VB_EXTRA,"[biop] Processing gateway");
+         return ProcessDir(true, cachep, filecache, data, curp);
+     }
+     else
+     {
+         /* Error */
+-        VERBOSE(VB_DSMCC, QString("Unknown or unsupported format %1%2%3%4")
++        VERBOSE(VB_DSMCC, QString("[biop] WARN Unknown or unsupported format %1%2%3%4")
+                 .arg(m_objkind[0]).arg(m_objkind[1])
+                 .arg(m_objkind[2]).arg(m_objkind[3]));
+         return false;
+@@ -159,34 +161,53 @@ bool BiopMessage::ProcessMsgHdr(unsigned char *data, unsigned long *curp)
+     const unsigned char *buf = data + (*curp);
+     int off = 0;
+ 
+-    if (buf[0] !='B' || buf[1] !='I' || buf[2] !='O' || buf[3] !='P')
++    if (buf[off] !='B' || buf[off +1] !='I' || buf[off +2] !='O' || buf[off +3] !='P')
+     {
+-        VERBOSE(VB_DSMCC, "BiopMessage - invalid header");
++        VERBOSE(VB_DSMCC, "BiopMessage WARN invalid header");
+         return false;
+     }
++    off += 4;
+ 
+-    off += 4;/* skip magic */
+     m_version_major = buf[off++];
+     m_version_minor = buf[off++];
+-    off += 2; /* skip byte order & message type */
++    if (m_version_major != 1 || m_version_minor != 0)
++    {
++        VERBOSE(VB_DSMCC, "BiopMessage WARN invalid version");
++        return false;
++    }
++
++    if (buf[off++] != 0)
++    {
++        VERBOSE(VB_DSMCC, "BiopMessage WARN invalid byte order");
++        return false;
++    }
++    if (buf[off++] != 0)
++    {
++        VERBOSE(VB_DSMCC, "BiopMessage WARN invalid message type");
++        return false;
++    }
++
+     m_message_size  = ((buf[off + 0] << 24) | (buf[off+1] << 16) |
+                        (buf[off + 2] << 8)  | (buf[off + 3]));
+     off += 4;
++
+     uint nObjLen = buf[off++];
+     m_objkey = DSMCCCacheKey((const char*)buf + off, nObjLen);
+     off += nObjLen;
++
+     m_objkind_len = ((buf[off + 0] << 24) | (buf[off + 1] << 16) |
+                      (buf[off + 2] << 8)  | (buf[off + 3]));
+-
+     off += 4;
+     m_objkind = (char*) malloc(m_objkind_len);
+     memcpy(m_objkind, buf + off, m_objkind_len);
+     off += m_objkind_len;
++
+     m_objinfo_len = buf[off] << 8 | buf[off + 1];
+     off += 2;
+     m_objinfo = (char*) malloc(m_objinfo_len);
+     memcpy(m_objinfo, buf + off, m_objinfo_len);
+     off += m_objinfo_len;
++
+     (*curp) += off;
+ 
+     return true;
+@@ -206,27 +227,32 @@ bool BiopMessage::ProcessDir(
+     unsigned char *data, unsigned long *curp)
+ {
+     int off = 0;
+-    const unsigned char *buf = data + (*curp);
+-    off++; // skip service context count
++    const unsigned char * const buf = data + (*curp);
++
++    if (m_objinfo_len)
++        VERBOSE(VB_DSMCC,"[biop] WARN ProcessDir non-zero objectInfo_length");
++
++    const unsigned serviceContextList_count = buf[off++];
++    if (serviceContextList_count)
++    {
++        // TODO Handle serviceContextList for service gateway
++        VERBOSE(VB_DSMCC,
++            QString("[biop] WARN ProcessDir serviceContextList count %1")
++            .arg(serviceContextList_count));
++        return false; // Error
++    }
+ 
+     unsigned long msgbody_len = ((buf[off + 0] << 24) | (buf[off + 1] << 16) |
+                                  (buf[off + 2] <<  8) | (buf[off + 3]));
+-    (void) msgbody_len;
+     off += 4;
++    int const start = off;
+ 
+     unsigned int bindings_count = buf[off] << 8 | buf[off + 1];
+     off += 2;
+ 
+     DSMCCCacheReference ref(cachep->CarouselId(), cachep->ModuleId(),
+                             cachep->StreamId(), m_objkey);
+-    DSMCCCacheDir *pDir;
+-    if (isSrg)
+-        pDir = filecache->Srg(ref);
+-    else
+-        pDir = filecache->Directory(ref);
+-
+-    VERBOSE(VB_DSMCC, QString("[Biop] Processing %1 reference %2")
+-            .arg(isSrg ? "gateway" : "directory").arg(ref.toString()));
++    DSMCCCacheDir *pDir = isSrg ? filecache->Srg(ref) : filecache->Directory(ref);
+ 
+     for (uint i = 0; i < bindings_count; i++)
+     {
+@@ -237,18 +263,30 @@ bool BiopMessage::ProcessDir(
+         else
+             return false; // Error
+ 
++        if (binding.m_name.m_comp_count != 1)
++            VERBOSE(VB_DSMCC,"[biop] WARN ProcessDir nameComponents != 1");
++
++        if (binding.m_binding_type != 1 && binding.m_binding_type != 2)
++            VERBOSE(VB_DSMCC,"[biop] WARN ProcessDir invalid BindingType");
++
+         // Process any taps in this binding.
+         binding.m_ior.AddTap(filecache->m_Dsmcc);
+ 
+-        if (pDir)
++        if (pDir && binding.m_name.m_comp_count >= 1)
+         {
+-            if (strcmp("dir", binding.m_name.m_comps[0].m_kind) == 0)
+-                filecache->AddDirInfo(pDir, &binding);
+-            else if (strcmp("fil", binding.m_name.m_comps[0].m_kind) == 0)
++            if (strcmp("fil", binding.m_name.m_comps[0].m_kind) == 0)
+                 filecache->AddFileInfo(pDir, &binding);
++            else if (strcmp("dir", binding.m_name.m_comps[0].m_kind) == 0)
++                filecache->AddDirInfo(pDir, &binding);
++            else
++                VERBOSE(VB_DSMCC,QString("[biop] WARN ProcessDir unknown kind %1")
++                    .arg(binding.m_name.m_comps[0].m_kind));
+         }
+     }
+ 
++    if ((unsigned)(off - start) != msgbody_len)
++        VERBOSE(VB_DSMCC,"[biop] WARN ProcessDir incorrect msgbody_len");
++
+     (*curp) += off;
+ 
+     return true;
+@@ -262,15 +300,27 @@ bool BiopMessage::ProcessFile(DSMCCCacheModuleData *cachep, DSMCCCache *filecach
+     unsigned long msgbody_len;
+     unsigned long content_len;
+ 
+-    /* skip service contect count */
++    if (m_objinfo_len != 8)
++        VERBOSE(VB_DSMCC,QString("[biop] WARN ProcessFile objectInfo_length = %1")
++                .arg(m_objinfo_len));
++
++    const unsigned serviceContextList_count = buf[off++];
++    if (serviceContextList_count)
++    {
++        VERBOSE(VB_DSMCC,
++            QString("[biop] WARN ProcessFile Unexpected serviceContextList_count %1")
++            .arg(serviceContextList_count));
++        return false; // Error
++    }
+ 
+-    off++;
+     msgbody_len = ((buf[off    ] << 24) | (buf[off + 1] << 16) |
+                    (buf[off + 2] <<  8) | (buf[off + 3]));
+     off += 4;
+     content_len = ((buf[off    ] << 24) | (buf[off + 1] << 16) |
+                    (buf[off + 2] <<  8) | (buf[off + 3]));
+     off += 4;
++    if (content_len + 4 != msgbody_len)
++        VERBOSE(VB_DSMCC,"[biop] WARN ProcessFile incorrect msgbody_len");
+ 
+     (*curp) += off;
+ 
+@@ -336,13 +386,18 @@ int BiopModuleInfo::Process(const unsigned char *data)
+     taps_count = data[12];
+     off = 13;
+ 
++    VERBOSE(VB_DSMCC|VB_EXTRA, QString("[Biop] "
++            "ModuleTimeout %1 BlockTimeout %2 MinBlockTime %3 Taps %4")
++            .arg(mod_timeout).arg(block_timeout).arg(min_blocktime)
++            .arg(taps_count));
++
+     if (taps_count > 0)
+     {
+         /* only 1 allowed TODO - may not be first though ? */
+         ret = tap.Process(data + off);
+-        if (ret > 0)
+-            off += ret;
+-        /* else TODO error */
++        if (ret <= 0)
++            return ret;
++        off += ret;
+     }
+ 
+     unsigned userinfo_len = data[off++];
+@@ -360,7 +415,7 @@ int BiopTap::Process(const unsigned char *data)
+ {
+     int off=0;
+ 
+-    id = (data[0] << 8) | data[1];
++    id = (data[off] << 8) | data[off + 1]; // Ignored
+     off += 2;
+     use = (data[off] << 8) | data[off + 1];
+     off += 2;
+@@ -369,8 +424,26 @@ int BiopTap::Process(const unsigned char *data)
+     selector_len = data[off++];
+     selector_data = (char*) malloc(selector_len);
+     memcpy(selector_data, data + off, selector_len);
+-    off += selector_len;
++    if (use == 0x0016) // BIOP_DELIVERY_PARA_USE
++    {
++        unsigned selector_type = (data[off] << 8) | data[off + 1];
++        if (selector_len >= 10 && selector_type == 0x0001)
++        {
++            off += 2;
++            unsigned long transactionId = ((data[off] << 24) | (data[off + 1] << 16) |
++                         (data[off + 2] << 8)  | (data[off + 3]));
++            off += 4;
++            unsigned long timeout = ((data[off] << 24) | (data[off + 1] << 16) |
++                         (data[off + 2] << 8)  | (data[off + 3]));
++            VERBOSE(VB_DSMCC|VB_EXTRA, QString(
++                    "[biop] BIOP_DELIVERY_PARA_USE tag %1 id 0x%2 timeout %3uS")
++                .arg(assoc_tag).arg(transactionId,0,16).arg(timeout));
++            off += 4;
++            selector_len -= 10;
++        }
++    }
+ 
++    off += selector_len;
+     return off;
+ }
+ 
+@@ -380,7 +453,11 @@ int BiopConnbinder::Process(const unsigned char *data)
+ 
+     component_tag = ((data[0] << 24) | (data[1] << 16) |
+                      (data[2] << 8)  | (data[3]));
+-
++    if (0x49534F40 != component_tag)
++    {
++        VERBOSE(VB_DSMCC, "[biop] WARN Invalid Connbinder tag");
++        return 0;
++    }
+     off += 4;
+     component_data_len = data[off++];
+     taps_count = data[off++];
+@@ -389,9 +466,9 @@ int BiopConnbinder::Process(const unsigned char *data)
+         /* UKProfile - only first tap read */
+         ret = tap.Process(data + off);
+         //printf("Binder - assoc_tag %u\n", tap.assoc_tag);
+-        if (ret > 0)
+-            off += ret;
+-        /* else TODO error */
++        if (ret <= 0)
++            return ret;
++        off += ret;
+     }
+ 
+     return off;
+@@ -403,17 +480,31 @@ int BiopObjLocation::Process(const unsigned char *data)
+ 
+     component_tag = ((data[0] << 24) | (data[1] << 16) |
+                      (data[2] <<  8) | (data[3]));
++    if (0x49534F50 != component_tag)
++    {
++        VERBOSE(VB_DSMCC, "[biop] WARN Invalid ObjectLocation tag");
++        return 0;
++    }
+     off += 4;
++
+     component_data_len = data[off++];
+     m_Reference.m_nCarouselId =
+         ((data[off    ] << 24) | (data[off + 1] << 16) |
+          (data[off + 2] <<  8) | (data[off + 3]));
+ 
+     off += 4;
++
+     m_Reference.m_nModuleId = (data[off] << 8) | data[off + 1];
+     off += 2;
++
+     version_major = data[off++];
+     version_minor = data[off++];
++    if (1 != version_major || 0 != version_minor)
++    {
++        VERBOSE(VB_DSMCC, "[biop] WARN Invalid ObjectLocation version");
++        return 0;
++    }
++
+     uint objKeyLen = data[off++]; /* <= 4 */
+     m_Reference.m_Key = DSMCCCacheKey((char*)data + off, objKeyLen);
+     off += objKeyLen;
+@@ -424,7 +515,7 @@ int BiopObjLocation::Process(const unsigned char *data)
+ // a different PMT, We don't support that, at least at the moment.
+ int ProfileBodyLite::Process(const unsigned char */*data*/)
+ {
+-    VERBOSE(VB_DSMCC, "Found LiteProfileBody - Not Implemented Yet");
++    VERBOSE(VB_DSMCC, "[biop] WARN LiteProfileBody Not Implemented");
+     return 0;
+ }
+ 
+@@ -435,19 +526,30 @@ int ProfileBodyFull::Process(const unsigned char *data)
+     data_len = ((data[off    ] << 24) | (data[off + 1] << 16) |
+                 (data[off + 2] <<  8) | (data[off + 3]));
+     off += 4;
+-    /* skip bit order */
+-    off += 1;
++
++    /* bit order */
++    if (data[off++] != 0)
++    {
++        VERBOSE(VB_DSMCC, "[biop] WARN ProfileBody invalid byte order");
++        return 0;
++    }
++
+     lite_components_count = data[off++];
++    if (lite_components_count < 2)
++    {
++        VERBOSE(VB_DSMCC, "[biop] WARN ProfileBody invalid components_count");
++        return 0;
++    }
+ 
+     ret = obj_loc.Process(data + off);
+-    if (ret > 0)
+-        off += ret;
+-    /* else TODO error */
++    if (ret <= 0)
++        return ret;
++    off += ret;
+ 
+     ret = dsm_conn.Process(data + off);
+-    if (ret > 0)
+-        off += ret;
+-    /* else TODO error */
++    if (ret <= 0)
++        return ret;
++    off += ret;
+ 
+     obj_loc.m_Reference.m_nStreamTag = dsm_conn.tap.assoc_tag;
+ 
+@@ -465,31 +567,43 @@ int BiopIor::Process(const unsigned char *data)
+     off += 4;
+     memcpy(type_id, data + off, type_id_len);
+     off += type_id_len;
++
+     tagged_profiles_count = ((data[off    ] << 24) | (data[off + 1] << 16) |
+                              (data[off + 2] <<  8) | (data[off + 3]));
++    if (tagged_profiles_count < 1)
++    {
++        VERBOSE(VB_DSMCC, "[biop] WARN IOR missing taggedProfile");
++        return 0;
++    }
+     off += 4;
++
+     profile_id_tag = ((data[off    ] << 24) | (data[off + 1] << 16) |
+                       (data[off + 2] <<  8) | (data[off + 3]));
+     off += 4;
+ 
+-    if ((profile_id_tag & 0xFF) == 0x06) // profile_id_tag == 0x49534F06
++    if (profile_id_tag == 0x49534F06) // profile_id_tag == 0x49534F06
+     {
+         m_profile_body = new ProfileBodyFull;
+         ret = m_profile_body->Process(data + off);
+-        if (ret > 0)
+-            off += ret;
+-        /* else TODO error */
++        if (ret <= 0)
++            return ret;
++        off += ret;
+     }
+-    else if((profile_id_tag & 0xFF) == 0x05) // profile_id_tag == 0x49534F05
++    else if(profile_id_tag == 0x49534F05) // profile_id_tag == 0x49534F05
+     {
+         m_profile_body = new ProfileBodyLite;
+         ret = m_profile_body->Process(data + off);
+-        if (ret > 0)
+-            off += ret;
+-        /* else TODO error */
++        if (ret <= 0)
++            return ret;
++        off += ret;
++    }
++    else
++    {
++        /* UKProfile - receiver may ignore other profiles */
++        VERBOSE(VB_DSMCC, QString("[biop] WARN Unknown Ior profile 0x%1")
++                .arg(profile_id_tag, 0, 16));
++        return 0;
+     }
+-
+-    /* UKProfile - receiver may ignore other profiles */
+ 
+     return off;
+ }
+diff --git a/mythtv/libs/libmythtv/dsmcccache.cpp b/mythtv/libs/libmythtv/dsmcccache.cpp
+index 9bb441c..2e50f4d 100644
+--- a/mythtv/libs/libmythtv/dsmcccache.cpp
++++ b/mythtv/libs/libmythtv/dsmcccache.cpp
+@@ -140,9 +140,12 @@ DSMCCCacheDir *DSMCCCache::Srg(const DSMCCCacheReference &ref)
+     {
+         VERBOSE(VB_DSMCC, QString("[DSMCCCache] Already seen gateway %1")
+                 .arg(ref.toString()));
+-        return NULL;
++        return *dir;
+     }
+ 
++    VERBOSE(VB_DSMCC, QString("[DSMCCCache] New gateway reference %1")
++            .arg(ref.toString()));
++
+     DSMCCCacheDir *pSrg = new DSMCCCacheDir(ref);
+     m_Gateways.insert(ref, pSrg);
+ 
+@@ -160,9 +163,12 @@ DSMCCCacheDir *DSMCCCache::Directory(const DSMCCCacheReference &ref)
+     {
+         VERBOSE(VB_DSMCC, QString("[DSMCCCache] Already seen directory %1")
+                 .arg(ref.toString()));
+-        return NULL;
++        return *dir;
+     }
+ 
++    VERBOSE(VB_DSMCC, QString("[DSMCCCache] New directory reference %1")
++            .arg(ref.toString()));
++
+     DSMCCCacheDir *pDir = new DSMCCCacheDir(ref);
+     m_Directories.insert(ref, pDir);
+ 
+@@ -209,8 +215,8 @@ void DSMCCCache::AddFileInfo(DSMCCCacheDir *pDir, const BiopBinding *pBB)
+     pDir->m_Files.insert(name, *entry);
+ 
+     VERBOSE(VB_DSMCC,
+-            QString("[DSMCCCache] Adding file with name %1 reference %2")
+-            .arg(name).arg(entry->toString()));
++            QString("[DSMCCCache] Added file name %1 reference %2 parent %3")
++            .arg(name).arg(entry->toString()).arg(pDir->m_Reference.toString()));
+ }
+ 
+ // Add a sub-directory to the directory.
+@@ -226,8 +232,8 @@ void DSMCCCache::AddDirInfo(DSMCCCacheDir *pDir, const BiopBinding *pBB)
+     pDir->m_SubDirectories.insert(name, *entry);
+ 
+     VERBOSE(VB_DSMCC,
+-            QString("[DSMCCCache] Adding directory with name %1 reference %2")
+-            .arg(name).arg(entry->toString()));
++            QString("[DSMCCCache] added subdirectory name %1 reference %2 parent %3")
++            .arg(name).arg(entry->toString()).arg(pDir->m_Reference.toString()));
+ }
+ 
+ // Find File, Directory or Gateway by reference.
+@@ -321,8 +327,10 @@ int DSMCCCache::GetDSMObject(QStringList &objectPath, QByteArray &result)
+ // Set the gateway reference from a DSI message.
+ void DSMCCCache::SetGateway(const DSMCCCacheReference &ref)
+ {
+-    VERBOSE(VB_DSMCC, QString("[DSMCCCache] Setting gateway to reference %1")
+-            .arg(ref.toString()));
+-
+-    m_GatewayRef = ref;
++    if (!m_GatewayRef.Equal(ref))
++    {
++        VERBOSE(VB_DSMCC, QString("[DSMCCCache] Setting gateway to reference %1")
++                .arg(ref.toString()));
++        m_GatewayRef = ref;
++    }
+ }
+diff --git a/mythtv/libs/libmythtv/dsmccobjcarousel.cpp b/mythtv/libs/libmythtv/dsmccobjcarousel.cpp
+index cea0818..905975a 100644
+--- a/mythtv/libs/libmythtv/dsmccobjcarousel.cpp
++++ b/mythtv/libs/libmythtv/dsmccobjcarousel.cpp
+@@ -46,36 +46,44 @@ unsigned char *DSMCCCacheModuleData::AddModuleData(DsmccDb *ddb,
+                                                    const unsigned char *data)
+ {
+     if (m_version != ddb->module_version)
++    {
++        VERBOSE(VB_DSMCC, QString("[dsmcc] WARN Module %1 my version %2 != %3")
++                .arg(ddb->module_id).arg(m_version).arg(ddb->module_version));
+         return NULL; // Wrong version
++    }
+ 
+     if (m_completed)
+         return NULL; // Already got it.
+ 
+-    // Check if we have this block already or not. If not append to list
+-    VERBOSE(VB_DSMCC, QString("[dsmcc] Module %1 block number %2 length %3")
+-            .arg(ddb->module_id).arg(ddb->block_number).arg(ddb->len));
+-
+     if (ddb->block_number >= m_blocks.size())
+     {
+-        VERBOSE(VB_DSMCC, QString("[dsmcc] Module %1 block number %2 "
++        VERBOSE(VB_IMPORTANT, QString("[dsmcc] WARN Module %1 block number %2 "
+                                   "is larger than %3")
+                 .arg(ddb->module_id).arg(ddb->block_number)
+                 .arg(m_blocks.size()));
+-
+         return NULL;
+     }
+ 
+-    if (m_blocks[ddb->block_number] == NULL)
+-    {   // We haven't seen this block before.
+-        QByteArray *block = new QByteArray((char*) data, ddb->len);
+-        // Add this to our set of blocks.
+-        m_blocks[ddb->block_number] = block;
+-        m_receivedData += ddb->len;
++    // Check if we have this block already or not. If not append to list
++    if (m_blocks[ddb->block_number])
++    {
++        QString s;
++        for (unsigned i = 0; i < m_blocks.size(); ++i)
++            s += m_blocks[i] ? '+' : 'X';
++        VERBOSE(VB_DSMCC, QString("[dsmcc] Module %1 block %2 dup: %3")
++                .arg(ddb->module_id).arg(ddb->block_number +1).arg(s));
++        return NULL; // We have seen this block before.
+     }
+ 
+-    VERBOSE(VB_DSMCC, QString("[dsmcc] Module %1 Current Size %2 "
+-                              "Total Size %3")
+-            .arg(m_module_id).arg(m_receivedData).arg(m_moduleSize));
++    // Add this to our set of blocks.
++    m_blocks[ddb->block_number] = new QByteArray((char*) data, ddb->len);
++    if (m_blocks[ddb->block_number])
++        m_receivedData += ddb->len;
++
++    VERBOSE(VB_DSMCC, QString("[dsmcc] Module %1 block %2/%3 bytes %4/%5")
++            .arg(ddb->module_id)
++            .arg(ddb->block_number +1).arg(m_blocks.size())
++            .arg(m_receivedData).arg(m_moduleSize));
+ 
+     if (m_receivedData < m_moduleSize)
+         return NULL; // Not yet complete
+@@ -92,40 +100,38 @@ unsigned char *DSMCCCacheModuleData::AddModuleData(DsmccDb *ddb,
+     for (uint i = 0; i < m_blocks.size(); i++)
+     {
+         QByteArray *block = m_blocks[i];
++        m_blocks[i] = NULL;
+         uint size = block->size();
+         memcpy(tmp_data + curp, block->data(), size);
+         curp += size;
+         delete block;
+     }
+-    m_blocks.clear(); // No longer required: free the space.
+ 
+     /* Uncompress....  */
+     if (m_descriptorData.isCompressed)
+     {
+-        unsigned long dataLen = m_descriptorData.originalSize + 1;
++        unsigned long dataLen = m_descriptorData.originalSize;
+         VERBOSE(VB_DSMCC, QString("[dsmcc] uncompressing: "
+                                   "compressed size %1, final size %2")
+                 .arg(m_moduleSize).arg(dataLen));
+ 
+-        unsigned char *uncompressed = (unsigned char*) malloc(dataLen + 1);
++        unsigned char *uncompressed = (unsigned char*) malloc(dataLen);
+         int ret = uncompress(uncompressed, &dataLen, tmp_data, m_moduleSize);
+         if (ret != Z_OK)
+         {
+-            VERBOSE(VB_DSMCC,"[dsmcc] compression error, skipping");
++            VERBOSE(VB_DSMCC,"[dsmcc] WARN compression error, skipping");
+             free(tmp_data);
+             free(uncompressed);
+             return NULL;
+         }
+ 
+         free(tmp_data);
+-        m_completed = true;
+-        return uncompressed;
+-    }
+-    else
+-    {
+-        m_completed = true;
+-        return tmp_data;
++        tmp_data = uncompressed;
+     }
++
++    m_completed = true;
++    m_blocks.clear(); // No longer required: free the space.
++    return tmp_data;
+ }
+ 
+ 
+@@ -148,6 +154,7 @@ void ObjCarousel::AddModuleInfo(DsmccDii *dii, Dsmcc *status,
+     for (int i = 0; i < dii->number_modules; i++)
+     {
+         DsmccModuleInfo *info = &(dii->modules[i]);
++        bool bFound = false;
+         // Do we already know this module?
+         // If so and it is the same version we don't need to do anything.
+         // If the version has changed we have to replace it.
+@@ -161,11 +168,14 @@ void ObjCarousel::AddModuleInfo(DsmccDii *dii, Dsmcc *status,
+                 /* already known */
+                 if (cachep->Version() == info->module_version)
+                 {
+-                    VERBOSE(VB_DSMCC, QString("[dsmcc] Already Know "
++                    VERBOSE(VB_DSMCC|VB_EXTRA, QString("[dsmcc] Already Know "
+                                               "Module %1")
+                             .arg(info->module_id));
+                     if (cachep->ModuleSize() == info->module_size)
+-                        return;
++                    {
++                        bFound = true;
++                        break;
++                    }
+                     // It seems that when ITV4 starts broadcasting it
+                     // updates the contents of a file but doesn't
+                     // update the version.  This is a work-around.
+@@ -188,6 +198,9 @@ void ObjCarousel::AddModuleInfo(DsmccDii *dii, Dsmcc *status,
+             }
+         }
+ 
++        if (bFound)
++            continue;
++
+         VERBOSE(VB_DSMCC, QString("[dsmcc] Saving info for module %1")
+                 .arg(dii->modules[i].module_id));
+ 
+@@ -195,8 +208,8 @@ void ObjCarousel::AddModuleInfo(DsmccDii *dii, Dsmcc *status,
+         DSMCCCacheModuleData *cachep = new DSMCCCacheModuleData(dii, info, streamTag);
+ 
+         int tag = info->modinfo.tap.assoc_tag;
+-        VERBOSE(VB_DSMCC, QString("[dsmcc] Module info tap "
+-                                  "identifies tag %1 with carousel %2\n")
++        VERBOSE(VB_DSMCC|VB_EXTRA, QString("[dsmcc] Module info tap "
++                                  "identifies tag %1 with carousel %2")
+                 .arg(tag).arg(cachep->CarouselId()));
+ 
+         // If a carousel with this id does not exist create it.
+@@ -212,47 +225,42 @@ void ObjCarousel::AddModuleInfo(DsmccDii *dii, Dsmcc *status,
+  *
+  *   Add it to the module and process the module if it's now complete.
+  */
+-void ObjCarousel::AddModuleData(unsigned long carousel, DsmccDb *ddb,
+-                                const unsigned char *data)
++void ObjCarousel::AddModuleData(DsmccDb *ddb, const unsigned char *data)
+ {
+-    VERBOSE(VB_DSMCC, QString("[dsmcc] Data block on carousel %1").arg(m_id));
++    VERBOSE(VB_DSMCC|VB_EXTRA, QString("[dsmcc] Data block on carousel %1").arg(m_id));
+ 
+     // Search the saved module info for this module
+     QLinkedList<DSMCCCacheModuleData*>::iterator it = m_Cache.begin();
+-    DSMCCCacheModuleData *cachep = NULL;
+     for (; it != m_Cache.end(); ++it)
+     {
+-        cachep = *it;
+-        if (cachep->CarouselId() == carousel &&
++        DSMCCCacheModuleData *cachep = *it;
++        if (cachep->CarouselId() == m_id &&
+             (cachep->ModuleId() == ddb->module_id))
+         {
+-            break;
+-        }
+-    }
+-
+-    if (cachep == NULL)
+-        return; // Not found module info.
+-
+-    // Add the block to the module
+-    unsigned char *tmp_data = cachep->AddModuleData(ddb, data);
+-
+-    if (tmp_data)
+-    {
+-        // It is complete and we have the data
+-        unsigned int len   = cachep->DataSize();
+-        unsigned long curp = 0;
+-        VERBOSE(VB_DSMCC, QString("[biop] Module size (uncompressed) = %1")
+-                .arg(len));
+-
+-        // Now process the BIOP tables in this module.
+-        // Tables may be file contents or the descriptions of
+-        // directories or service gateways (root directories).
+-        while (curp < len)
+-        {
+-            BiopMessage bm;
+-            if (!bm.Process(cachep, &filecache, tmp_data, &curp))
+-                break;
++            // Add the block to the module
++            unsigned char *tmp_data = cachep->AddModuleData(ddb, data);
++            if (tmp_data)
++            {
++                // It is complete and we have the data
++                unsigned int len   = cachep->DataSize();
++                unsigned long curp = 0;
++                VERBOSE(VB_DSMCC|VB_EXTRA,
++                    QString("[biop] Module size (uncompressed) = %1").arg(len));
++
++                // Now process the BIOP tables in this module.
++                // Tables may be file contents or the descriptions of
++                // directories or service gateways (root directories).
++                while (curp < len)
++                {
++                    BiopMessage bm;
++                    if (!bm.Process(cachep, &filecache, tmp_data, &curp))
++                        break;
++                }
++                free(tmp_data);
++            }
++            return;
+         }
+-        free(tmp_data);
+     }
++    VERBOSE(VB_DSMCC, QString("[dsmcc] Data block module %1 not on carousel %2")
++        .arg(ddb->module_id).arg(m_id));
+ }
+diff --git a/mythtv/libs/libmythtv/dsmccobjcarousel.h b/mythtv/libs/libmythtv/dsmccobjcarousel.h
+index 106bef3..e906f56 100644
+--- a/mythtv/libs/libmythtv/dsmccobjcarousel.h
++++ b/mythtv/libs/libmythtv/dsmccobjcarousel.h
+@@ -67,8 +67,7 @@ class ObjCarousel
+     ObjCarousel(Dsmcc*);
+     ~ObjCarousel();
+     void AddModuleInfo(DsmccDii *dii, Dsmcc *status, unsigned short streamTag);
+-    void AddModuleData(unsigned long carousel, DsmccDb *ddb,
+-                       const unsigned char *data);
++    void AddModuleData(DsmccDb *ddb, const unsigned char *data);
+ 
+     DSMCCCache                     filecache;
+     QLinkedList<DSMCCCacheModuleData*> m_Cache;
+diff --git a/mythtv/libs/libmythtv/mhi.cpp b/mythtv/libs/libmythtv/mhi.cpp
+index 8da5985..a71abc2 100644
+--- a/mythtv/libs/libmythtv/mhi.cpp
++++ b/mythtv/libs/libmythtv/mhi.cpp
+@@ -24,6 +24,17 @@ static FT_Library ft_library;
+ #define SCALED_X(arg1) (int)(((float)arg1 * m_xScale) + 0.5f)
+ #define SCALED_Y(arg1) (int)(((float)arg1 * m_yScale) + 0.5f)
+ 
++// LifecycleExtension tuneinfo:
++const unsigned kTuneQuietly   = 1U<<0; // b0 tune quietly
++const unsigned kTuneKeepApp   = 1U<<1; // b1 keep app running
++const unsigned kTuneCarId     = 1U<<2; // b2 carousel id in bits 8..16
++const unsigned kTuneCarReset  = 1U<<3; // b3 get carousel id from gateway info
++const unsigned kTuneBcastDisa = 1U<<4; // b4 broadcaster_interrupt disable
++// b5..7 reserverd
++// b8..15 carousel id
++// b16..31 reserved
++const unsigned kTuneKeepChnl  = 1U<<16; // Keep current channel
++
+ /** \class MHIImageData
+  *  \brief Data for items in the interactive television display stack.
+  */
+@@ -44,10 +55,10 @@ MHIContext::MHIContext(InteractiveTV *parent)
+       m_engine(NULL),       m_stop(false),
+       m_stopped(false),     m_updated(false),
+       m_displayWidth(StdDisplayWidth), m_displayHeight(StdDisplayHeight),
+-      m_face_loaded(false), m_currentChannel(-1),
++      m_face_loaded(false), m_currentChannel(-1), m_currentStream(-1),
+       m_isLive(false),      m_currentCard(0),
+       m_audioTag(-1),       m_videoTag(-1),
+-      m_tuningTo(-1),       m_lastNbiVersion(NBI_VERSION_UNSET),
++      m_lastNbiVersion(NBI_VERSION_UNSET),
+       m_videoRect(0, 0, StdDisplayWidth, StdDisplayHeight),
+       m_displayRect(0, 0, StdDisplayWidth, StdDisplayHeight)
+ {
+@@ -146,10 +157,17 @@ void MHIContext::StopEngine()
+ // Start or restart the MHEG engine.
+ void MHIContext::Restart(uint chanid, uint cardid, bool isLive)
+ {
+-    m_currentChannel = (chanid) ? (int)chanid : -1;
++    int tuneinfo = m_tuneinfo.isEmpty() ? 0 : m_tuneinfo.takeFirst();
++
++    VERBOSE(VB_MHEG, QString("[mhi] Restart ch=%1 card=%2 live=%3 tuneinfo=0x%4")
++        .arg((int)chanid).arg((int)cardid).arg(isLive).arg(tuneinfo,0,16));
++
+     m_currentCard = cardid;
++    m_currentStream = (chanid) ? (int)chanid : -1;
++    if (!(tuneinfo & kTuneKeepChnl))
++        m_currentChannel = m_currentStream;
+ 
+-    if (m_currentChannel == m_tuningTo && m_currentChannel != -1)
++    if (tuneinfo & kTuneKeepApp)
+     {
+         // We have tuned to the channel in order to find the streams.
+         // Leave the MHEG engine running but restart the DSMCC carousel.
+@@ -159,14 +177,21 @@ void MHIContext::Restart(uint chanid, uint cardid, bool isLive)
+             m_dsmcc = new Dsmcc();
+         {
+             QMutexLocker locker(&m_dsmccLock);
+-            m_dsmcc->Reset();
++            if (tuneinfo & kTuneCarReset)
++                m_dsmcc->Reset();
+             ClearQueue();
+         }
++
++        if (tuneinfo & (kTuneCarReset|kTuneCarId))
++            m_engine->EngineEvent(10); // NonDestructiveTuneOK
+     }
+     else
+     {
+         StopEngine();
+ 
++        m_audioTag = -1;
++        m_videoTag = -1;
++
+         if (!m_dsmcc)
+             m_dsmcc = new Dsmcc();
+ 
+@@ -193,9 +218,6 @@ void MHIContext::Restart(uint chanid, uint cardid, bool isLive)
+         // after the PMT is processed.
+         m_stopped = pthread_create(&m_engineThread, NULL,
+                                    StartMHEGEngine, this) != 0;
+-        m_audioTag = -1;
+-        m_videoTag = -1;
+-        m_tuningTo = -1;
+     }
+ }
+ 
+@@ -206,6 +228,7 @@ void *MHIContext::StartMHEGEngine(void *param)
+     MHIContext *context = (MHIContext*) param;
+     context->RunMHEGEngine();
+     context->m_stopped = true;
++    VERBOSE(VB_MHEG, "[mhi] Engine stopped");
+     return NULL;
+ }
+ 
+@@ -236,10 +259,13 @@ void MHIContext::RunMHEGEngine(void)
+             // Run the engine and find out how long to pause.
+             toWait = m_engine->RunAll();
+             if (toWait < 0)
++            {
++                VERBOSE(VB_GENERAL, "[mhi] Engine requested exit");
+                 return;
++            }
+         } while (key != 0);
+ 
+-        if (toWait > 1000 || toWait == 0)
++        if (toWait > 1000 || toWait <= 0)
+             toWait = 1000;
+ 
+         m_engine_wait.wait(&mutex, toWait);
+@@ -273,6 +299,9 @@ void MHIContext::QueueDSMCCPacket(
+     unsigned char *data, int length, int componentTag,
+     unsigned carouselId, int dataBroadcastId)
+ {
++    if (m_stopped)
++        return;
++
+     unsigned char *dataCopy =
+         (unsigned char*) malloc(length * sizeof(unsigned char));
+ 
+@@ -292,6 +321,8 @@ void MHIContext::SetNetBootInfo(const unsigned char *data, uint length)
+ {
+     if (length < 2) // A valid descriptor should always have at least 2 bytes.
+         return;
++    VERBOSE(VB_MHEG, QString("[mhi] SetNetBootInfo version %1 mode %2 len %3")
++        .arg(data[0]).arg(data[1]).arg(length));
+     QMutexLocker locker(&m_dsmccLock);
+     // Save the data from the descriptor.
+     m_nbiData.resize(0);
+@@ -311,14 +342,22 @@ void MHIContext::NetworkBootRequested(void)
+     if (m_nbiData.size() >= 2 && m_nbiData[0] != m_lastNbiVersion)
+     {
+         m_lastNbiVersion = m_nbiData[0]; // Update the saved version
+-        if (m_nbiData[1] == 1)
++        switch (m_nbiData[1])
+         {
++        case 1:
+             m_dsmcc->Reset();
+             m_engine->SetBooting();
+             ClearDisplay();
+             m_updated = true;
++            break;
++        case 2:
++            m_engine->EngineEvent(9); // NetworkBootInfo EngineEvent
++            break;
++        default:
++            VERBOSE(VB_GENERAL, QString("[mhi] Unknown NetworkBoot type %1")
++                    .arg(m_nbiData[1]));
++            break;
+         }
+-        // TODO: else if it is 2 generate an EngineEvent.
+     }
+ }
+ 
+@@ -368,6 +407,9 @@ bool MHIContext::GetCarouselData(QString objectPath, QByteArray &result)
+ // and return true otherwise we return false.
+ bool MHIContext::OfferKey(QString key)
+ {
++    if (m_stopped)
++        return false;
++
+     int action = 0;
+     QMutexLocker locker(&m_keyLock);
+ 
+@@ -594,20 +636,23 @@ void MHIContext::DrawVideo(const QRect &videoRect, const QRect &dispRect)
+ // Returns -1 if it cannot find it.
+ int MHIContext::GetChannelIndex(const QString &str)
+ {
+-    if (str.startsWith("dvb://"))
++    int nResult = -1;
++
++    do if (str.startsWith("dvb://"))
+     {
+         QStringList list = str.mid(6).split('.');
+         MSqlQuery query(MSqlQuery::InitCon());
+-        if (list.size() != 3) return -1; // Malformed.
++        if (list.size() != 3)
++            break; // Malformed.
+         // The various fields are expressed in hexadecimal.
+         // Convert them to decimal for the DB.
+         bool ok;
+         int netID = list[0].toInt(&ok, 16);
+         if (!ok)
+-            return -1;
++            break;
+         int serviceID = list[2].toInt(&ok, 16);
+         if (!ok)
+-            return -1;
++            break;
+         // We only return channels that match the current capture card.
+         if (list[1].isEmpty()) // TransportID is not specified
+         {
+@@ -625,7 +670,7 @@ int MHIContext::GetChannelIndex(const QString &str)
+         {
+             int transportID = list[1].toInt(&ok, 16);
+             if (!ok)
+-                return -1;
++                break;
+             query.prepare(
+                 "SELECT chanid "
+                 "FROM channel, dtv_multiplex, cardinput, capturecard "
+@@ -642,17 +687,15 @@ int MHIContext::GetChannelIndex(const QString &str)
+         query.bindValue(":SERVICEID", serviceID);
+         query.bindValue(":CARDID", m_currentCard);
+         if (query.exec() && query.isActive() && query.next())
+-        {
+-            int nResult = query.value(0).toInt();
+-            return nResult;
+-        }
++            nResult = query.value(0).toInt();
+     }
+     else if (str.startsWith("rec://svc/lcn/"))
+     {
+         // I haven't seen this yet so this is untested.
+         bool ok;
+         int channelNo = str.mid(14).toInt(&ok); // Decimal integer
+-        if (!ok) return -1;
++        if (!ok)
++            break;
+         MSqlQuery query(MSqlQuery::InitCon());
+         query.prepare("SELECT chanid "
+                       "FROM channel, cardinput, capturecard "
+@@ -663,20 +706,26 @@ int MHIContext::GetChannelIndex(const QString &str)
+         query.bindValue(":CHAN", channelNo);
+         query.bindValue(":CARDID", m_currentCard);
+         if (query.exec() && query.isActive() && query.next())
+-            return query.value(0).toInt();
++            nResult = query.value(0).toInt();
+     }
+-    else if (str == "rec://svc/cur" || str == "rec://svc/def")
+-        return m_currentChannel;
++    else if (str == "rec://svc/cur")
++        nResult = m_currentStream;
++    else if (str == "rec://svc/def")
++        nResult = m_currentChannel;
+     else if (str.startsWith("rec://"))
+-    {
+-    }
+-    return -1;
++        ;
++    while(0);
++
++    VERBOSE(VB_MHEG, QString("[mhi] GetChannelIndex %1 => %2")
++        .arg(str).arg(nResult));
++    return nResult;
+ }
+ 
+ // Get netId etc from the channel index.  This is the inverse of GetChannelIndex.
+ bool MHIContext::GetServiceInfo(int channelId, int &netId, int &origNetId,
+                                 int &transportId, int &serviceId)
+ {
++    VERBOSE(VB_MHEG, QString("[mhi] GetServiceInfo %1").arg(channelId));
+     MSqlQuery query(MSqlQuery::InitCon());
+     query.prepare("SELECT networkid, transportid, serviceid "
+                   "FROM channel, dtv_multiplex "
+@@ -694,11 +743,15 @@ bool MHIContext::GetServiceInfo(int channelId, int &netId, int &origNetId,
+     else return false;
+ }
+ 
+-bool MHIContext::TuneTo(int channel)
++bool MHIContext::TuneTo(int channel, int tuneinfo)
+ {
++    VERBOSE(VB_MHEG, QString("[mhi] TuneTo %1 0x%2")
++        .arg(channel).arg(tuneinfo,0,16));
+     if (!m_isLive)
+         return false; // Can't tune if this is a recording.
+ 
++    m_tuneinfo.append(tuneinfo);
++
+     // Post an event requesting a channel change.
+     MythEvent me(QString("NETWORK_CONTROL CHANID %1").arg(channel));
+     gCoreContext->dispatch(me);
+@@ -712,16 +765,19 @@ bool MHIContext::TuneTo(int channel)
+ // Begin playing audio from the specified stream
+ bool MHIContext::BeginAudio(const QString &stream, int tag)
+ {
++    VERBOSE(VB_MHEG, QString("[mhi] BeginAudio %1 %2").arg(stream).arg(tag));
+     int chan = GetChannelIndex(stream);
++    if (chan < 0)
++        return false;
+ 
+-    if (chan != m_currentChannel)
++    if (chan != m_currentStream)
+     {
+         // We have to tune to the channel where the audio is to be found.
+         // Because the audio and video are both components of an MHEG stream
+         // they will both be on the same channel.
+-        m_tuningTo = chan;
++        m_currentStream = chan;
+         m_audioTag = tag;
+-        return TuneTo(chan);
++        return TuneTo(chan, kTuneKeepChnl|kTuneQuietly|kTuneKeepApp);
+     }
+ 
+     if (tag < 0)
+@@ -741,13 +797,16 @@ void MHIContext::StopAudio(void)
+ // Begin displaying video from the specified stream
+ bool MHIContext::BeginVideo(const QString &stream, int tag)
+ {
++    VERBOSE(VB_MHEG, QString("[mhi] BeginVideo %1 %2").arg(stream).arg(tag));
+     int chan = GetChannelIndex(stream);
+-    if (chan != m_currentChannel)
++    if (chan < 0)
++        return false;
++    if (chan != m_currentStream)
+     {
+         // We have to tune to the channel where the video is to be found.
+-        m_tuningTo = chan;
++        m_currentStream = chan;
+         m_videoTag = tag;
+-        return TuneTo(chan);
++        return TuneTo(chan, kTuneKeepChnl|kTuneQuietly|kTuneKeepApp);
+     }
+     if (tag < 0)
+         return true; // Leave it at the default.
+diff --git a/mythtv/libs/libmythtv/mhi.h b/mythtv/libs/libmythtv/mhi.h
+index 52ffa2e..63bae67 100644
+--- a/mythtv/libs/libmythtv/mhi.h
++++ b/mythtv/libs/libmythtv/mhi.h
+@@ -18,6 +18,7 @@ using namespace std;
+ #include <QString>
+ #include <QWaitCondition>
+ #include <QImage>
++#include <QList>
+ 
+ // MythTV headers
+ #include "../libmythfreemheg/freemheg.h"
+@@ -105,7 +106,7 @@ class MHIContext : public MHContext
+     /// Get netId etc from the channel index.
+     virtual bool GetServiceInfo(int channelId, int &netId, int &origNetId,
+                                 int &transportId, int &serviceId);
+-    virtual bool TuneTo(int channel);
++    virtual bool TuneTo(int channel, int tuneinfo);
+ 
+     /// Begin playing audio from the specified stream
+     virtual bool BeginAudio(const QString &stream, int tag);
+@@ -175,12 +176,13 @@ class MHIContext : public MHContext
+     pthread_t        m_engineThread;
+ 
+     int              m_currentChannel;
++    int              m_currentStream;
+     bool             m_isLive;
+     int              m_currentCard;
+ 
+     int              m_audioTag;
+     int              m_videoTag;
+-    int              m_tuningTo;
++    QList<int>       m_tuneinfo;
+ 
+     uint             m_lastNbiVersion;
+     vector<unsigned char> m_nbiData;
+-- 
+1.7.9.5
+

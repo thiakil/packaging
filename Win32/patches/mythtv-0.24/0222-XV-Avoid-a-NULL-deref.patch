@@ -1,0 +1,26 @@
+From 081f86c754d2cae03390bdaa518af8c3dfa9b210 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 15 Jun 2013 16:33:16 +0100
+Subject: [PATCH 222/285] XV: Avoid a NULL deref
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/videoout_xv.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/videoout_xv.cpp b/mythtv/libs/libmythtv/videoout_xv.cpp
+index b4f1c98..0383d7f 100644
+--- a/mythtv/libs/libmythtv/videoout_xv.cpp
++++ b/mythtv/libs/libmythtv/videoout_xv.cpp
+@@ -1824,7 +1824,7 @@ void VideoOutputXv::DeleteBuffers(VOSType subtype, bool delete_pause_frame)
+         xvmc_buf_attr->SetOSDNum(1);
+     }
+ 
+-    Display *d = disp->GetDisplay();
++    Display *d = disp ? disp->GetDisplay() : 0;
+ #ifdef USING_XVMC
+     // XvMC buffers
+     for (uint i=0; i<xvmc_surfs.size(); i++)
+-- 
+1.7.9.5
+

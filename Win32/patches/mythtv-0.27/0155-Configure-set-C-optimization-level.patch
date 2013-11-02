@@ -1,0 +1,25 @@
+From 874d5140b0cb1c0a2d9f92779da71fc7c074cde0 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 30 Jul 2013 20:38:39 +0100
+Subject: [PATCH 155/207] Configure: set C++ optimization level
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/configure |    1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/mythtv/configure b/mythtv/configure
+index 976371c..f8e59f8 100755
+--- a/mythtv/configure
++++ b/mythtv/configure
+@@ -5332,6 +5332,7 @@ if enabled lto; then
+ fi
+ 
+ check_optflags $optflags
++check_cxxflags $optflags
+ check_optflags -fno-math-errno
+ check_optflags -fno-signed-zeros
+ 
+-- 
+1.7.9.5
+

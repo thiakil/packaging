@@ -1,0 +1,50 @@
+From 82903ecbf5405967d50645130f07bfb47ca0b877 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 22 Jun 2013 19:15:19 +0100
+Subject: [PATCH 231/285] TFW: Limit the time data is buffered for low bit
+ rate streams
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/ThreadedFileWriter.cpp |   14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/ThreadedFileWriter.cpp b/mythtv/libs/libmythtv/ThreadedFileWriter.cpp
+index 33ace71..e636342 100644
+--- a/mythtv/libs/libmythtv/ThreadedFileWriter.cpp
++++ b/mythtv/libs/libmythtv/ThreadedFileWriter.cpp
+@@ -450,6 +450,15 @@ void ThreadedFileWriter::SyncLoop(void)
+ void ThreadedFileWriter::DiskLoop(void)
+ {
+     uint size = 0;
++
++    // Limit the number of times buffered data < tfw_min_write_size is
++    // held back.  Otherwise clients of low bit rate data streams (DVB radio)
++    // can be starved of data for lengthy periods.  E.g. 64kbps radio can
++    // take 8 seconds to fill the default 64kB tfw_min_write_size
++    int deferred = 0;
++    int const kMaxDeferred = 5;
++    int const kBufferWaitMilliSec = 100;
++
+     written = 0;
+ 
+     while (!in_dtor || BufUsed() > 0)
+@@ -466,12 +475,13 @@ void ThreadedFileWriter::DiskLoop(void)
+ 
+         if (!size || (!in_dtor && !flush &&
+             ((size < tfw_min_write_size) &&
+-             (written >= tfw_min_write_size))))
++             (written >= tfw_min_write_size && ++deferred <= kMaxDeferred))))
+         {
+-            bufferHasData.wait(&buflock, 100);
++            bufferHasData.wait(&buflock, kBufferWaitMilliSec);
+             buflock.unlock();
+             continue;
+         }
++        deferred = 0;
+         uint trpos = rpos;
+         buflock.unlock();
+ 
+-- 
+1.7.9.5
+

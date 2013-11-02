@@ -1,0 +1,27 @@
+From 10c1ba286a4c40f9df763b05e583f59379adb292 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 22 Mar 2013 17:42:22 +0000
+Subject: [PATCH 179/285] mythweather: kill script in WeatherSource dtor to
+ prevent hang on exit
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../mythweather/mythweather/weatherSource.cpp      |    2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/mythplugins/mythweather/mythweather/weatherSource.cpp b/mythplugins/mythweather/mythweather/weatherSource.cpp
+index b72df0a..1231cb9 100644
+--- a/mythplugins/mythweather/mythweather/weatherSource.cpp
++++ b/mythplugins/mythweather/mythweather/weatherSource.cpp
+@@ -407,6 +407,8 @@ WeatherSource::WeatherSource(ScriptInfo *info)
+ 
+ WeatherSource::~WeatherSource()
+ {
++    if (m_proc)
++        m_proc->kill();
+     delete m_proc;
+     delete m_scriptTimer;
+     delete m_updateTimer;
+-- 
+1.7.9.5
+

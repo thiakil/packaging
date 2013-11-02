@@ -1,0 +1,29 @@
+From 4d0732bc53ad8fbcb253efe4ceee2966f9e60ff2 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 16 Aug 2013 19:42:48 +0100
+Subject: [PATCH 165/202] mythwelcome: Inhibit log output from mythshutdown
+ --status
+
+This command is called every 30 seconds and produces 40-50 log lines
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythwelcome/welcomedialog.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/programs/mythwelcome/welcomedialog.cpp b/mythtv/programs/mythwelcome/welcomedialog.cpp
+index 7eaf3ec..394a355 100644
+--- a/mythtv/programs/mythwelcome/welcomedialog.cpp
++++ b/mythtv/programs/mythwelcome/welcomedialog.cpp
+@@ -534,7 +534,7 @@ void WelcomeDialog::updateStatusMessage(void)
+         m_statusList.append(tr("MythTV is busy recording."));
+     }
+ 
+-    QString mythshutdown_status = m_appBinDir + "mythshutdown --status 0";
++    QString mythshutdown_status = m_appBinDir + "mythshutdown -q --status 0";
+     uint statusCode = myth_system(mythshutdown_status + logPropagateArgs);
+ 
+     if (!(statusCode & 0xFF00))
+-- 
+1.7.9.5
+

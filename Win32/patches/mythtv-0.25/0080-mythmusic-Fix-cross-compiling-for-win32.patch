@@ -1,0 +1,44 @@
+From df84ba44206035c97bd901b83ded192336701940 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 20 May 2012 20:30:33 +0200
+Subject: [PATCH 080/124] mythmusic: Fix cross compiling for win32
+
+When cross compiling for win32, mythplugins configure fails to find a
+number of required libraries for mythmusic, which is then disabled.
+
+This patch adds the correct library search paths and additional libs.
+
+NB to correctly run configure for mythmusic requires an updated
+mythbuild.sh.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/configure |    5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/mythplugins/configure b/mythplugins/configure
+index 15946c0..9356804 100755
+--- a/mythplugins/configure
++++ b/mythplugins/configure
+@@ -151,7 +151,7 @@ check_ld(){
+         test "${f}" = "${f#-l}" && flags="$flags $f" || libs="$libs $f"
+     done
+     check_cc $($filter_cflags $flags) || return
+-    check_cmd $LD $LDFLAGS $flags -o $TMPE $TMPO $libs
++    check_cmd $LD $LDFLAGS $flags -o $TMPE $TMPO $libs $EXTRALIBS
+ }
+ 
+ check_header(){
+@@ -555,6 +555,9 @@ CXXPPFLAGS=$(cat mythconfig.mak | grep -e "^CXXPPFLAGS=")
+ CXXPPFLAGS=${CXXPPFLAGS#CXXPPFLAGS=}
+ OPENGLV=$(cat mythconfig.mak | grep -e "^CONFIG_OPENGL_VIDEO=yes")
+ 
++EXTRALIBS=$(cat mythconfig.mak | grep -e "^EXTRALIBS=")
++EXTRALIBS=${EXTRALIBS#EXTRALIBS=}
++
+ if ! is_qmake4 $qmake; then
+     is_qmake4 qmake-qt4 && qmake=qmake-qt4 || die "qmake for Qt4.6 or newer not found.\nPlease specify the correct qmake with --qmake="
+ fi
+-- 
+1.7.9.5
+

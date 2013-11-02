@@ -1,0 +1,88 @@
+From 9128dbf1a91759674aa5053e2bf1b04675171d18 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 13 Aug 2012 20:22:00 +0200
+Subject: [PATCH 146/285] MythGallery: Register known video types with
+ MediaMonitor
+
+This allows hot plugged media with video content (avi, mpg etc) to
+be automatically opened by MythGallery on insertion
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/mythgallery/mythgallery/iconview.cpp |    4 ++--
+ mythplugins/mythgallery/mythgallery/main.cpp     |   20 +++++++++++++++++---
+ 2 files changed, 19 insertions(+), 5 deletions(-)
+
+diff --git a/mythplugins/mythgallery/mythgallery/iconview.cpp b/mythplugins/mythgallery/mythgallery/iconview.cpp
+index c47e816..3055664 100644
+--- a/mythplugins/mythgallery/mythgallery/iconview.cpp
++++ b/mythplugins/mythgallery/mythgallery/iconview.cpp
+@@ -630,7 +630,7 @@ bool IconView::HandleMediaEscape(MediaMonitor *mon)
+ {
+     bool handled = false;
+     QDir curdir(m_currDir);
+-    QList<MythMediaDevice*> removables = mon->GetMedias(MEDIATYPE_DATA|MEDIATYPE_MGALLERY);
++    QList<MythMediaDevice*> removables = mon->GetMedias(MEDIATYPE_DATA|MEDIATYPE_MGALLERY|MEDIATYPE_MVIDEO);
+     QList<MythMediaDevice*>::iterator it = removables.begin();
+     for (; !handled && (it != removables.end()); it++)
+     {
+@@ -1169,7 +1169,7 @@ void IconView::HandleShowDevices(void)
+ 
+     if (mon)
+     {
+-        QList<MythMediaDevice*> removables = mon->GetMedias(MEDIATYPE_DATA|MEDIATYPE_MGALLERY);
++        QList<MythMediaDevice*> removables = mon->GetMedias(MEDIATYPE_DATA|MEDIATYPE_MGALLERY|MEDIATYPE_MVIDEO);
+         QList<MythMediaDevice*>::Iterator it = removables.begin();
+         for (; it != removables.end(); it++)
+         {
+diff --git a/mythplugins/mythgallery/mythgallery/main.cpp b/mythplugins/mythgallery/mythgallery/main.cpp
+index ba7d0e0..928431e 100644
+--- a/mythplugins/mythgallery/mythgallery/main.cpp
++++ b/mythplugins/mythgallery/mythgallery/main.cpp
+@@ -16,6 +16,7 @@
+ #include "config.h"
+ #include "iconview.h"
+ #include "gallerysettings.h"
++#include "galleryutil.h"
+ #include "dbcheck.h"
+ 
+ #ifdef DCRAW_SUPPORT
+@@ -112,19 +113,32 @@ static void setupKeys(void)
+     REG_KEY("Gallery", "FULLSCREEN", QT_TRANSLATE_NOOP("MythControls",
+         "Toggle scale to fullscreen/scale to fit"), "W");
+     REG_MEDIA_HANDLER(QT_TRANSLATE_NOOP("MythControls",
+-        "MythGallery Media Handler 1/2"), "", "", handleMedia,
++        "MythGallery Media Handler 1/3"), "", "", handleMedia,
+         MEDIATYPE_DATA | MEDIATYPE_MIXED, QString::null);
+     QString filt;
+-    Q_FOREACH(QByteArray format, QImageReader::supportedImageFormats())
++    Q_FOREACH(QString format, GalleryUtil::GetImageFilter())
+     {
++        format.remove(0,2); // Remoce "*."
+         if (filt.isEmpty())
+             filt = format;
+         else
+             filt += "," + format;
+     }
+     REG_MEDIA_HANDLER(QT_TRANSLATE_NOOP("MythControls",
+-        "MythGallery Media Handler 2/2"), "", "", handleMedia,
++        "MythGallery Media Handler 2/3"), "", "", handleMedia,
+         MEDIATYPE_MGALLERY, filt);
++    filt.clear();
++    Q_FOREACH(QString format, GalleryUtil::GetMovieFilter())
++    {
++        format.remove(0,2); // Remoce "*."
++        if (filt.isEmpty())
++            filt = format;
++        else
++            filt += "," + format;
++    }
++    REG_MEDIA_HANDLER(QT_TRANSLATE_NOOP("MythControls",
++        "MythGallery Media Handler 3/3"), "", "", handleMedia,
++        MEDIATYPE_MVIDEO, filt);
+ }
+ 
+ int mythplugin_init(const char *libversion)
+-- 
+1.7.9.5
+

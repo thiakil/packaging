@@ -1,0 +1,49 @@
+From c1740ded12872396e6490cc693b710b302dbf029 Mon Sep 17 00:00:00 2001
+From: Stuart Auchterlonie <stuarta@squashedfrog.net>
+Date: Mon, 29 Jul 2013 20:27:59 +0100
+Subject: [PATCH 264/285] Strip 'Brand New' from the start of a title, i know
+ it's new. MythTV will record it for me, i don't
+ need my guide data to mess with my program
+ titles.... (cherry picked from commit
+ 4b13570a8f0291ed5e2559be06998098edf8ae7b)
+
+---
+ mythtv/libs/libmythtv/eitfixup.cpp |    2 ++
+ mythtv/libs/libmythtv/eitfixup.h   |    1 +
+ 2 files changed, 3 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/eitfixup.cpp b/mythtv/libs/libmythtv/eitfixup.cpp
+index dc6df86..864176c 100644
+--- a/mythtv/libs/libmythtv/eitfixup.cpp
++++ b/mythtv/libs/libmythtv/eitfixup.cpp
+@@ -34,6 +34,7 @@ EITFixUp::EITFixUp()
+       m_dishPPVCode("\\s*\\(([A-Z]|[0-9]){5}\\)\\s*$"),
+       m_ukThen("\\s*(Then|Followed by) 60 Seconds\\.", Qt::CaseInsensitive),
+       m_ukNew("(New\\.|\\s*(Brand New|New)\\s*(Series|Episode)\\s*[:\\.\\-])",Qt::CaseInsensitive),
++      m_ukNewTitle("^Brand New\\s*",Qt::CaseInsensitive),
+       m_ukCEPQ("[:\\!\\.\\?]"),
+       m_ukColonPeriod("[:\\.]"),
+       m_ukDotSpaceStart("^\\. "),
+@@ -678,6 +679,7 @@ void EITFixUp::FixUK(DBEventEIT &event) const
+     // BBC three case (could add another record here ?)
+     event.description = event.description.remove(m_ukThen);
+     event.description = event.description.remove(m_ukNew);
++    event.title = event.title.remove(m_ukNewTitle);
+ 
+     // Removal of Class TV, CBBC and CBeebies etc..
+     event.title = event.title.remove(m_ukTitleRemove);
+diff --git a/mythtv/libs/libmythtv/eitfixup.h b/mythtv/libs/libmythtv/eitfixup.h
+index 39f732a..d370b0f 100644
+--- a/mythtv/libs/libmythtv/eitfixup.h
++++ b/mythtv/libs/libmythtv/eitfixup.h
+@@ -113,6 +113,7 @@ class EITFixUp
+     const QRegExp m_dishPPVCode;
+     const QRegExp m_ukThen;
+     const QRegExp m_ukNew;
++    const QRegExp m_ukNewTitle;
+     const QRegExp m_ukCEPQ;
+     const QRegExp m_ukColonPeriod;
+     const QRegExp m_ukDotSpaceStart;
+-- 
+1.7.9.5
+

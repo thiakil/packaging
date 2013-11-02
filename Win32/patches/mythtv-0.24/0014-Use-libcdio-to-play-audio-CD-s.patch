@@ -1,0 +1,2543 @@
+From 97dfc821e8a1caa72a3d371cd6ee7b908fe24445 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 14 Mar 2011 23:11:57 +0100
+Subject: [PATCH 014/285] Use libcdio to play audio CD's
+
+Replace obsolete libcdaudio
+Enable CD audio playback on win32
+Cross platform cddb lookup
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/configure                              |   25 +-
+ mythplugins/mythmusic/mythmusic/cddb.cpp           |  661 ++++++++++++++++
+ mythplugins/mythmusic/mythmusic/cddb.h             |   94 +++
+ mythplugins/mythmusic/mythmusic/cddecoder-cdio.cpp |  827 ++++++++++++++++++++
+ mythplugins/mythmusic/mythmusic/cddecoder.cpp      |   45 +-
+ mythplugins/mythmusic/mythmusic/cddecoder.h        |   66 +-
+ mythplugins/mythmusic/mythmusic/cdrip.cpp          |   78 +-
+ mythplugins/mythmusic/mythmusic/databasebox.cpp    |    5 -
+ mythplugins/mythmusic/mythmusic/decoder.cpp        |    2 -
+ mythplugins/mythmusic/mythmusic/main.cpp           |    8 +-
+ mythplugins/mythmusic/mythmusic/musiccommon.cpp    |    2 -
+ mythplugins/mythmusic/mythmusic/mythmusic.pro      |   24 +-
+ mythplugins/mythmusic/mythmusic/playbackbox.cpp    |   63 +-
+ 13 files changed, 1814 insertions(+), 86 deletions(-)
+ create mode 100644 mythplugins/mythmusic/mythmusic/cddb.cpp
+ create mode 100644 mythplugins/mythmusic/mythmusic/cddb.h
+ create mode 100644 mythplugins/mythmusic/mythmusic/cddecoder-cdio.cpp
+
+diff --git a/mythplugins/configure b/mythplugins/configure
+index 6371269..6373bbd 100755
+--- a/mythplugins/configure
++++ b/mythplugins/configure
+@@ -118,9 +118,11 @@ sdl
+ exif
+ newexif
+ dcraw
++cdio
+ "
+ 
+ enable $PLUGIN_LIST $CONFIG_LIST
++disable cdio
+ 
+ 
+ prefix="/usr/local"
+@@ -174,6 +176,7 @@ MythMusic related options:
+   --enable-libvisual       enable libvisual visualizers [$libvisual]
+   --enable-fftw            enable fftw visualizers [$fftw]
+   --enable-sdl             use SDL for the synaesthesia output [$sdl]
++  --enable-cdio            enable libcdio for CD access [$cdio]
+ 
+ MythNews related options:
+   --enable-mythnews        build the mythnews plugin [$news]
+@@ -501,12 +504,19 @@ if test "$music" != "no" ; then
+         echo "MythMusic requires FLAC."
+     fi
+ 
++    if test "$cdio" != "no" ; then
++        cdio="no"
++        if has_header cdio/cdio.h && has_library libcdio && has_library libcdio_cdda && has_library libcdio_paranoia ; then
++            cdio="yes"
++        fi
++    fi
++
+     cdaudio="no"
+     if has_header cdaudio.h && has_library libcdaudio ; then
+         cdaudio="yes"
+     fi
+ 
+-    if test "$cdaudio" = "no" -a "$targetos" != "Darwin"; then
++    if test "$cdaudio" = "no" -a "cdio" = "no" -a "$targetos" != "Darwin" -a "`echo ${targetos} | cut -c1-5`" != "MINGW"; then
+         echo "MythMusic requires libcdaudio."
+     fi
+ 
+@@ -520,7 +530,7 @@ if test "$music" != "no" ; then
+         fi
+     fi
+ 
+-    if test "$paranoia" = "no" -a "$targetos" != "Darwin" -a \
++    if test "$paranoia" = "no" -a "cdio" = "no" -a "$targetos" != "Darwin" -a \
+                                   "`echo ${targetos} | cut -c1-5`" != "MINGW"; then
+         echo "MythMusic requires CDDA Paranoia."
+     fi
+@@ -547,7 +557,7 @@ if test "$music" != "no" ; then
+         echo "MythMusic requires taglib 1.5 or later."
+     fi
+ 
+-    if test "$targetos" != "Darwin" -a "`echo ${targetos} | cut -c1-5`" != "MINGW" ; then
++    if test "cdio" = "no" -a "$targetos" != "Darwin" -a "`echo ${targetos} | cut -c1-5`" != "MINGW" ; then
+         if test "$cdaudio" = "no" -o "$paranoia" = "no" ; then
+             cdlibs="no"
+         fi
+@@ -802,6 +812,15 @@ if test "$music" = "yes" ; then
+       echo "#undef  HAVE_PARANOIA" >> ./mythmusic/mythmusic/config.h
+     fi
+ 
++    if test "$cdio" = "yes" ; then
++      echo "#define HAVE_CDIO 1" >> ./mythmusic/mythmusic/config.h
++      echo "CONFIG += cdio" >> ./mythmusic/mythmusic/config.pro
++      echo "        libcdio        support will be included in MythMusic"
++    else
++      echo "#undef  HAVE_CDIO" >> ./mythmusic/mythmusic/config.h
++      echo "        libcdio        support will not be included in MythMusic"
++    fi
++
+     if test "$opengl" = "yes" ; then
+         echo "        OpenGL         support will be included in MythMusic"
+         echo "#define OPENGL_SUPPORT 1" >> ./mythmusic/mythmusic/config.h
+diff --git a/mythplugins/mythmusic/mythmusic/cddb.cpp b/mythplugins/mythmusic/mythmusic/cddb.cpp
+new file mode 100644
+index 0000000..a2c2624
+--- /dev/null
++++ b/mythplugins/mythmusic/mythmusic/cddb.cpp
+@@ -0,0 +1,661 @@
++#include "cddb.h"
++
++#include <cstddef>
++#include <cstdlib>
++
++#include <QFile>
++#include <QFileInfo>
++#include <QDir>
++#include <QVector>
++#include <QMap>
++
++#include <mythversion.h>
++#include <mythverbose.h>
++#include <mythcontext.h>
++#ifdef USING_HTTPCOMMS
++#error httpcomms is no longer supported
++#include <httpcomms.h>
++#else
++#include "mythdownloadmanager.h"
++#endif
++
++/*
++ * CDDB protocol docs:
++ * http://ftp.freedb.org/pub/freedb/latest/CDDBPROTO
++ * http://ftp.freedb.org/pub/freedb/misc/freedb_howto1.07.zip
++ * http://ftp.freedb.org/pub/freedb/misc/freedb_CDDB_protcoldoc.zip
++ */
++
++const int CDROM_LEADOUT_TRACK = 0xaa;
++const int CD_FRAMES_PER_SEC = 75;
++const int SECS_PER_MIN = 60;
++
++static const char URL[] = "http://freedb.freedb.org/~cddb/cddb.cgi?cmd=";
++static const QString& helloID();
++
++namespace {
++/*
++ * Local cddb database
++ */
++struct Dbase
++{
++    static bool Search(Cddb::Matches&, Cddb::discid_t);
++    static bool Search(Cddb::Album&, const QString& genre, Cddb::discid_t);
++    static bool Write(const Cddb::Album&);
++
++    static void New(Cddb::discid_t, const Cddb::Toc&);
++    static void MakeAlias(const Cddb::Album&, const Cddb::discid_t);
++
++private:
++    static bool CacheGet(Cddb::Matches&, Cddb::discid_t);
++    static bool CacheGet(Cddb::Album&, const QString& genre, Cddb::discid_t);
++    static void CachePut(const Cddb::Album&);
++
++    // DiscID to album info cache
++    typedef QMap< Cddb::discid_t, Cddb::Album > cache_t;
++    static cache_t s_cache;
++
++    static const QString& GetDB();
++};
++QMap< Cddb::discid_t, Cddb::Album > Dbase::s_cache;
++}
++
++
++/*
++ * Inline helpers
++ */
++// min/sec/frame to/from lsn
++static inline unsigned long msf2lsn(const Cddb::Msf& msf)
++{
++    return ((unsigned long)msf.min * SECS_PER_MIN + msf.sec) *
++        CD_FRAMES_PER_SEC + msf.frame;
++}
++static inline Cddb::Msf lsn2msf(unsigned long lsn)
++{
++    Cddb::Msf msf;
++
++    std::div_t d = std::div(lsn, CD_FRAMES_PER_SEC);
++    msf.frame = d.rem;
++    d = std::div(d.quot, SECS_PER_MIN);
++    msf.sec = d.rem;
++    msf.min = d.quot;
++    return msf;
++}
++
++// min/sec/frame to/from seconds
++static inline int msf2sec(const Cddb::Msf& msf)
++{
++    return msf.min * SECS_PER_MIN + msf.sec;
++}
++static inline Cddb::Msf sec2msf(unsigned sec)
++{
++    Cddb::Msf msf;
++
++    std::div_t d = std::div(sec, SECS_PER_MIN);
++    msf.sec = d.rem;
++    msf.min = d.quot;
++    msf.frame = 0;
++    return msf;
++}
++
++
++/**
++ * CDDB query
++ */
++// static
++bool Cddb::Query(Matches& res, const Toc& toc)
++{
++    if (toc.size() < 2)
++        return false;
++    const unsigned totalTracks = toc.size() - 1;
++
++    unsigned secs = 0;
++    const discid_t discID = Discid(secs, toc.data(), totalTracks);
++
++    // Is it cached?
++    if (Dbase::Search(res, discID))
++        return res.matches.size() > 0;
++
++    // Construct query
++    // cddb query discid ntrks off1 off2 ... nsecs
++    QString URL2 = URL +
++        QString("cddb+query+%1+%2+").arg(discID,0,16).arg(totalTracks);
++    for (unsigned t = 0; t < totalTracks; ++t)
++        URL2 += QString("%1+").arg(msf2lsn(toc[t]));
++    URL2 += QString::number(secs);
++
++    // Send the request
++    URL2 += "&hello=" + helloID() + "&proto=5";
++    VERBOSE(VB_MEDIA, "CDDB lookup: " + URL2);
++#ifdef USING_HTTPCOMMS
++    QString cddb = HttpComms::getHttp(URL2);
++#else
++    QString cddb;
++    { QByteArray data;
++    if (!GetMythDownloadManager()->download(URL2, &data))
++        return false;
++    cddb = data; }
++#endif
++
++    // Check returned status
++    const uint stat = cddb.left(3).toUInt(); // Extract 3 digit status:
++    cddb = cddb.mid(4);
++    switch (stat)
++    {
++    case 200: // Unique match
++        VERBOSE(VB_MEDIA, "CDDB match: " + cddb.trimmed());
++        // e.g. "200 rock 960b5e0c Nichole Nordeman / Woven & Spun"
++        res.discID = discID;
++        res.isExact = true;
++        res.matches.push_back(Match(
++            cddb.section(' ', 0, 0), // genre
++            cddb.section(' ', 1, 1).toUInt(0,16), // discID
++            cddb.section(' ', 2).section(" / ", 0, 0), // artist
++            cddb.section(' ', 2).section(" / ", 1) // title
++        ));
++        break;
++
++    case 202: // No match for disc ID...
++        VERBOSE(VB_MEDIA, "CDDB no match");
++        Dbase::New(discID, toc); // Stop future lookups
++        return false;
++
++    case 210:  // Multiple exact matches
++    case 211:  // Multiple inexact matches
++        // 210 Found exact matches, list follows (until terminating `.')
++        // 211 Found inexact matches, list follows (until terminating `.')
++        res.discID = discID;
++        res.isExact = 210 == stat;
++
++        // Remove status line
++        cddb = cddb.section('\n', 1);
++
++        // Append all matches
++        while (!cddb.isEmpty() && !cddb.startsWith("."))
++        {
++            VERBOSE(VB_MEDIA, QString("CDDB %1 match: %2").
++                arg(210 == stat ? "exact" : "inexact").
++                arg(cddb.section('\n',0,0)));
++            res.matches.push_back(Match(
++                cddb.section(' ', 0, 0), // genre
++                cddb.section(' ', 1, 1).toUInt(0,16), // discID
++                cddb.section(' ', 2).section(" / ", 0, 0), // artist
++                cddb.section(' ', 2).section(" / ", 1) // title
++            ));
++            cddb = cddb.section('\n', 1);
++        }
++        if (res.matches.size() <= 0)
++            Dbase::New(discID, toc); // Stop future lookups
++        break;
++
++    default:
++        // TODO try a (telnet 8880) CDDB lookup
++        VERBOSE(VB_GENERAL, QString("CDDB query error: %1").arg(stat) +
++            cddb.trimmed());
++        return false;
++    }
++    return true;
++}
++
++/**
++ * CDDB read
++ */
++// static
++bool Cddb::Read(Album& album, const QString& genre, discid_t discID)
++{
++     // Is it cached?
++    if (Dbase::Search(album, genre.toLower(), discID))
++        return true;
++
++   // Lookup the details...
++    QString URL2 = URL + QString("cddb+read+") + genre.toLower() +
++        QString("+%1").arg(discID,0,16) + "&hello=" + helloID() + "&proto=5";
++    VERBOSE(VB_MEDIA, "CDDB read: " + URL2);
++#ifdef USING_HTTPCOMMS
++    QString cddb = HttpComms::getHttp(URL2);
++#else
++    QString cddb;
++    { QByteArray data;
++    if (!GetMythDownloadManager()->download(URL2, &data))
++        return false;
++    cddb = data; }
++#endif
++
++    // Check returned status
++    const uint stat = cddb.left(3).toUInt(); // Get 3 digit status:
++    cddb = cddb.mid(4);
++    switch (stat)
++    {
++    case 210: // OK, CDDB database entry follows (until terminating marker)
++        VERBOSE(VB_MEDIA, "CDDB read returned: " + cddb.section(' ',0,3));
++        VERBOSE(VB_MEDIA+VB_EXTRA, cddb.section('\n',1).trimmed());
++        break;
++    default:
++        VERBOSE(VB_GENERAL, QString("CDDB read error: %1").arg(stat) +
++            cddb.trimmed());
++        return false;
++    }
++
++    album = cddb;
++    album.genre = cddb.section(' ', 0, 0);
++    album.discID = discID;
++
++    // Success - add to cache
++    Dbase::Write(album);
++
++    return true;
++}
++
++/**
++ * CDDB write
++ */
++// static
++bool Cddb::Write(const Album& album, bool /*bLocalOnly =true*/)
++{
++// TODO send to cddb if !bLocalOnly
++    Dbase::Write(album);
++    return true;
++}
++
++static inline int cddb_sum(int i)
++{
++    int total = 0;
++    while (i > 0)
++    {
++        const std::div_t d = std::div(i,10);
++        total += d.rem;
++        i = d.quot;
++    }
++    return total;
++}
++
++/**
++ * discID calculation. See appendix A of freedb_howto1.07.zip
++ */
++// static
++Cddb::discid_t Cddb::Discid(unsigned& secs, const Msf v[], unsigned tracks)
++{
++    int checkSum = 0;
++    for (unsigned t = 0; t < tracks; ++t)
++        checkSum += cddb_sum(v[t].min * SECS_PER_MIN + v[t].sec);
++
++    secs = v[tracks].min * SECS_PER_MIN + v[tracks].sec -
++        (v[0].min * SECS_PER_MIN + v[0].sec);
++
++    const discid_t discID = ((discid_t)(checkSum % 255) << 24) |
++        ((discid_t)secs << 8) | tracks;
++    return discID;
++}
++
++/**
++ * Create a local alias for a matched discID
++ */
++// static
++void Cddb::Alias(const Album& album, discid_t discID)
++{
++    Dbase::MakeAlias(album, discID);
++}
++
++/**
++ * Parse CDDB text
++ */
++Cddb::Album& Cddb::Album::operator =(const QString& rhs)
++{
++    this->genre.clear();
++    this->discID = 0;
++    this->artist.clear();
++    this->title.clear();
++    this->year = 0;
++    this->submitter = "MythTV " MYTH_BINARY_VERSION;
++    this->rev = 1;
++    this->isCompilation = false;
++    this->tracks.empty();
++    this->toc.empty();
++    this->extd.clear();
++    this->ext.empty();
++
++    enum { kNorm, kToc } eState = kNorm;
++
++    QString cddb = rhs;
++    while (!cddb.isEmpty())
++    {
++        // Lines should be of the form "FIELD=value\r\n"
++        QString line  = cddb.section(QRegExp("[\r\n]"), 0, 0);
++
++        if (line.startsWith("# Track frame offsets:"))
++        {
++            eState = kToc;
++        }
++        else if (line.startsWith("# Disc length:"))
++        {
++            QString s = line.section(QRegExp("[ \t]"), 3, 3);
++            unsigned secs = s.toULong();
++            if (this->toc.size())
++                secs -= msf2sec(this->toc[0]);
++            this->toc.push_back(sec2msf(secs));
++            eState = kNorm;
++        }
++        else if (line.startsWith("# Revision:"))
++        {
++            QString s = line.section(QRegExp("[ \t]"), 2, 2);
++            bool bValid = false;
++            int v = s.toInt(&bValid);
++            if (bValid)
++                this->rev = v;
++        }
++        else if (line.startsWith("# Submitted via:"))
++        {
++            this->submitter = line.section(QRegExp("[ \t]"), 3, 3);
++        }
++        else if (line.startsWith("#"))
++        {
++            if (kToc == eState)
++            {
++                bool bValid = false;
++                QString s = line.section(QRegExp("[ \t]"), 1).trimmed();
++                unsigned long lsn = s.toUInt(&bValid);
++                if (bValid)
++                    this->toc.push_back(lsn2msf(lsn));
++                else
++                    eState = kNorm;
++            }
++        }
++        else
++        {
++            QString value = line.section('=', 1, 1);
++            QString art;
++
++            if (value.contains(" / "))
++            {
++                art   = value.section(" / ", 0, 0);  // Artist in *TITLE
++                value = value.section(" / ", 1, 1);
++            }
++
++            if (line.startsWith("DISCID="))
++            {
++                bool isValid = false;
++                ulong discID = value.toULong(&isValid,16);
++                if (isValid)
++                    this->discID = discID;
++            }
++            else if (line.startsWith("DTITLE="))
++            {
++                // Albums (and maybe artists?) can wrap over multiple lines:
++                this->artist += art;
++                this->title  += value;
++            }
++            else if (line.startsWith("DYEAR="))
++            {
++                bool isValid = false;
++                int year = value.toInt(&isValid);
++                if (isValid)
++                    this->year = year;
++            }
++            else if (line.startsWith("DGENRE="))
++            {
++                if (!value.isEmpty())
++                    this->genre = value;
++            }
++            else if (line.startsWith("TTITLE"))
++            {
++                int trk = line.remove("TTITLE").section('=', 0, 0).toInt();
++                if (trk >= 0 && trk < CDROM_LEADOUT_TRACK)
++                {
++                    if (trk >= this->tracks.size())
++                        this->tracks.resize(trk + 1);
++
++                    Cddb::Track& track = this->tracks[trk];
++
++                    // Titles can wrap over multiple lines, so we load+store:
++                    track.title += value;
++                    track.artist += art;
++
++                    if (art.length())
++                        this->isCompilation = true;
++                }
++            }
++            else if (line.startsWith("EXTD="))
++            {
++                if (!value.isEmpty())
++                    this->extd = value;
++            }
++            else if (line.startsWith("EXTT"))
++            {
++                int trk = line.remove("EXTT").section('=', 0, 0).toInt();
++                if (trk >= 0 && trk < CDROM_LEADOUT_TRACK)
++                {
++                    if (trk >= this->ext.size())
++                        this->ext.resize(trk + 1);
++
++                    this->ext[trk] = value;
++                }
++            }
++        }
++
++        // Next response line:
++        cddb = cddb.section('\n', 1);
++    }
++    return *this;
++}
++
++/**
++ * Convert album to CDDB text form
++ */
++Cddb::Album::operator QString() const
++{
++    QString ret = "# xmcd\n"
++        "#\n"
++        "# Track frame offsets:\n";
++    for (int i = 1; i < this->toc.size(); ++i)
++        ret += "#       " + QString::number(msf2lsn(this->toc[i - 1])) + '\n';
++    ret += "#\n";
++    ret += "# Disc length: " +
++        QString::number( msf2sec(this->toc.last()) + msf2sec(this->toc[0]) ) +
++        " seconds\n";
++    ret += "#\n";
++    ret += "# Revision: " + QString::number(this->rev) + '\n';
++    ret += "#\n";
++    ret += "# Submitted via: " + (!this->submitter.isEmpty() ? this->submitter :
++            "MythTV " MYTH_BINARY_VERSION) + '\n';
++    ret += "#\n";
++    ret += "DISCID=" + QString::number(this->discID,16) + '\n';
++    ret += "DTITLE=" + this->artist.toUtf8() + " / " + this->title + '\n';
++    ret += "DYEAR=" + (this->year ? QString::number(this->year) : "")+ '\n';
++    ret += "DGENRE=" + this->genre.toLower().toUtf8() + '\n';
++    for (int t = 0; t < this->tracks.size(); ++t)
++        ret += "TTITLE" + QString::number(t) + "=" +
++            this->tracks[t].title.toUtf8() + '\n';
++    ret += "EXTD=" + this->extd.toUtf8() + '\n';
++    for (int t = 0; t < this->tracks.size(); ++t)
++        ret += "EXTT" + QString::number(t) + "=" + this->ext[t].toUtf8() + '\n';
++    ret += "PLAYORDER=\n";
++
++    return ret;
++}
++
++
++/**********************************************************
++ * Local cddb database ops
++ **********************************************************/
++
++// search local database for discID
++bool Dbase::Search(Cddb::Matches& res, const Cddb::discid_t discID)
++{
++    res.matches.empty();
++
++    if (CacheGet(res, discID))
++        return true;
++
++    QFileInfoList list = QDir(GetDB()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
++    for (QFileInfoList::const_iterator it = list.begin(); it != list.end(); ++it)
++    {
++        QString genre = it->baseName();
++
++        QFileInfoList ids = QDir(it->canonicalFilePath()).entryInfoList(QDir::Files);
++        for (QFileInfoList::const_iterator it2 = ids.begin(); it2 != ids.end(); ++it2)
++        {
++            if (it2->baseName().toUInt(0,16) == discID)
++            {
++                QFile file(it2->canonicalFilePath());
++                if (file.open(QIODevice::ReadOnly | QIODevice::Text))
++                {
++                    Cddb::Album a = QTextStream(&file).readAll();
++                    a.genre = genre;
++                    a.discID = discID;
++                    VERBOSE(VB_MEDIA, QString("LocalCDDB found %1 in ").
++                        arg(discID,0,16) + genre + " : " +
++                        a.artist + " / " + a.title);
++
++                    CachePut(a);
++                    res.matches.push_back(Cddb::Match(genre,discID,a.artist,a.title));
++                }
++
++            }
++        }
++    }
++    return res.matches.size() > 0;
++}
++
++// search local database for genre/discID
++bool Dbase::Search(Cddb::Album& a, const QString& genre, const Cddb::discid_t discID)
++{
++    if (CacheGet(a, genre, discID))
++        return true;
++
++    QFile file(GetDB() + '/' + genre.toLower() + '/' + QString::number(discID,16));
++    if (file.open(QIODevice::ReadOnly | QIODevice::Text))
++    {
++        a = QTextStream(&file).readAll();
++        a.genre = genre.toLower();
++        a.discID = discID;
++        VERBOSE(VB_MEDIA, QString("LocalCDDB matched %1 ").arg(discID,0,16) +
++            genre + " to " + a.artist + " / " + a.title);
++
++        CachePut(a);
++
++        return true;
++    }
++    return false;
++}
++
++// Create CDDB file
++bool Dbase::Write(const Cddb::Album& album)
++{
++    CachePut(album);
++
++    const QString genre = !album.genre.isEmpty() ?
++        album.genre.toLower().toUtf8() : "misc";
++
++    VERBOSE(VB_MEDIA, "WriteDB " + genre +
++        QString(" %1 ").arg(album.discID,0,16) +
++        album.artist + " / " + album.title);
++
++    if (QDir(GetDB()).mkpath(genre))
++    {
++        QFile file(GetDB() + '/' + genre + '/' +
++            QString::number(album.discID,16));
++        if (file.open(QIODevice::WriteOnly | QIODevice::Text))
++        {
++            QTextStream(&file) << album;
++            return true;
++        }
++        else
++            VERBOSE(VB_IMPORTANT, "Cddb can't write " + file.fileName());
++    }
++    else
++        VERBOSE(VB_IMPORTANT, "Cddb can't mkpath " + GetDB() + '/' + genre);
++    return false;
++}
++
++// Create a local alias for a matched discID
++// static
++void Dbase::MakeAlias(const Cddb::Album& album, const Cddb::discid_t discID)
++{
++    s_cache[ discID] = album;
++}
++
++// Create a new entry for a discID
++// static
++void Dbase::New(const Cddb::discid_t discID, const Cddb::Toc& toc)
++{
++    (s_cache[ discID] = Cddb::Album(discID)).toc = toc;
++}
++
++// static
++void Dbase::CachePut(const Cddb::Album& album)
++{
++    s_cache[ album.discID] = album;
++}
++
++// static
++bool Dbase::CacheGet(Cddb::Matches& res, const Cddb::discid_t discID)
++{
++    bool ret = false;
++    for (cache_t::const_iterator it = s_cache.find(discID); it != s_cache.end(); ++it)
++    {
++        // NB it->discID may not equal discID if it's an alias
++        if (it->discID)
++        {
++            ret = true;
++            res.discID = discID;
++            VERBOSE(VB_MEDIA+VB_EXTRA, QString("Cddb CacheGet found %1 ").
++                arg(discID,0,16) + it->genre + " " + it->artist + " / " + it->title);
++
++            // If it's marker for 'no match' then genre is empty
++            if (!it->genre.isEmpty())
++                res.matches.push_back(Cddb::Match(*it));
++        }
++    }
++    return ret;
++}
++
++// static
++bool Dbase::CacheGet(Cddb::Album& album, const QString& genre, const Cddb::discid_t discID)
++{
++    const Cddb::Album& a = s_cache[ discID];
++    if (a.discID && a.genre == genre)
++    {
++        album = a;
++        return true;
++    }
++    return false;
++}
++
++// Local database path
++// static
++const QString& Dbase::GetDB()
++{
++    static QString s_path;
++    if (s_path.isEmpty())
++    {
++        s_path = getenv("HOME");
++#ifdef WIN32
++        if (s_path.isEmpty())
++        {
++            s_path = getenv("HOMEDRIVE");
++            s_path += getenv("HOMEPATH");
++        }
++#endif
++        if (s_path.isEmpty())
++            s_path = ".";
++        if (!s_path.endsWith('/'))
++            s_path += '/';
++        s_path += ".cddb/";
++    }
++    return s_path;
++}
++
++// CDDB hello string
++static const QString& helloID()
++{
++    static QString helloID;
++    if (helloID.isEmpty())
++    {
++        helloID = getenv("USER");
++        if (helloID.isEmpty())
++            helloID = "anon";
++        helloID += QString("+%1+MythTV+%2+")
++                   .arg(gCoreContext->GetHostName()).arg(MYTH_BINARY_VERSION);
++    }
++    return helloID;
++}
+diff --git a/mythplugins/mythmusic/mythmusic/cddb.h b/mythplugins/mythmusic/mythmusic/cddb.h
+new file mode 100644
+index 0000000..462ca37
+--- /dev/null
++++ b/mythplugins/mythmusic/mythmusic/cddb.h
+@@ -0,0 +1,94 @@
++#ifndef CDDB_H_
++#define CDDB_H_
++
++#include <QString>
++#include <QStringList>
++#include <QVector>
++
++/*
++ * CDDB lookup
++ */
++struct Cddb
++{
++    typedef unsigned long discid_t;
++    struct Album;
++
++    // A CDDB query match
++    struct Match
++    {
++        QString genre;
++        discid_t discID;
++        QString artist;
++        QString title;
++
++        Match() : discID(0) {}
++        Match(const char *g, discid_t d, const char *a, const char *t) :
++            genre(g), discID(d), artist(a), title(t)
++        {}
++        Match(const Album& a) : genre(a.genre), discID(a.discID),
++            artist(a.artist), title(a.title)
++        {}
++    };
++
++    // CDDB query results
++    struct Matches
++    {
++        discid_t discID; // discID of query
++        bool isExact;
++        typedef QVector< Match > match_t;
++        match_t matches;
++
++        Matches() : discID(0), isExact(false) {}
++    };
++
++    struct Msf
++    {
++        int min, sec, frame;
++        Msf(int m = 0, int s = 0, int f = 0) : min(m), sec(s), frame(f) {}
++    };
++    typedef QVector< Msf > Toc;
++
++    struct Track
++    {
++        QString artist;
++        QString title;
++    };
++
++    // CDDB detail result
++    struct Album
++    {
++        QString genre;
++        discid_t discID;
++        QString artist;
++        QString title;
++        int year;
++        QString submitter;
++        int rev;
++        bool isCompilation;
++        typedef QVector< Track > track_t;
++        track_t tracks;
++        QString extd;
++        typedef QVector< QString > ext_t;
++        ext_t ext;
++        Toc toc;
++
++        Album(discid_t d = 0, const char* g = 0) :
++            genre(g), discID(d), year(0), rev(1), isCompilation(false) {}
++
++        Album(const QString& s) { *this = s; }
++
++        Album& operator = (const QString&);
++        operator QString () const;
++    };
++
++    // Primary cddb access
++    static bool Query(Matches&, const Toc&);
++    static bool Read(Album&, const QString& genre, discid_t);
++    static bool Write(const Album&, bool bLocalOnly = true);
++
++    // Support
++    static discid_t Discid(unsigned& secs, const Msf [], unsigned tracks);
++    static void Alias(const Album&, discid_t);
++};
++
++#endif //ndef CDDB_H_
+diff --git a/mythplugins/mythmusic/mythmusic/cddecoder-cdio.cpp b/mythplugins/mythmusic/mythmusic/cddecoder-cdio.cpp
+new file mode 100644
+index 0000000..0860305
+--- /dev/null
++++ b/mythplugins/mythmusic/mythmusic/cddecoder-cdio.cpp
+@@ -0,0 +1,827 @@
++#define DO_NOT_WANT_PARANOIA_COMPATIBILITY
++#include "cddecoder.h"
++
++// C
++#include <cstdlib>
++#include <cstring>
++
++#include <unistd.h>
++
++// Qt
++#include <QIODevice>
++#include <QFile>
++#include <QObject>
++#include <QString>
++
++// libcdio
++#include <cdio/cdda.h>
++
++// MythTV
++#include <audiooutput.h>
++#include <mythcontext.h>
++
++extern "C" {
++#include <libavcodec/avcodec.h>
++}
++
++// MythMusic
++#include "constants.h"
++#include "metadata.h"
++#include "cddb.h"
++
++#define CDEXT ".cda"
++const unsigned kSamplesPerSec = 44100;
++
++
++// Open a cdio device
++static CdIo_t * openCdio(const QString& name)
++{
++    CdIo_t *cdio = cdio_open(name.toAscii(), DRIVER_DEVICE);
++    if (!cdio)
++    {
++        VERBOSE(VB_MEDIA, QString("CdDecoder: cdio_open(%1) failed").
++            arg(name));
++    }
++    return cdio;
++}
++
++// Stack-based cdio device open
++class StCdioDevice
++{
++    CdIo_t* m_cdio;
++
++    void* operator new(std::size_t); // Stack only
++    // No copying
++    StCdioDevice(const StCdioDevice&);
++    StCdioDevice& operator =(const StCdioDevice&);
++
++public:
++    StCdioDevice(const QString& dev) : m_cdio(openCdio(dev)) { }
++    ~StCdioDevice() { if (m_cdio) cdio_destroy(m_cdio); }
++
++    operator CdIo_t*() const { return m_cdio; }
++};
++
++
++CdDecoder::CdDecoder(const QString &file, DecoderFactory *d, QIODevice *i,
++                     AudioOutput *o) :
++    Decoder(d, i, o),
++    inited(false),   user_stop(false),
++    devicename(""),
++    stat(DecoderEvent::Error),
++    output_buf(NULL),
++    output_at(0),    bks(0),
++    bksFrames(0),    decodeBytes(0),
++    finish(false),
++    freq(0),         bitrate(0),
++    chan(0),
++    seekTime(-1.),
++    settracknum(-1), tracknum(0),
++    cdio(0),        device(0), paranoia( 0),
++    start(CDIO_INVALID_LSN),
++    end(CDIO_INVALID_LSN),
++    curpos(CDIO_INVALID_LSN)
++{
++    setFilename(file);
++}
++
++// virtual
++CdDecoder::~CdDecoder()
++{
++    if (this->inited)
++        deinit();
++}
++
++void CdDecoder::setDevice(const QString &dev)
++{
++    this->devicename = dev;
++#ifdef WIN32
++    // libcdio needs the drive letter with no path
++    if (this->devicename.endsWith('\\'))
++        this->devicename.chop(1);
++#endif
++}
++
++// pure virtual
++void CdDecoder::stop()
++{
++    this->user_stop = true;
++}
++
++void CdDecoder::writeBlock()
++{
++    while (this->seekTime <= +0.)
++    {
++        if(output()->AddFrames(this->output_buf, this->bksFrames, -1))
++        {
++            if (this->output_at >= this->bks)
++            {
++                this->output_at -= this->bks;
++                std::memmove(this->output_buf, this->output_buf + this->bks,
++                    this->output_at);
++            }
++            break;
++        }
++        else
++            ::usleep(output()->GetAudioBufferedTime()<<9);
++    }
++}
++
++//static
++QMutex& CdDecoder::getCdioMutex()
++{
++    static QMutex mtx(QMutex::Recursive);
++    return mtx;
++}
++
++// pure virtual
++bool CdDecoder::initialize()
++{
++    if (this->inited)
++        return true;
++
++    this->inited = this->user_stop = this->finish = false;
++    this->freq = this->bitrate = 0L;
++    this->stat = DecoderEvent::Error;
++    this->chan = 0;
++    this->seekTime = -1.;
++
++    if (output())
++        output()->PauseUntilBuffered();
++
++    QFile* file = dynamic_cast< QFile* >(input()); // From QIODevice*
++    if (file)
++    {
++        setFilename(file->fileName());
++        this->tracknum = getFilename().section('.', 0, 0).toUInt();
++    }
++
++    QMutexLocker lock(&getCdioMutex());
++
++    this->cdio = openCdio(this->devicename);
++    if (!this->cdio)
++        return false;
++
++    this->start = cdio_get_track_lsn(this->cdio, this->tracknum);
++    this->end = cdio_get_track_last_lsn(this->cdio, this->tracknum);
++    if (CDIO_INVALID_LSN  == this->start ||
++        CDIO_INVALID_LSN  == this->end)
++    {
++        VERBOSE(VB_MEDIA, "CdDecoder: No tracks on " + this->devicename);
++        cdio_destroy(this->cdio), this->cdio = 0;
++        return false;
++    }
++
++    VERBOSE(VB_MEDIA+VB_EXTRA, QString("CdDecoder track=%1 lsn start=%2 end=%3").
++        arg(this->tracknum).arg(this->start).arg(this->end));
++    this->curpos = this->start;
++
++    this->device = cdio_cddap_identify_cdio(this->cdio, 0, NULL);
++    if (NULL == this->device)
++    {
++        VERBOSE(VB_IMPORTANT,
++            QString("Error: CdDecoder: cdio_cddap_identify(%1) failed").
++            arg(this->devicename));
++        cdio_destroy(this->cdio), this->cdio = 0;
++        return false;
++    }
++
++    cdio_cddap_verbose_set(this->device,
++        VERBOSE_LEVEL_CHECK(VB_MEDIA) ? CDDA_MESSAGE_PRINTIT :
++            CDDA_MESSAGE_FORGETIT,
++        VERBOSE_LEVEL_CHECK(VB_MEDIA+VB_EXTRA) ? CDDA_MESSAGE_PRINTIT :
++            CDDA_MESSAGE_FORGETIT);
++
++    if (DRIVER_OP_SUCCESS == cdio_cddap_open(this->device))
++    {
++        // cdio_get_track_last_lsn is unreliable on discs with data at end
++        lsn_t end2 = cdio_cddap_track_lastsector(this->device, this->tracknum);
++        if (end2 < this->end)
++        {
++            VERBOSE(VB_MEDIA, QString("CdDecoder: trim last lsn from %1 to %2").
++                arg(this->end).arg(end2));
++            this->end = end2;
++        }
++
++        this->paranoia = cdio_paranoia_init(this->device);
++        if (NULL != this->paranoia)
++        {
++            cdio_paranoia_modeset(this->paranoia, PARANOIA_MODE_DISABLE);
++            (void)cdio_paranoia_seek(this->paranoia, this->start, SEEK_SET);
++        }
++        else
++        {
++            VERBOSE(VB_IMPORTANT, "Warn: CD reading with paranoia is disabled");
++        }
++    }
++    else
++    {
++        VERBOSE(VB_IMPORTANT,
++            QString("Warn: drive '%1' is not cdda capable").
++            arg(this->devicename));
++    }
++
++    int chnls = cdio_get_track_channels(this->cdio, this->tracknum);
++    this->chan = chnls > 0 ? chnls : 2;
++    this->freq = kSamplesPerSec;
++
++    if (output())
++    {
++        const AudioSettings settings(FORMAT_S16, this->chan,
++            CODEC_ID_PCM_S16LE, this->freq, false /* AC3/DTS passthru */);
++        output()->Reconfigure(settings);
++        output()->SetSourceBitrate(this->freq * this->chan * 16);
++    }
++
++    // 20ms worth
++    this->bks = (this->freq * this->chan * 2) / 50;
++    this->bksFrames = this->freq / 50;
++    // decode 8 bks worth of samples each time we need more
++    this->decodeBytes = this->bks << 3;
++
++    this->output_buf = reinterpret_cast< char* >(
++        ::av_malloc(this->decodeBytes + CDIO_CD_FRAMESIZE_RAW * 2));
++    this->output_at = 0;
++
++    setCDSpeed(2);
++
++    return this->inited = true;
++}
++
++// pure virtual
++void CdDecoder::seek(double pos)
++{
++    this->seekTime = pos;
++    if (output())
++        output()->PauseUntilBuffered();
++}
++
++// private
++void CdDecoder::deinit()
++{
++    setCDSpeed(-1);
++
++    QMutexLocker lock(&getCdioMutex());
++
++    if (this->paranoia)
++        cdio_paranoia_free(this->paranoia), this->paranoia = 0;
++    if (this->device)
++        cdio_cddap_close(this->device), this->device = 0, this->cdio = 0;
++    if (this->cdio)
++        cdio_destroy(this->cdio), this->cdio = 0;
++
++    if (this->output_buf)
++        ::av_free(this->output_buf), this->output_buf = NULL;
++
++    this->inited = this->user_stop = this->finish = false;
++    this->freq = this->bitrate = 0L;
++    this->stat = DecoderEvent::Finished;
++    this->chan = 0;
++    setInput(0);
++    setOutput(0);
++}
++
++// private
++void CdDecoder::run()
++{
++    if (!this->inited)
++        return;
++
++    this->stat = DecoderEvent::Decoding;
++    // NB block scope required to prevent re-entrancy
++    {
++        DecoderEvent e(this->stat);
++        dispatch(e);
++    }
++
++    // account for possible frame expansion in aobase (upmix, float conv)
++    const std::size_t thresh = this->bks * 6;
++
++    while (!this->finish && !this->user_stop)
++    {
++        if (this->seekTime >= +0.)
++        {
++            this->curpos = this->start + static_cast< lsn_t >(
++                (this->seekTime * kSamplesPerSec) / CD_FRAMESAMPLES);
++            if (this->paranoia)
++            {
++                QMutexLocker lock(&getCdioMutex());
++                cdio_paranoia_seek(this->paranoia, this->curpos, SEEK_SET);
++            }
++
++            this->output_at = 0;
++            this->seekTime = -1.;
++        }
++
++        if (this->output_at < this->bks)
++        {
++            while (this->output_at < this->decodeBytes &&
++                   !this->finish && !this->user_stop && this->seekTime <= +0.)
++            {
++                if (this->curpos < this->end)
++                {
++                    QMutexLocker lock(&getCdioMutex());
++                    if (this->paranoia)
++                    {
++                        int16_t *cdbuffer = cdio_paranoia_read_limited(
++                                                this->paranoia, 0, 10);
++                        if (cdbuffer)
++                            memcpy(&this->output_buf[this->output_at],
++                                cdbuffer, CDIO_CD_FRAMESIZE_RAW);
++                    }
++                    else
++                    {
++                        driver_return_code_t c = cdio_read_audio_sector(
++                            this->cdio, &this->output_buf[this->output_at],
++                            this->curpos);
++                        if (DRIVER_OP_SUCCESS != c)
++                        {
++                            VERBOSE(VB_MEDIA+VB_EXTRA,
++                                QString("cdio_read_audio_sector(%1) error %2").
++                                arg(this->curpos).arg(c));
++                            memset( &this->output_buf[this->output_at],
++                                0, CDIO_CD_FRAMESIZE_RAW);
++                        }
++                    }
++
++                    this->output_at += CDIO_CD_FRAMESIZE_RAW;
++                    ++(this->curpos);
++                }
++                else
++                {
++                    this->finish = true;
++                }
++            }
++        }
++
++        if (!output())
++            continue;
++
++        // Wait until we need to decode or supply more samples
++        uint fill = 0, total = 0;
++        while (!this->finish && !this->user_stop && this->seekTime <= +0.)
++        {
++            output()->GetBufferStatus(fill, total);
++            // Make sure we have decoded samples ready and that the
++            // audiobuffer is reasonably populated
++            if (fill < (thresh << 6))
++                break;
++            else
++            {
++                // Wait for half of the buffer to drain
++                ::usleep(output()->GetAudioBufferedTime()<<9);
++            }
++        }
++
++        // write a block if there's sufficient space for it
++        if (!this->user_stop &&
++            this->output_at >= this->bks &&
++            fill <= total - thresh)
++        {
++            writeBlock();
++        }
++    }
++
++    if (this->user_stop)
++        this->inited = false;
++    else if (output())
++    {
++        // Drain our buffer
++        while (this->output_at >= this->bks)
++            writeBlock();
++
++        // Drain ao buffer
++        output()->Drain();
++    }
++
++    if (this->finish)
++        this->stat = DecoderEvent::Finished;
++    else if (this->user_stop)
++        this->stat = DecoderEvent::Stopped;
++    else
++        this->stat = DecoderEvent::Error;
++
++    // NB block scope required to step onto next track
++    {
++        DecoderEvent e(this->stat);
++        dispatch(e);
++    }
++
++    deinit();
++}
++
++//public
++void CdDecoder::setCDSpeed(int speed)
++{
++    QMutexLocker lock(&getCdioMutex());
++
++    StCdioDevice cdio(this->devicename);
++    if (cdio)
++    {
++        driver_return_code_t c = cdio_set_speed(cdio, speed >= 0 ? speed : 1);
++        if (DRIVER_OP_SUCCESS != c)
++        {
++            VERBOSE(VB_MEDIA,
++                QString("Error: cdio_set_speed('%1',%2) failed").
++                arg(this->devicename).arg(speed));
++        }
++    }
++}
++
++//public
++int CdDecoder::getNumTracks()
++{
++    QMutexLocker lock(&getCdioMutex());
++
++    StCdioDevice cdio(this->devicename);
++    if (!cdio)
++        return 0;
++
++    track_t tracks = cdio_get_num_tracks(cdio);
++    if (CDIO_INVALID_TRACK != tracks)
++        VERBOSE(VB_MEDIA+VB_EXTRA, QString("getNumTracks = %1").arg(tracks));
++    else
++        tracks = -1;
++
++    return tracks;
++}
++
++//public
++int CdDecoder::getNumCDAudioTracks()
++{
++    QMutexLocker lock(&getCdioMutex());
++
++    StCdioDevice cdio(this->devicename);
++    if (!cdio)
++        return 0;
++
++    int nAudio = 0;
++    const track_t last = cdio_get_last_track_num(cdio);
++    if (CDIO_INVALID_TRACK != last)
++    {
++        for (track_t t = cdio_get_first_track_num(cdio) ; t <= last; ++t)
++        {
++            if (TRACK_FORMAT_AUDIO == cdio_get_track_format(cdio, t))
++                ++nAudio;
++        }
++        VERBOSE(VB_MEDIA+VB_EXTRA, QString("getNumCDAudioTracks = %1").arg(nAudio));
++    }
++    else
++      nAudio = -1;
++
++    return nAudio;
++}
++
++//public
++Metadata* CdDecoder::getMetadata(int track)
++{
++    this->settracknum = track;
++    return getMetadata();
++}
++
++//public
++Metadata *CdDecoder::getLastMetadata()
++{
++    for(int i = getNumTracks(); i > 0; --i)
++    {
++        Metadata *m = getMetadata(i);
++        if(m)
++            return m;
++    }
++    return NULL;
++}
++
++// Create a TOC
++static lsn_t s_lastAudioLsn;
++static Cddb::Toc& GetToc(CdIo_t *cdio, Cddb::Toc& toc)
++{
++    // Get lead-in
++    const track_t firstTrack = cdio_get_first_track_num(cdio);
++    lsn_t lsn0 = 0;
++    msf_t msf;
++    if (cdio_get_track_msf(cdio, firstTrack, &msf))
++        lsn0 = (msf.m * 60 + msf.s) * CDIO_CD_FRAMES_PER_SEC + msf.f;
++
++    const track_t lastTrack = cdio_get_last_track_num(cdio);
++    for (track_t t = firstTrack; t <= lastTrack + 1; ++t)
++    {
++#if 0 // This would be better but the msf's returned are way off in libcdio 0.81
++        if (!cdio_get_track_msf(cdio, t, &msf))
++            break;
++#else
++        lsn_t lsn = cdio_get_track_lsn(cdio, t);
++        if (s_lastAudioLsn && lsn > s_lastAudioLsn)
++            lsn = s_lastAudioLsn;
++        lsn += lsn0; // lead-in
++
++        std::div_t d = std::div(lsn, CDIO_CD_FRAMES_PER_SEC);
++        msf.f = d.rem;
++        d = std::div(d.quot, 60);
++        msf.s = d.rem;
++        msf.m = d.quot;
++#endif
++        //VERBOSE(VB_MEDIA, QString("Track %1 msf: %2:%3:%4").
++        //    arg(t,2).arg(msf.m,2).arg(msf.s,2).arg(msf.f,2) );
++        toc.push_back(Cddb::Msf(msf.m, msf.s, msf.f));
++
++        if (TRACK_FORMAT_AUDIO != cdio_get_track_format(cdio, t))
++            break;
++    }
++    return toc;
++}
++
++//virtual
++Metadata *CdDecoder::getMetadata()
++{
++    QString artist, album, compilation_artist, title, genre;
++    int year = 0;
++    unsigned long length = 0;
++    track_t tracknum = 0;
++
++    if (-1 == this->settracknum)
++        tracknum = getFilename().toUInt();
++    else
++    {
++        tracknum = this->settracknum;
++        setFilename(QString("%1" CDEXT).arg(tracknum));
++    }
++
++    QMutexLocker lock(&getCdioMutex());
++
++    StCdioDevice cdio(this->devicename);
++    if (!cdio)
++        return NULL;
++
++    const track_t lastTrack = cdio_get_last_track_num(cdio);
++    if (CDIO_INVALID_TRACK == lastTrack)
++        return NULL;
++
++    if (TRACK_FORMAT_AUDIO != cdio_get_track_format(cdio, tracknum))
++        return NULL;
++
++    // Assume disc changed if max LSN different
++    bool isDiscChanged = false;
++    static lsn_t s_totalSectors;
++    lsn_t totalSectors = cdio_get_track_lsn(cdio, CDIO_CDROM_LEADOUT_TRACK);
++    if (s_totalSectors != totalSectors)
++    {
++        s_totalSectors = totalSectors;
++        isDiscChanged = true;
++    }
++
++    // NB cdio_get_track_last_lsn is unreliable for the last audio track
++    // of discs with data tracks beyond
++    lsn_t end = cdio_get_track_last_lsn(cdio, tracknum);
++    if (isDiscChanged)
++    {
++        const track_t audioTracks = getNumCDAudioTracks();
++        s_lastAudioLsn = cdio_get_track_last_lsn(cdio, audioTracks);
++
++        if (audioTracks < lastTrack)
++        {
++            cdrom_drive_t *dev = cdio_cddap_identify_cdio(cdio, 0, NULL);
++            if (NULL != dev)
++            {
++                if (DRIVER_OP_SUCCESS == cdio_cddap_open(dev))
++                {
++                    // NB this can be S L O W  but is reliable
++                    lsn_t end2 = cdio_cddap_track_lastsector(dev,
++                        getNumCDAudioTracks());
++                    if (CDIO_INVALID_LSN != end2)
++                        s_lastAudioLsn = end2;
++                }
++                cdio_cddap_close_no_free_cdio(dev);
++            }
++        }
++    }
++
++    if (s_lastAudioLsn && s_lastAudioLsn < end)
++        end = s_lastAudioLsn;
++
++    const lsn_t start = cdio_get_track_lsn(cdio, tracknum);
++    if (CDIO_INVALID_LSN != start && CDIO_INVALID_LSN != end)
++    {
++        length = ((end - start + 1) * 1000 + CDIO_CD_FRAMES_PER_SEC/2) /
++            CDIO_CD_FRAMES_PER_SEC;
++    }
++
++    bool isCompilation = false;
++
++#define CDTEXT 0 // Disabled - cd-text access on discs without it is S L O W
++#if CDTEXT
++    static int s_iCdtext;
++    if (isDiscChanged)
++        s_iCdtext = -1;
++
++    if (s_iCdtext)
++    {
++        // cdio_get_cdtext can't take >5 seconds on some CD's without cdtext
++        if (s_iCdtext < 0)
++            VERBOSE(VB_MEDIA,
++                QString("Getting cdtext for track %1...").arg(tracknum));
++        cdtext_t * cdtext = cdio_get_cdtext(cdio, tracknum);
++        if (NULL != cdtext)
++        {
++            genre = cdtext_get_const(CDTEXT_GENRE, cdtext);
++            artist = cdtext_get_const(CDTEXT_PERFORMER, cdtext);
++            title = cdtext_get_const(CDTEXT_TITLE, cdtext);
++            const char* isrc = cdtext_get_const(CDTEXT_ISRC, cdtext);
++            /* ISRC codes are 12 characters long, in the form CCXXXYYNNNNN
++             * CC = country code
++             * XXX = registrant e.g. BMG
++             * CC = year withou century
++             * NNNNN = unique ID
++             */
++            if (isrc && strlen(isrc) >= 7)
++            {
++                year = (isrc[5] - '0') * 10 + (isrc[6] - '0');
++                year += (year <= 30) ? 2000 : 1900;
++            }
++
++            cdtext_destroy(cdtext);
++
++            if (!title.isNull())
++            {
++                if (s_iCdtext < 0)
++                    VERBOSE(VB_MEDIA, "Found cdtext track title");
++                s_iCdtext = 1;
++
++                // Get disc info
++                cdtext = cdio_get_cdtext(cdio, 0);
++                if (NULL != cdtext)
++                {
++                    compilation_artist = cdtext_get_const(
++                        CDTEXT_PERFORMER, cdtext);
++                    if (!compilation_artist.isEmpty() &&
++                            artist != compilation_artist)
++                        isCompilation = true;
++
++                    album = cdtext_get_const(CDTEXT_TITLE, cdtext);
++
++                    if (genre.isNull())
++                        genre = cdtext_get_const(CDTEXT_GENRE, cdtext);
++
++                    cdtext_destroy(cdtext);
++                }
++            }
++            else
++            {
++                if (s_iCdtext < 0)
++                    VERBOSE(VB_MEDIA, "No cdtext title for track");
++                s_iCdtext = 0;
++            }
++        }
++        else
++        {
++            if (s_iCdtext < 0)
++                VERBOSE(VB_MEDIA, "No cdtext");
++            s_iCdtext = 0;
++        }
++    }
++
++    if (title.isEmpty() || artist.isEmpty() || album.isEmpty())
++#endif // CDTEXT
++    {
++        // CDDB lookup
++        Cddb::Toc toc;
++        Cddb::Matches r;
++        if (Cddb::Query(r, GetToc(cdio, toc)))
++        {
++            Cddb::Matches::match_t::const_iterator select = r.matches.begin();
++
++            if (r.matches.size() > 1)
++            {
++                // TODO prompt user to select one
++                // In the meantime, select the first non-generic genre
++                for (Cddb::Matches::match_t::const_iterator it = select;
++                    it != r.matches.end(); ++it)
++                {
++                    QString g = it->genre.toLower();
++                    if (g != "misc" && g != "data")
++                    {
++                        select = it;
++                        break;
++                    }
++                }
++            }
++
++            Cddb::Album info;
++            if (Cddb::Read(info, select->genre, select->discID))
++            {
++                isCompilation = info.isCompilation;
++                if (info.genre.toLower() != "misc")
++                    genre = info.genre;
++                album = info.title;
++                compilation_artist = info.artist;
++                year = info.year;
++                if (info.tracks.size() >= tracknum)
++                {
++                    const Cddb::Track& track = info.tracks[tracknum - 1];
++                    title = track.title;
++                    artist = track.artist;
++                }
++
++                // Create a temporary local alias for future lookups
++                if (r.discID != info.discID)
++                    Cddb::Alias(info, r.discID);
++            }
++        }
++    }
++
++    if (compilation_artist.toLower().left(7) == "various")
++        compilation_artist = QObject::tr("Various Artists");
++
++    if (artist.isEmpty())
++    {
++        artist = compilation_artist;
++        compilation_artist.clear();
++    }
++
++    if (title.isEmpty())
++        title = QObject::tr("Track %1").arg(tracknum);
++
++    Metadata *m = new Metadata(getFilename(), artist, compilation_artist,
++        album, title, genre, year, tracknum, length);
++    if (m)
++        m->setCompilation(isCompilation);
++
++    return m;
++}
++
++// virtual
++void CdDecoder::commitMetadata(Metadata *mdata)
++{
++    QMutexLocker lock(&getCdioMutex());
++
++    StCdioDevice cdio(this->devicename);
++    if (!cdio)
++        return;
++
++    Cddb::Toc toc;
++    GetToc(cdio, toc);
++
++    unsigned secs;
++    Cddb::discid_t discID = Cddb::Discid(secs, toc.data(), toc.size() - 1);
++
++    Cddb::Album album(discID, mdata->Genre().toLower().toUtf8());
++    if (!Cddb::Read(album, album.genre, discID))
++        album.toc = toc;
++
++    album.isCompilation = mdata->Compilation();
++    if (!mdata->Compilation())
++        album.artist = mdata->Artist();
++    else if (mdata->CompilationArtist() != album.artist)
++        album.artist = mdata->CompilationArtist();
++
++    album.title = mdata->Album();
++    album.year = mdata->Year();
++
++    if (album.tracks.size() < this->tracknum)
++        album.tracks.resize(this->tracknum);
++
++    Cddb::Track& track = album.tracks[this->tracknum - 1];
++    track.title = mdata->Title();
++    track.artist = mdata->Artist();
++
++    Cddb::Write(album);
++}
++
++
++// pure virtual
++bool CdDecoderFactory::supports(const QString &source) const
++{
++    return (source.right(extension().length()).toLower() == extension());
++}
++
++// pure virtual
++const QString &CdDecoderFactory::extension() const
++{
++    static QString ext(CDEXT);
++    return ext;
++}
++
++// pure virtual
++const QString &CdDecoderFactory::description() const
++{
++    static QString desc(QObject::tr("Audio CD parser"));
++    return desc;
++}
++
++// pure virtual
++Decoder *CdDecoderFactory::create(const QString &file, QIODevice *input,
++                                  AudioOutput *output, bool deletable)
++{
++   if (deletable)
++        return new CdDecoder(file, this, input, output);
++
++    static CdDecoder *decoder;
++    if (! decoder) {
++        decoder = new CdDecoder(file, this, input, output);
++    } else {
++        decoder->setInput(input);
++        decoder->setFilename(file);
++        decoder->setOutput(output);
++    }
++
++    return decoder;
++}
+diff --git a/mythplugins/mythmusic/mythmusic/cddecoder.cpp b/mythplugins/mythmusic/mythmusic/cddecoder.cpp
+index b539297..7131bff 100644
+--- a/mythplugins/mythmusic/mythmusic/cddecoder.cpp
++++ b/mythplugins/mythmusic/mythmusic/cddecoder.cpp
+@@ -37,7 +37,8 @@ CdDecoder::CdDecoder(const QString &file, DecoderFactory *d, QIODevice *i,
+     m_lastTrack(0),  m_leadout(0),
+     m_lengthInSecs(0.0)
+ #endif
+-    stat(0),         output_buf(NULL),
++    stat(DecoderEvent::Error),
++    output_buf(NULL),
+     output_at(0),    bks(0),
+     bksFrames(0),    decodeBytes(0),
+     finish(false),
+@@ -45,7 +46,7 @@ CdDecoder::CdDecoder(const QString &file, DecoderFactory *d, QIODevice *i,
+     chan(0),
+     totalTime(0.0),  seekTime(-1.0),
+     settracknum(-1), tracknum(0),
+-#if defined(__linux__) || defined(__FreeBSD__)
++#ifdef HAVE_PARANOIA
+     device(NULL),    paranoia(NULL),
+ #endif
+     start(0),        end(0),
+@@ -85,7 +86,8 @@ bool CdDecoder::initialize()
+ {
+     inited = user_stop = finish = FALSE;
+     freq = bitrate = 0;
+-    stat = chan = 0;
++    stat = DecoderEvent::Error;
++    chan = 0;
+     seekTime = -1.0;
+ 
+     if (output())
+@@ -96,6 +98,7 @@ bool CdDecoder::initialize()
+     filename = ((QFile *)input())->fileName();
+     tracknum = filename.section('.', 0, 0).toUInt();
+ 
++#ifdef HAVE_PARANOIA
+     QByteArray devname = devicename.toAscii();
+     device = cdda_identify(devname.constData(), 0, NULL);
+     if (!device)
+@@ -148,6 +151,9 @@ bool CdDecoder::initialize()
+     setCDSpeed(2);
+     inited = TRUE;
+     return TRUE;
++#else
++    return FALSE;
++#endif
+ }
+ 
+ void CdDecoder::seek(double pos)
+@@ -159,6 +165,7 @@ void CdDecoder::seek(double pos)
+ 
+ void CdDecoder::deinit()
+ {
++#ifdef HAVE_PARANOIA
+     setCDSpeed(-1);
+     if (paranoia)
+         paranoia_free(paranoia);
+@@ -171,18 +178,22 @@ void CdDecoder::deinit()
+ 
+     device = NULL;
+     paranoia = NULL;
++#endif
+ 
+     inited = user_stop = finish = FALSE;
+     freq = bitrate = 0;
+-    stat = chan = 0;
++    stat = DecoderEvent::Error;
++    chan = 0;
+     setInput(0);
+     setOutput(0);
+ }
+ 
++#ifdef HAVE_PARANOIA
+ static void paranoia_cb(long inpos, int function)
+ {
+     inpos = inpos; function = function;
+ }
++#endif
+ 
+ void CdDecoder::run()
+ {
+@@ -205,7 +216,9 @@ void CdDecoder::run()
+         if (seekTime >= 0.0)
+         {
+             curpos = (int)(((seekTime * 44100) / CD_FRAMESAMPLES) + start);
++#ifdef HAVE_PARANOIA
+             paranoia_seek(paranoia, curpos, SEEK_SET);
++#endif
+             output_at = 0;
+             seekTime = -1.0;
+         }
+@@ -219,10 +232,12 @@ void CdDecoder::run()
+ 
+                 if (curpos <= end)
+                 {
++#ifdef HAVE_PARANOIA
+                     cdbuffer = paranoia_read(paranoia, paranoia_cb);
+ 
+                     memcpy((char *)(output_buf + output_at), (char *)cdbuffer,
+                            CD_FRAMESIZE_RAW);
++#endif
+ 
+                     output_at += CD_FRAMESIZE_RAW;
+                 }
+@@ -286,6 +301,7 @@ void CdDecoder::setCDSpeed(int speed)
+ 
+ int CdDecoder::getNumTracks(void)
+ {
++#ifdef HAVE_CDAUDIO
+     QByteArray devname = devicename.toAscii();
+     int cd = cd_init_device(const_cast<char*>(devname.constData()));
+ 
+@@ -309,10 +325,14 @@ int CdDecoder::getNumTracks(void)
+     cd_finish(cd);
+ 
+     return retval;
++#else
++    return 0;
++#endif
+ }
+ 
+ int CdDecoder::getNumCDAudioTracks(void)
+ {
++#ifdef HAVE_CDAUDIO
+     QByteArray devname = devicename.toAscii();
+     int cd = cd_init_device(const_cast<char*>(devname.constData()));
+ 
+@@ -343,6 +363,9 @@ int CdDecoder::getNumCDAudioTracks(void)
+     cd_finish(cd);
+ 
+     return retval;
++#else
++    return 0;
++#endif
+ }
+ 
+ Metadata* CdDecoder::getMetadata(int track)
+@@ -372,6 +395,7 @@ Metadata *CdDecoder::getMetadata()
+     QString artist, album, compilation_artist, title, genre;
+     int year = 0, tracknum = 0, length = 0;
+ 
++#ifdef HAVE_CDAUDIO
+     QByteArray devname = devicename.toAscii();
+     int cd = cd_init_device(const_cast<char*>(devname.constData()));
+ 
+@@ -466,15 +490,19 @@ Metadata *CdDecoder::getMetadata()
+     length = length < 0 ? 0 : length;
+     length *= 1000;
+ 
++    cd_finish(cd);
++#endif // defined HAVE_CDAUDIO
++
+     Metadata *retdata = new Metadata(filename, artist, compilation_artist,
+                                      album, title, genre, year, tracknum, length);
+ 
+-    retdata->determineIfCompilation(true);
++    if (retdata)
++        retdata->determineIfCompilation(true);
+ 
+-    cd_finish(cd);
+     return retdata;
+ }
+ 
++#ifdef HAVE_CDAUDIO
+ static void set_cstring(char *dest, const char *src, size_t dest_buf_size)
+ {
+     if (dest_buf_size < 1)
+@@ -482,9 +510,11 @@ static void set_cstring(char *dest, const char *src, size_t dest_buf_size)
+     strncpy(dest, src, dest_buf_size - 1);
+     dest[dest_buf_size - 1] = 0;
+ }
++#endif
+ 
+ void CdDecoder::commitMetadata(Metadata *mdata)
+ {
++#ifdef HAVE_CDAUDIO
+     QByteArray devname = devicename.toAscii();
+     int cd = cd_init_device(const_cast<char*>(devname.constData()));
+ 
+@@ -566,6 +596,9 @@ void CdDecoder::commitMetadata(Metadata *mdata)
+     cddb_write_data(cd, &discdata);
+ 
+     cd_finish(cd);
++#else
++    (void)mdata;
++#endif
+ }
+ 
+ bool CdDecoderFactory::supports(const QString &source) const
+diff --git a/mythplugins/mythmusic/mythmusic/cddecoder.h b/mythplugins/mythmusic/mythmusic/cddecoder.h
+index e92d6f7..d975102 100644
+--- a/mythplugins/mythmusic/mythmusic/cddecoder.h
++++ b/mythplugins/mythmusic/mythmusic/cddecoder.h
+@@ -10,11 +10,17 @@
+ using std::vector;
+ #endif
+ 
+-#if defined(__linux__) || defined(__FreeBSD__)
++#ifdef HAVE_CDAUDIO
+ #include <cdaudio.h>
++#endif
++
++#ifdef HAVE_CDIO
++# include <cdio/cdda.h>
++# include <cdio/paranoia.h>
++#elif defined HAVE_PARANOIA
+ extern "C" {
+-#include <cdda_interface.h>
+-#include <cdda_paranoia.h>
++# include <cdda_interface.h>
++# include <cdda_paranoia.h>
+ }
+ #endif
+ 
+@@ -24,30 +30,39 @@ class CdDecoder : public Decoder
+ {
+   public:
+     CdDecoder(const QString &file, DecoderFactory *, QIODevice *, AudioOutput *);
+-    virtual ~CdDecoder(void);
++    virtual ~CdDecoder();
+ 
+-    bool initialize();
+-    double lengthInSeconds();
+-    void seek(double);
+-    void stop();
++    // Decoder implementation
++    virtual bool initialize();
++    virtual void seek(double);
++    virtual void stop();
+ 
+-    int getNumTracks(void);
+-    int getNumCDAudioTracks(void);
++    // Decoder overrides
++    virtual Metadata *getMetadata(void);
++    virtual void commitMetadata(Metadata *mdata);
+ 
+     // The following need to allocate a new Metadata object each time,
+     // because their callers (e.g. databasebox.cpp) free the returned value
+     Metadata *getMetadata(int track);
+-    Metadata *getMetadata(void);
+-    Metadata *getLastMetadata(void);
++    Metadata *getLastMetadata();
++
++#if CONFIG_DARWIN
++    double lengthInSeconds();
++#endif
++    int getNumTracks();
++    int getNumCDAudioTracks();
+ 
+-    void commitMetadata(Metadata *mdata);
+-    void      setDevice(const QString &dev)  { devicename = dev; }
++#ifdef HAVE_CDIO
++    void      setDevice(const QString &dev);
++#else
++    void      setDevice(const QString &dev)  { this->devicename = dev; }
++#endif
+     void      setCDSpeed(int speed);
+ 
+   private:
+     void run();
+ 
+-    void writeBlock(void);
++    void writeBlock();
+     void deinit();
+ 
+     bool inited, user_stop;
+@@ -65,12 +80,15 @@ class CdDecoder : public Decoder
+     vector<int>        m_tracks;        ///< Start block offset of each track
+     vector<Metadata*>  m_mData;         ///< After lookup, details of each trk
+ #endif
++#ifdef HAVE_CDIO
++    static QMutex& getCdioMutex();
++#endif
+ 
+-    int stat;
++    DecoderEvent::Type stat;
+     char *output_buf;
+-    ulong output_at;
++    std::size_t output_at;
+ 
+-    unsigned int bks, bksFrames, decodeBytes;
++    std::size_t bks, bksFrames, decodeBytes;
+     bool finish;
+     long freq, bitrate;
+     int chan;
+@@ -79,12 +97,18 @@ class CdDecoder : public Decoder
+     int settracknum;
+     int tracknum;
+ 
+-#if defined(__linux__) || defined(__FreeBSD__)
++#ifdef HAVE_CDIO
++    CdIo_t *cdio;
++    cdrom_drive_t *device;
++    cdrom_paranoia_t *paranoia;
++    lsn_t start, end, curpos;
++#else
++# if defined HAVE_PARANOIA
+     cdrom_drive *device;
+     cdrom_paranoia *paranoia;
+-#endif
+-
++# endif
+     long int start, end, curpos;
++#endif
+ };
+ 
+ #endif
+diff --git a/mythplugins/mythmusic/mythmusic/cdrip.cpp b/mythplugins/mythmusic/mythmusic/cdrip.cpp
+index d6f522c..08a46bf 100644
+--- a/mythplugins/mythmusic/mythmusic/cdrip.cpp
++++ b/mythplugins/mythmusic/mythmusic/cdrip.cpp
+@@ -6,15 +6,21 @@
+ #include <sys/types.h>
+ #include <fcntl.h>
+ 
+-// Linux C includes
+ #include "config.h"
+-#ifdef HAVE_CDAUDIO
+-#include <cdaudio.h>
++#ifdef HAVE_CDIO
++# include <cdio/cdda.h>
++# include <cdio/paranoia.h>
++#else
++# ifdef HAVE_CDAUDIO
++#  include <cdaudio.h>
++# endif
++# ifdef HAVE_PARANOIA
+ extern "C" {
+-#include <cdda_interface.h>
+-#include <cdda_paranoia.h>
++#  include <cdda_interface.h>
++#  include <cdda_paranoia.h>
+ }
+-#endif
++# endif
++#endif //def HAVE_CDIO
+ 
+ // C++ includes
+ #include <iostream>
+@@ -54,6 +60,17 @@ using namespace std;
+ #include "genres.h"
+ #include "editmetadata.h"
+ 
++#ifdef HAVE_CDIO
++// libparanoia compatibility
++#ifndef cdrom_paranoia
++#define cdrom_paranoia cdrom_paranoia_t
++#endif
++
++#ifndef CD_FRAMESIZE_RAW
++# define CD_FRAMESIZE_RAW CDIO_CD_FRAMESIZE_RAW
++#endif
++#endif
++
+ QEvent::Type RipStatusEvent::kTrackTextEvent =
+     (QEvent::Type) QEvent::registerEventType();
+ QEvent::Type RipStatusEvent::kOverallTextEvent =
+@@ -103,15 +120,23 @@ void CDEjectorThread::run()
+ 
+ static long int getSectorCount (QString &cddevice, int tracknum)
+ {
+-#ifdef HAVE_CDAUDIO
++#if defined HAVE_PARANOIA || defined HAVE_CDIO
+     QByteArray devname = cddevice.toAscii();
+     cdrom_drive *device = cdda_identify(devname.constData(), 0, NULL);
+ 
+     if (!device)
++    {
++        VERBOSE(VB_IMPORTANT,
++            QString("Error: %1('%2',track=%3) failed at cdda_identify()").
++            arg(__func__).arg(cddevice).arg(tracknum));
+         return -1;
++    }
+ 
+     if (cdda_open(device))
+     {
++        VERBOSE(VB_MEDIA,
++            QString("Error: %1('%2',track=%3) failed at cdda_open() - cdda not supported").
++            arg(__func__).arg(cddevice).arg(tracknum));
+         cdda_close(device);
+         return -1;
+     }
+@@ -125,6 +150,8 @@ static long int getSectorCount (QString &cddevice, int tracknum)
+         cdda_close(device);
+         return end - start + 1;
+     }
++    VERBOSE(VB_IMPORTANT,
++        QString("Error: cdrip - cdda_track_audiop(%1) returned 0").arg(cddevice));
+ 
+     cdda_close(device);
+ #else
+@@ -133,10 +160,16 @@ static long int getSectorCount (QString &cddevice, int tracknum)
+     return 0;
+ }
+ 
++#ifdef HAVE_CDIO
++static void paranoia_cb(long, paranoia_cb_mode_t)
++{
++}
++#elif defined HAVE_PARANOIA
+ static void paranoia_cb(long inpos, int function)
+ {
+     inpos = inpos; function = function;
+ }
++#endif
+ 
+ CDRipperThread::CDRipperThread(RipStatus *parent,  QString device,
+                                QVector<RipTrack*> *tracks, int quality) :
+@@ -146,6 +179,10 @@ CDRipperThread::CDRipperThread(RipStatus *parent,  QString device,
+     m_totalSectorsDone(0), m_lastTrackPct(0),
+     m_lastOverallPct(0)
+ {
++#ifdef WIN32 // libcdio needs the drive letter with no path
++    if (this->m_CDdevice.endsWith('\\'))
++        this->m_CDdevice.chop(1);
++#endif
+ }
+ 
+ CDRipperThread::~CDRipperThread(void)
+@@ -319,6 +356,7 @@ void CDRipperThread::run(void)
+         }
+     }
+ 
++#ifndef USING_MINGW
+     QString PostRipCDScript = gCoreContext->GetSetting("PostCDRipScript");
+ 
+     if (!PostRipCDScript.isEmpty())
+@@ -338,14 +376,14 @@ void CDRipperThread::run(void)
+             _exit(1);
+         }
+     }
+-
++#endif
+     QApplication::postEvent(
+         m_parent, new RipStatusEvent(RipStatusEvent::kFinishedEvent, ""));
+ }
+ 
+ int CDRipperThread::ripTrack(QString &cddevice, Encoder *encoder, int tracknum)
+ {
+-#ifdef HAVE_CDAUDIO  // && HAVE_CDPARANOIA
++#if defined HAVE_PARANOIA || defined HAVE_CDIO
+     QByteArray devname = cddevice.toAscii();
+     cdrom_drive *device = cdda_identify(devname.constData(), 0, NULL);
+ 
+@@ -360,6 +398,9 @@ int CDRipperThread::ripTrack(QString &cddevice, Encoder *encoder, int tracknum)
+ 
+     if (cdda_open(device))
+     {
++        VERBOSE(VB_MEDIA,
++            QString("Error: %1('%2',track=%3) failed at cdda_open() - cdda not supported").
++            arg(__func__).arg(cddevice).arg(tracknum));
+         cdda_close(device);
+         return -1;
+     }
+@@ -367,6 +408,8 @@ int CDRipperThread::ripTrack(QString &cddevice, Encoder *encoder, int tracknum)
+     cdda_verbose_set(device, CDDA_MESSAGE_FORGETIT, CDDA_MESSAGE_FORGETIT);
+     long int start = cdda_track_firstsector(device, tracknum);
+     long int end = cdda_track_lastsector(device, tracknum);
++    VERBOSE(VB_MEDIA, QString("%1(%2,track=%3) start=%4 end=%5").
++        arg(__func__).arg(cddevice).arg(tracknum).arg(start).arg(end));
+ 
+     cdrom_paranoia *paranoia = paranoia_init(device);
+     if (gCoreContext->GetSetting("ParanoiaLevel") == "full")
+@@ -746,7 +789,13 @@ void Ripper::startScanCD(void)
+ 
+ void Ripper::scanCD(void)
+ {
+-#ifdef HAVE_CDAUDIO
++#ifdef HAVE_CDIO
++    {
++    VERBOSE(VB_MEDIA, QString("Ripper::%1 CD='%2'").
++        arg(__func__).arg(this->m_CDdevice));
++    (void)cdio_close_tray(this->m_CDdevice.toAscii().constData(), NULL);
++    }
++#elif defined HAVE_CDAUDIO
+     QByteArray devname = m_CDdevice.toAscii();
+     int cdrom_fd = cd_init_device(const_cast<char*>(devname.constData()));
+     VERBOSE(VB_MEDIA, "Ripper::scanCD() - dev:" + m_CDdevice);
+@@ -951,7 +1000,7 @@ QString Ripper::filenameFromMetadata(Metadata *track, bool createDir)
+         musicdir += "/" + directoryList[i];
+         if (createDir)
+         {
+-            umask(022);
++            umask(002); // Retain g+w in case creating in shared dir
+             directoryQD.mkdir(musicdir);
+             directoryQD.cd(musicdir);
+         }
+@@ -1219,10 +1268,15 @@ void Ripper::startEjectCD()
+ 
+ void Ripper::ejectCD()
+ {
++    VERBOSE(VB_MEDIA, __PRETTY_FUNCTION__);
+     bool bEjectCD = gCoreContext->GetNumSetting("EjectCDAfterRipping",1);
+     if (bEjectCD)
+     {
+-#ifdef HAVE_CDAUDIO
++#ifdef HAVE_CDIO
++        VERBOSE(VB_MEDIA, QString("Ripper::%1 '%2'").
++            arg(__func__).arg(this->m_CDdevice));
++        (void)cdio_eject_media_drive(this->m_CDdevice.toAscii().constData());
++#elif defined HAVE_CDAUDIO
+         QByteArray devname = m_CDdevice.toAscii();
+         int cdrom_fd = cd_init_device(const_cast<char*>(devname.constData()));
+         VERBOSE(VB_MEDIA, "Ripper::ejectCD() - dev " + m_CDdevice);
+diff --git a/mythplugins/mythmusic/mythmusic/databasebox.cpp b/mythplugins/mythmusic/mythmusic/databasebox.cpp
+index f610af9..b865c28 100644
+--- a/mythplugins/mythmusic/mythmusic/databasebox.cpp
++++ b/mythplugins/mythmusic/mythmusic/databasebox.cpp
+@@ -27,9 +27,6 @@ using namespace std;
+ #include "cddecoder.h"
+ #include "playlistcontainer.h"
+ #include "musicplayer.h"
+-#ifndef USING_MINGW
+-#include "cddecoder.h"
+-#endif
+ 
+ DatabaseBox::DatabaseBox(MythMainWindow *parent,
+                          const QString dev, const QString &window_name,
+@@ -1276,7 +1273,6 @@ ReadCDThread::ReadCDThread(const QString &dev)
+ 
+ void ReadCDThread::run()
+ {
+-#ifndef USING_MINGW
+     // lock all_music and cd_status_changed while running thread
+     QMutexLocker locker(getLock());
+ 
+@@ -1364,6 +1360,5 @@ void ReadCDThread::run()
+     }
+ 
+     delete decoder;
+-#endif // USING_MINGW
+ }
+ 
+diff --git a/mythplugins/mythmusic/mythmusic/decoder.cpp b/mythplugins/mythmusic/mythmusic/decoder.cpp
+index 7a0e924..cc439b0 100644
+--- a/mythplugins/mythmusic/mythmusic/decoder.cpp
++++ b/mythplugins/mythmusic/mythmusic/decoder.cpp
+@@ -181,9 +181,7 @@ static void checkFactories()
+     {
+         factories = new QList<DecoderFactory*>;
+ 
+-#ifndef USING_MINGW
+         Decoder::registerFactory(new CdDecoderFactory);
+-#endif // USING_MINGW
+         Decoder::registerFactory(new avfDecoderFactory);
+     }
+ }
+diff --git a/mythplugins/mythmusic/mythmusic/main.cpp b/mythplugins/mythmusic/mythmusic/main.cpp
+index 0e63e77..609eaf9 100644
+--- a/mythplugins/mythmusic/mythmusic/main.cpp
++++ b/mythplugins/mythmusic/mythmusic/main.cpp
+@@ -34,10 +34,8 @@
+ #include "filescanner.h"
+ #include "musicplayer.h"
+ #include "config.h"
+-#ifndef USING_MINGW
+ #include "cdrip.h"
+ #include "importmusic.h"
+-#endif
+ 
+ // System header (relies on config.h define)
+ #ifdef HAVE_CDAUDIO
+@@ -271,6 +269,7 @@ static void startRipper(void)
+ {
+     loadMusic();
+ 
++#if defined HAVE_CDAUDIO || defined HAVE_CDIO
+     MythScreenStack *mainStack = GetMythMainWindow()->GetMainStack();
+ 
+     Ripper *rip = new Ripper(mainStack, chooseCD());
+@@ -283,12 +282,14 @@ static void startRipper(void)
+     QObject::connect(rip, SIGNAL(ripFinished()),
+                      gMusicData, SLOT(reloadMusic()),
+                      Qt::QueuedConnection);
++#endif
+ }
+ 
+ static void startImport(void)
+ {
+     loadMusic();
+ 
++#if defined HAVE_CDAUDIO || defined HAVE_CDIO
+     MythScreenStack *mainStack = GetMythMainWindow()->GetMainStack();
+ 
+     ImportMusicDialog *import = new ImportMusicDialog(mainStack);
+@@ -301,6 +302,7 @@ static void startImport(void)
+     QObject::connect(import, SIGNAL(importFinished()),
+                      gMusicData, SLOT(reloadMusic()),
+                      Qt::QueuedConnection);
++#endif
+ }
+ 
+ static void MusicCallback(void *data, QString &selection)
+@@ -395,6 +397,7 @@ static void runRipCD(void)
+ {
+     loadMusic();
+ 
++#if defined HAVE_CDAUDIO || defined HAVE_CDIO
+     MythScreenStack *mainStack = GetMythMainWindow()->GetMainStack();
+ 
+     Ripper *rip = new Ripper(mainStack, chooseCD());
+@@ -407,6 +410,7 @@ static void runRipCD(void)
+     QObject::connect(rip, SIGNAL(ripFinished()),
+                      gMusicData, SLOT(reloadMusic()),
+                      Qt::QueuedConnection);
++#endif
+ }
+ 
+ static void runScan(void)
+diff --git a/mythplugins/mythmusic/mythmusic/musiccommon.cpp b/mythplugins/mythmusic/mythmusic/musiccommon.cpp
+index 82c99ca..f40d529 100755
+--- a/mythplugins/mythmusic/mythmusic/musiccommon.cpp
++++ b/mythplugins/mythmusic/mythmusic/musiccommon.cpp
+@@ -32,9 +32,7 @@ using namespace std;
+ #include "search.h"
+ #include "editmetadata.h"
+ 
+-#ifndef USING_MINGW
+ #include "cddecoder.h"
+-#endif // USING_MINGW
+ 
+ #include "musiccommon.h"
+ //#include "playlistview.h"
+diff --git a/mythplugins/mythmusic/mythmusic/mythmusic.pro b/mythplugins/mythmusic/mythmusic/mythmusic.pro
+index 3ba7a5f..58ad184 100644
+--- a/mythplugins/mythmusic/mythmusic/mythmusic.pro
++++ b/mythplugins/mythmusic/mythmusic/mythmusic.pro
+@@ -9,7 +9,7 @@ QT += xml sql opengl qt3support network
+    error(Missing config.pro: please run the configure script)
+ }
+ 
+-INCLUDEPATH *= $${SYSROOT}/usr/include/cdda
++paranoia:INCLUDEPATH *= $${SYSROOT}/usr/include/cdda
+ TEMPLATE = lib
+ CONFIG += plugin thread
+ TARGET = mythmusic
+@@ -65,7 +65,17 @@ SOURCES += playlistcontainer.cpp
+ SOURCES += mythlistview-qt3.cpp mythlistbox-qt3.cpp
+ SOURCES += musiccommon.cpp decoderhandler.cpp pls.cpp shoutcast.cpp
+ 
+-macx {
++cdio {
++    INCLUDEPATH -= $${SYSROOT}/usr/include/cdda
++    INCLUDEPATH *= $${SYSROOT}/usr/include/cdio
++    HEADERS += cddb.h
++    SOURCES -= cddecoder.cpp
++    SOURCES += cddecoder-cdio.cpp cddb.cpp
++    QT += network
++    cdaudio: LIBS -= -lcdaudio
++    paranoia:LIBS -= -lcdda_paranoia -lcdda_interface
++    LIBS += -lcdio -lcdio_cdda -lcdio_paranoia
++} else macx {
+     SOURCES -= cddecoder.cpp
+     SOURCES += cddecoder-darwin.cpp
+ 
+@@ -73,13 +83,15 @@ macx {
+ }
+ 
+ mingw {
+-    HEADERS -= cdrip.h   importmusic.h
+-    SOURCES -= cdrip.cpp importmusic.cpp cddecoder.cpp
+-    SOURCES += cddecoder-windows.cpp
++    !cdio {
++        HEADERS -= cdrip.h   importmusic.h
++        SOURCES -= cdrip.cpp importmusic.cpp cddecoder.cpp
++        SOURCES += cddecoder-windows.cpp
++    }
+ 
+     LIBS += -logg
+ 
+-    # libcdaudio needs ...
++    # flac needs ...
+     LIBS += -lwsock32
+ }
+ 
+diff --git a/mythplugins/mythmusic/mythmusic/playbackbox.cpp b/mythplugins/mythmusic/mythmusic/playbackbox.cpp
+index 291617b..d21f689 100644
+--- a/mythplugins/mythmusic/mythmusic/playbackbox.cpp
++++ b/mythplugins/mythmusic/mythmusic/playbackbox.cpp
+@@ -33,10 +33,6 @@ using namespace std;
+ #include "playlistcontainer.h"
+ #include "search.h"
+ 
+-#ifndef USING_MINGW
+-#include "cddecoder.h"
+-#endif // USING_MINGW
+-
+ PlaybackBoxMusic::PlaybackBoxMusic(MythMainWindow *parent, QString window_name,
+                                    QString theme_filename, const QString &dev, const char *name)
+ 
+@@ -468,7 +464,8 @@ void PlaybackBoxMusic::keyPressEvent(QKeyEvent *e)
+                                             160, 160);
+                 mainvisual->setVisual(visual_modes[current_visual]);
+                 bannerDisable();
+-                updateTrackInfo(curMeta);
++                if (curMeta)
++                    updateTrackInfo(curMeta);
+ 
+                 if (!m_parent->IsExitingToMain())
+                     handled = true;
+@@ -970,7 +967,7 @@ void PlaybackBoxMusic::postUpdate()
+ 
+ void PlaybackBoxMusic::occasionallyCheckCD()
+ {
+-    if (!cd_reader_thread->getLock()->tryLock())
++    if (!cd_reader_thread || !cd_reader_thread->getLock()->tryLock())
+         return;
+     cd_reader_thread->getLock()->unlock();
+ 
+@@ -1068,7 +1065,8 @@ void PlaybackBoxMusic::showEditMetadataDialog()
+ 
+         GenericTree *node = music_tree_list->getCurrentNode();
+         curMeta = gMusicData->all_music->getMetadata(node->getInt());
+-        updateTrackInfo(curMeta);
++        if (curMeta)
++            updateTrackInfo(curMeta);
+ 
+         setShuffleMode(gPlayer->getShuffleMode());
+ 
+@@ -1106,6 +1104,9 @@ void PlaybackBoxMusic::checkForPlaylists()
+                 if (scan_for_cd)
+                     updatePlaylistFromCD();
+ 
++                bool bLocked = cd_reader_thread ?
++                    cd_reader_thread->getLock()->lock(), true : false;
++
+                 music_tree_list->showWholeTree(show_whole_tree);
+                 Q3ValueList <int> branches_to_current_node;
+                 branches_to_current_node.append(0); //  Root node
+@@ -1135,6 +1136,8 @@ void PlaybackBoxMusic::checkForPlaylists()
+                 if (curMeta)
+                     updateTrackInfo(curMeta);
+ 
++                if (bLocked && cd_reader_thread)
++                    cd_reader_thread->getLock()->unlock();
+                 return;     // Do not restart Timer
+             }
+             else
+@@ -1357,7 +1360,8 @@ void PlaybackBoxMusic::play()
+             gPlayer->getOutput()->SetTimecode(0);
+     }
+ 
+-    bannerEnable(curMeta, show_album_art);
++    if (curMeta)
++        bannerEnable(curMeta, show_album_art);
+ }
+ 
+ void PlaybackBoxMusic::visEnable()
+@@ -1388,7 +1392,7 @@ void PlaybackBoxMusic::bannerToggle(Metadata *mdata)
+ {
+     if (mainvisual->bannerIsShowing())
+         bannerDisable();
+-    else
++    else if (mdata)
+         bannerEnable(mdata, false);
+ }
+ 
+@@ -1801,7 +1805,8 @@ void PlaybackBoxMusic::restorePosition(const QString &position)
+                         if (node)
+                         {
+                             curMeta = gMusicData->all_music->getMetadata(node->getInt());
+-                            updateTrackInfo(curMeta);
++                            if (curMeta)
++                                updateTrackInfo(curMeta);
+ 
+                             maxTime = curMeta->Length() / 1000;
+ 
+@@ -1827,7 +1832,8 @@ void PlaybackBoxMusic::restorePosition(const QString &position)
+                     if (node)
+                     {
+                         curMeta = gMusicData->all_music->getMetadata(node->getInt());
+-                        updateTrackInfo(curMeta);
++                        if (curMeta)
++                            updateTrackInfo(curMeta);
+ 
+                         maxTime = curMeta->Length() / 1000;
+ 
+@@ -2069,24 +2075,27 @@ void PlaybackBoxMusic::wipeTrackInfo()
+ 
+ void PlaybackBoxMusic::updateTrackInfo(Metadata *mdata)
+ {
+-    if (visualizer_status != 2)
++    if (mdata)
+     {
+-        if (title_text)
+-            title_text->SetText(mdata->FormatTitle());
+-        if (artist_text)
+-            artist_text->SetText(mdata->FormatArtist());
+-        if (album_text)
+-            album_text->SetText(mdata->Album());
+-        if (albumart_image)
+-            showAlbumArtImage(mdata);
+-
+-        if (showrating)
++        if (visualizer_status != 2)
+         {
+-            if (ratings_image)
+-                ratings_image->setRepeat(mdata->Rating());
++            if (title_text)
++                title_text->SetText(mdata->FormatTitle());
++            if (artist_text)
++                artist_text->SetText(mdata->FormatArtist());
++            if (album_text)
++                album_text->SetText(mdata->Album());
++            if (albumart_image)
++                showAlbumArtImage(mdata);
++
++            if (showrating)
++            {
++                if (ratings_image)
++                    ratings_image->setRepeat(mdata->Rating());
++            }
+         }
++        setTrackOnLCD(mdata);
+     }
+-    setTrackOnLCD(mdata);
+ }
+ 
+ void PlaybackBoxMusic::showAlbumArtImage(Metadata *mdata)
+@@ -2164,8 +2173,8 @@ void PlaybackBoxMusic::handleTreeListSignals(int node_int, IntVector *attributes
+         }
+ 
+         curMeta = gMusicData->all_music->getMetadata(node_int);
+-
+-        updateTrackInfo(curMeta);
++        if (curMeta)
++            updateTrackInfo(curMeta);
+ 
+         maxTime = curMeta->Length() / 1000;
+ 
+-- 
+1.7.9.5
+

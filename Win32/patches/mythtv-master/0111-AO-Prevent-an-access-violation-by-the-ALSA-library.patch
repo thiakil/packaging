@@ -1,0 +1,90 @@
+From 7e8f8e575d2a1704b269293b3a565f968d091a22 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 6 Jun 2012 18:31:46 +0200
+Subject: [PATCH 111/202] AO: Prevent an access violation by the ALSA library
+
+In audiooutputalsa.cpp, AudioOutputALSA::GetALSADevices calls the
+ALSA API snd_device_name_hint with a card index of -1 to obtain a list
+of hints for all cards.  Unfortunately, with libasound.so.2.0 this API
+can cause an access violation when the card index is -1.
+
+Running with valgrind shows that snd_device_name_hint makes reference
+to previously freed memory when the card index is -1.
+
+This patch enumerates the cards using other ALSA APIs, thus avoiding
+the SEGV.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/audio/audiooutputalsa.cpp |   52 +++++++++++++++++--------
+ 1 file changed, 35 insertions(+), 17 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/audio/audiooutputalsa.cpp b/mythtv/libs/libmyth/audio/audiooutputalsa.cpp
+index 0d140bb..7185ff7 100644
+--- a/mythtv/libs/libmyth/audio/audiooutputalsa.cpp
++++ b/mythtv/libs/libmyth/audio/audiooutputalsa.cpp
+@@ -997,26 +997,44 @@ bool AudioOutputALSA::OpenMixer(void)
+ QMap<QString, QString> *AudioOutputALSA::GetDevices(const char *type)
+ {
+     QMap<QString, QString> *alsadevs = new QMap<QString, QString>();
+-    void **hints, **n;
+-    char *name, *desc;
+ 
+-    if (snd_device_name_hint(-1, type, &hints) < 0)
+-        return alsadevs;
+-    n = hints;
+-
+-    while (*n != NULL)
++    // Loop through the sound cards to get Alsa device hints.
++    // NB Don't use snd_device_name_hint(-1,..) since there is a potential
++    // access violation using this ALSA API with libasound.so.2.0.0.
++    // See http://code.google.com/p/chromium/issues/detail?id=95797
++    int card = -1;
++    while (!snd_card_next(&card) && card >= 0)
+     {
+-          name = snd_device_name_get_hint(*n, "NAME");
+-          desc = snd_device_name_get_hint(*n, "DESC");
+-          if (name && desc && strcmp(name, "null"))
+-              alsadevs->insert(name, desc);
+-          if (name)
+-              free(name);
+-          if (desc)
+-              free(desc);
+-          n++;
++        void** hints = NULL;
++        int error = snd_device_name_hint(card, type, &hints);
++        if (error == 0)
++        {
++            void *hint;
++            for (int i = 0; (hint = hints[i]) != NULL; ++i)
++            {
++                char *name = snd_device_name_get_hint(hint, "NAME");
++                if (name)
++                {
++                    char *desc = snd_device_name_get_hint(hint, "DESC");
++                    if (desc)
++                    {
++                        if (strcmp(name, "null"))
++                            alsadevs->insert(name, desc);
++                        free(desc);
++                    }
++                    free(name);
++                }
++            }
++
++            snd_device_name_free_hint(hints);
++        }
++        else
++        {
++            VBERROR(QString("Failed to get device hints for card %1, error %2")
++                    .arg(card).arg(error));
++        }
+     }
+-    snd_device_name_free_hint(hints);
++
+         // Work around ALSA bug < 1.0.22 ; where snd_device_name_hint can corrupt
+         // global ALSA memory context
+ #if SND_LIB_MAJOR == 1
+-- 
+1.7.9.5
+

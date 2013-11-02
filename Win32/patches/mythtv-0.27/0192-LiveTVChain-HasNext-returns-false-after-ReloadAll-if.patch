@@ -1,0 +1,38 @@
+From 33f774b422cfcfe7ae36753030a29255ae1d43b6 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 30 Sep 2013 17:35:56 +0100
+Subject: [PATCH 192/207] LiveTVChain: HasNext returns false after ReloadAll
+ if current program not found
+
+If the new livetvchain doesn't contain the current program then currently
+the current position is set to 0.  This causes HasNext to return true,
+implying that the current recording is ending.  This cause problems for
+fileringbuffer which sets the oldfile flag if the recording is about to end.
+
+This patch sets current position to size() -1 if the current program is not
+contained in the new livetvchain.  This allows fileringbuffer to avaid
+the incorrect HasNext indication.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/livetvchain.cpp |    4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/livetvchain.cpp b/mythtv/libs/libmythtv/livetvchain.cpp
+index 14cdb07..5f7b0ab 100644
+--- a/mythtv/libs/libmythtv/livetvchain.cpp
++++ b/mythtv/libs/libmythtv/livetvchain.cpp
+@@ -248,8 +248,8 @@ void LiveTVChain::ReloadAll(const QStringList &data)
+     }
+ 
+     m_curpos = ProgramIsAt(m_cur_chanid, m_cur_startts);
+-    if (m_curpos < 0)
+-        m_curpos = 0;
++    if (m_curpos < 0 && m_cur_chanid > 0)
++        m_curpos = m_chain.count() - 1;
+ 
+     if (m_switchid >= 0)
+         m_switchid = ProgramIsAt(m_switchentry.chanid,m_switchentry.starttime);
+-- 
+1.7.9.5
+

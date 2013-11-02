@@ -1,0 +1,27 @@
+From af64c23894141adb8f2b5f2c16a351f8815fcea2 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 3 Oct 2012 14:55:01 +0200
+Subject: [PATCH 067/207] mythfrontend: Omit min stars from 'new
+ titles'/premiers search for UK EIT
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythfrontend/proglist.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/programs/mythfrontend/proglist.cpp b/mythtv/programs/mythfrontend/proglist.cpp
+index 4bde4b6..8665983 100644
+--- a/mythtv/programs/mythfrontend/proglist.cpp
++++ b/mythtv/programs/mythfrontend/proglist.cpp
+@@ -1206,7 +1206,7 @@ void ProgLister::FillItemList(bool restorePosition, bool updateDisp)
+             where += "      AND (program.category = 'Special' ";
+             where += "        OR program.programid LIKE 'EP%0001')) ";
+             where += "    OR (program.category_type='movie' ";
+-            where += "      AND program.stars > 0.5 ";
++//            where += "      AND program.stars > 0.5 ";
+             where += "      AND program.airdate >= YEAR(NOW()) - 2) ";
+             where += "  ) ";
+         }
+-- 
+1.7.9.5
+

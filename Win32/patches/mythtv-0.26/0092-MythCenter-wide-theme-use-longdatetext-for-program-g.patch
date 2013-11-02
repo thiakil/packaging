@@ -1,0 +1,36 @@
+From 4513193ad929c1d2b107a584fcff46cf165efc27 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 26 Jul 2012 13:26:12 +0200
+Subject: [PATCH 092/227] MythCenter-wide-theme use longdatetext for program
+ guide
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/themes/MythCenter-wide/schedule-ui.xml |    4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/themes/MythCenter-wide/schedule-ui.xml b/mythtv/themes/MythCenter-wide/schedule-ui.xml
+index 4674dcc..1785c49 100644
+--- a/mythtv/themes/MythCenter-wide/schedule-ui.xml
++++ b/mythtv/themes/MythCenter-wide/schedule-ui.xml
+@@ -39,7 +39,7 @@
+             <cornerradius>10</cornerradius>
+         </shape>
+ 
+-        <textarea name="datetext" from="basetextarea">
++        <textarea name="longdatetext" from="basetextarea">
+             <area>26,244,190,26</area>
+             <align>top,hcenter</align>
+         </textarea>
+@@ -238,7 +238,7 @@
+             <area>940,50,300,170</area>
+         </imagetype>
+ 
+-        <textarea name="datetext" from="basetextarea">
++        <textarea name="longdatetext" from="basetextarea">
+             <area>24,244,190,26</area>
+             <align>top,hcenter</align>
+         </textarea>
+-- 
+1.7.9.5
+

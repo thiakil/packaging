@@ -1,0 +1,21 @@
+# Fix 2 problems when building for MacOSX
+--- qt-everywhere-opensource-src-4.7.0.orig/qmake/generators/unix/unixmake.cpp	2010-09-10 11:04:41.000000000 +0200
++++ qt-everywhere-opensource-src-4.7.0/qmake/generators/unix/unixmake.cpp	2011-02-26 12:32:07.000000000 +0100
+@@ -734,7 +734,7 @@ UnixMakefileGenerator::defaultInstall(co
+         if(bundle) {
+             if(!ret.isEmpty())
+                 ret += "\n\t";
+-            ret += "$(DEL_FILE) -r \"" + dst_targ + "\"\n\t";
++            ret += "$(DEL_FILE) -r \"" + dst_targ + "\"";
+         }
+         if(!ret.isEmpty())
+             ret += "\n\t";
+@@ -773,7 +773,7 @@ UnixMakefileGenerator::defaultInstall(co
+             else if(project->first("TEMPLATE") == "app" && !project->isEmpty("QMAKE_STRIPFLAGS_APP"))
+                 ret += " " + var("QMAKE_STRIPFLAGS_APP");
+             if(bundle)
+-                ret = " \"" + dst_targ + "/Contents/MacOS/$(QMAKE_TARGET)\"";
++                ret += " \"" + dst_targ + "/Contents/MacOS/$(QMAKE_TARGET)\"";
+             else
+                 ret += " \"" + dst_targ + "\"";
+         }

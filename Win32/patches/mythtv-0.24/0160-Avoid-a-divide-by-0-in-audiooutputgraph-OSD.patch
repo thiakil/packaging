@@ -1,0 +1,26 @@
+From 3eedd1411ade4d2c72d3b7e409f4e76d803670dd Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 25 Jan 2013 18:42:08 +0000
+Subject: [PATCH 160/285] Avoid a divide by 0 in audiooutputgraph OSD
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/audiooutputgraph.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmyth/audiooutputgraph.cpp b/mythtv/libs/libmyth/audiooutputgraph.cpp
+index 9791916..cfc7af5 100644
+--- a/mythtv/libs/libmyth/audiooutputgraph.cpp
++++ b/mythtv/libs/libmyth/audiooutputgraph.cpp
+@@ -138,7 +138,7 @@ protected:
+ 
+     inline unsigned long Samples2MS(unsigned samples) const
+     {
+-        return (samples * 1000UL + m_sample_rate - 1) / m_sample_rate; // round up
++        return m_sample_rate ? (samples * 1000UL + m_sample_rate - 1) / m_sample_rate : 0; // round up
+     }
+ 
+     inline unsigned MS2Samples(int64_t ms) const
+-- 
+1.7.9.5
+

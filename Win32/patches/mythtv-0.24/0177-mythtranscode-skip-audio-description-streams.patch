@@ -1,0 +1,40 @@
+From e660dfa221a1b847b7be8d557ebc75d70b02df02 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 20 Mar 2013 13:51:07 +0000
+Subject: [PATCH 177/285] mythtranscode: skip audio description streams
+
+A number of recent broadcasts on UK Freeview (BBC & ITV) have an
+audio description (AD) stream that is discontiguous.  Mythtranscode attempts
+to output all audio streams but if the AD stream is not present for
+some time then the output FIFOs overflow.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythtranscode/mpeg2fix.cpp |    7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/programs/mythtranscode/mpeg2fix.cpp b/mythtv/programs/mythtranscode/mpeg2fix.cpp
+index 170d24e..5980c2e 100644
+--- a/mythtv/programs/mythtranscode/mpeg2fix.cpp
++++ b/mythtv/programs/mythtranscode/mpeg2fix.cpp
+@@ -813,12 +813,15 @@ int MPEG2fixup::InitAV(const char *inputfile, const char *type, int64_t offset)
+                 break;
+ 
+             case CODEC_TYPE_AUDIO:
+-                if (inputFC->streams[i]->codec->channels == 0)
++                if (ext_count > 0 &&
++                    inputFC->streams[i]->codec->channels < 2 &&
++                    inputFC->streams[i]->codec->sample_rate < 100000)
+                 {
+                     VERBOSE(MPF_GENERAL, QString(
+-                            "Skipping invalid audio stream: %1").arg(i));
++                            "Skipping audio stream: %1").arg(i));
+                     break;
+                 }
++
+                 if (inputFC->streams[i]->codec->codec_id == CODEC_ID_AC3 ||
+                     inputFC->streams[i]->codec->codec_id == CODEC_ID_MP3 ||
+                     inputFC->streams[i]->codec->codec_id == CODEC_ID_MP2)
+-- 
+1.7.9.5
+

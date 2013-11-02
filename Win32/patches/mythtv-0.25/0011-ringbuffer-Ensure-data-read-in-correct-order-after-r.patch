@@ -1,0 +1,70 @@
+From 9dee6084cc48f0ec7e56dd0671f3c919394763df Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 6 Aug 2012 15:45:53 +0200
+Subject: [PATCH 011/124] ringbuffer: Ensure data read in correct order after
+ read timeout
+
+Fix a bug in RingBuffer::ReadPriv where if WaitForReadsAllowed times out
+then the next read would cause data to be returned out of sequence
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/ringbuffer.cpp |   18 ++++++++++--------
+ 1 file changed, 10 insertions(+), 8 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/ringbuffer.cpp b/mythtv/libs/libmythtv/ringbuffer.cpp
+index 113bc1a..1ba26f6 100644
+--- a/mythtv/libs/libmythtv/ringbuffer.cpp
++++ b/mythtv/libs/libmythtv/ringbuffer.cpp
+@@ -1159,7 +1159,7 @@ int RingBuffer::ReadDirect(void *buf, int count, bool peek)
+         if (new_pos != old_pos)
+         {
+             LOG(VB_GENERAL, LOG_ERR, LOC +
+-                QString("Peek() Failed to return from new "
++                QString("Seek() Failed to return from new "
+                         "position %1 to old position %2, now "
+                         "at position %3")
+                     .arg(old_pos - ret).arg(old_pos).arg(new_pos));
+@@ -1179,12 +1179,14 @@ int RingBuffer::ReadDirect(void *buf, int count, bool peek)
+  */
+ int RingBuffer::ReadPriv(void *buf, int count, bool peek)
+ {
+-    QString loc_desc = QString("ReadPriv(..%1, %2)")
++    const QString loc_desc = QString("ReadPriv(..%1, %2)")
+         .arg(count).arg(peek?"peek":"normal");
+-    LOG(VB_FILE, LOG_DEBUG, LOC + loc_desc +
+-        QString(" @%1 -- begin").arg(rbrpos));
+ 
+     rwlock.lockForRead();
++
++    LOG(VB_FILE, LOG_DEBUG, LOC + loc_desc +
++        QString(" @%1 avail=%2 -- begin").arg(rbrpos).arg(ReadBufAvail()));
++
+     if (writemode)
+     {
+         LOG(VB_GENERAL, LOG_ERR, LOC + loc_desc +
+@@ -1215,6 +1217,7 @@ int RingBuffer::ReadPriv(void *buf, int count, bool peek)
+         if (request_pause || stopreads ||
+             !readaheadrunning || (ignorereadpos >= 0))
+         {
++            LOG(VB_FILE, LOG_DEBUG, LOC + loc_desc + " -- direct read");
+             int ret = ReadDirect(buf, count, peek);
+             LOG(VB_FILE, LOG_DEBUG, LOC + loc_desc +
+                 QString(": ReadDirect checksum %1")
+@@ -1229,10 +1232,9 @@ int RingBuffer::ReadPriv(void *buf, int count, bool peek)
+     if (!WaitForReadsAllowed())
+     {
+         LOG(VB_FILE, LOG_NOTICE, LOC + loc_desc + ": !WaitForReadsAllowed()");
+-        rwlock.unlock();
+-        stopreads = true; // this needs to be outside the lock
+-        rwlock.lockForWrite();
+-        wanttoread = 0;
++        // NB don't set stopreads or else the next ReadPriv will call ReadDirect
++        // which, if there's any readahead, will cause data to be returned out
++        // of sequence
+         rwlock.unlock();
+         return 0;
+     }
+-- 
+1.7.9.5
+

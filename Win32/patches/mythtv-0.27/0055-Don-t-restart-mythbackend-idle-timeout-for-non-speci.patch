@@ -1,0 +1,92 @@
+From 54e5d60c30b17158f97e5d47f41963b9fb240aa1 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 17 Apr 2012 15:47:38 +0200
+Subject: [PATCH 055/207] Don't restart mythbackend idle timeout for
+ non-specific reschedules
+
+This enables mythbackend to shutdown when using the EIT scanner.
+
+The EIT scanner calls EITScanner::RescheduleRecordings() when a program change
+is detected.  If the previous call to this function was more than 150 seconds
+ago it in turn calls ScheduledRecording::signalChange with a recordid of -1
+(all recordids).  When the scheduler runs and sees a reschedule request it
+restarts the idle timeout.
+
+Therefore, if the mythbackend idle timeout is set to more than 150 seconds, a
+common situation, then the scheduler will never become idle.
+
+This fix prevents the scheduler from interupting an idle timeout if the
+recordid is -1 (all records).
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythbackend/scheduler.cpp |   11 +++++++----
+ mythtv/programs/mythbackend/scheduler.h   |    2 +-
+ 2 files changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/mythtv/programs/mythbackend/scheduler.cpp b/mythtv/programs/mythbackend/scheduler.cpp
+index ffbeb6d..c01053f 100644
+--- a/mythtv/programs/mythbackend/scheduler.cpp
++++ b/mythtv/programs/mythbackend/scheduler.cpp
+@@ -1853,6 +1853,7 @@ void Scheduler::run(void)
+         }
+ 
+         nextWakeTime = min(nextWakeTime, nextStartTime);
++        bool isIdle = false;
+         QDateTime curtime = MythDate::current();
+         int secs_to_next = curtime.secsTo(nextStartTime);
+         int sched_sleep = max(curtime.msecsTo(nextWakeTime), qint64(0));
+@@ -1892,7 +1893,7 @@ void Scheduler::run(void)
+                                                 15);
+ 
+                 QTime t; t.start();
+-                if (HandleReschedule())
++                if (HandleReschedule(isIdle))
+                 {
+                     statuschanged = true;
+                     startIter = reclist.begin();
+@@ -1968,8 +1969,8 @@ void Scheduler::run(void)
+         {
+             MythEvent me("SCHEDULE_CHANGE");
+             gCoreContext->dispatch(me);
+-// a scheduler run has nothing to do with the idle shutdown
+-//            idleSince = QDateTime();
++            if (!isIdle)
++                idleSince = QDateTime();
+         }
+ 
+         // if idletimeout is 0, the user disabled the auto-shutdown feature
+@@ -2063,7 +2064,7 @@ void Scheduler::ResetDuplicates(uint recordid, uint findid,
+     }
+  }
+ 
+-bool Scheduler::HandleReschedule(void)
++bool Scheduler::HandleReschedule(bool &isIdle)
+ {
+     // We might have been inactive for a long time, so make
+     // sure our DB connection is fresh before continuing.
+@@ -2104,6 +2105,8 @@ bool Scheduler::HandleReschedule(void)
+             }
+ 
+             uint recordid = tokens[1].toUInt();
++            if (recordid == 0)
++                isIdle = true;
+             uint sourceid = tokens[2].toUInt();
+             uint mplexid = tokens[3].toUInt();
+             QDateTime maxstarttime = MythDate::fromString(tokens[4]);
+diff --git a/mythtv/programs/mythbackend/scheduler.h b/mythtv/programs/mythbackend/scheduler.h
+index df5a1d7..2e8e34d 100644
+--- a/mythtv/programs/mythbackend/scheduler.h
++++ b/mythtv/programs/mythbackend/scheduler.h
+@@ -163,7 +163,7 @@ class Scheduler : public MThread, public MythScheduler
+     void ResetDuplicates(uint recordid, uint findid, const QString &title,
+                          const QString &subtitle, const QString &descrip,
+                          const QString &programid);
+-    bool HandleReschedule(void);
++    bool HandleReschedule(bool &isIdle);
+     bool HandleRunSchedulerStartup(
+         int prerollseconds, int idleWaitForRecordingTime);
+     void HandleWakeSlave(RecordingInfo &ri, int prerollseconds);
+-- 
+1.7.9.5
+

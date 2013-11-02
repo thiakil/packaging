@@ -1,0 +1,36 @@
+From df81eb19fef6485e5564d79e11947b45c9f4e63a Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 21 Aug 2013 17:19:52 +0100
+Subject: [PATCH 171/202] ALSA: Reload the saved volume level for user defined
+ mixer controls
+
+If ALSA is configured with a user defined mixer control name other
+than PCM or master then the user set volume is not preserved across
+player instances.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/audio/audiooutputalsa.cpp |    7 ++-----
+ 1 file changed, 2 insertions(+), 5 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/audio/audiooutputalsa.cpp b/mythtv/libs/libmyth/audio/audiooutputalsa.cpp
+index 7185ff7..a960887 100644
+--- a/mythtv/libs/libmyth/audio/audiooutputalsa.cpp
++++ b/mythtv/libs/libmyth/audio/audiooutputalsa.cpp
+@@ -982,11 +982,8 @@ bool AudioOutputALSA::OpenMixer(void)
+ 
+     if (set_initial_vol)
+     {
+-        int initial_vol;
+-        if (m_mixer.control == "PCM")
+-            initial_vol = gCoreContext->GetNumSetting("PCMMixerVolume", 80);
+-        else
+-            initial_vol = gCoreContext->GetNumSetting("MasterMixerVolume", 80);
++        QString controlLabel = m_mixer.control + "MixerVolume";
++        int initial_vol = gCoreContext->GetNumSetting(controlLabel, 80);
+         for (int ch = 0; ch < channels; ++ch)
+             SetVolumeChannel(ch, initial_vol);
+     }
+-- 
+1.7.9.5
+

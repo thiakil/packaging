@@ -1,0 +1,357 @@
+From 8dade561a223eb0877cd650a38f29a891034f505 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 19 Jul 2011 14:49:12 +0200
+Subject: [PATCH 058/285] MythPlayer: Add support for InteractiveTV streams
+
+This patch adds functionality to MythPlayer to enable interactive TV content
+to select altenative streamed media for display.
+
+NB this patch needs to be applied together with that for InteractionChannel
+streaming.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |    3 +
+ mythtv/libs/libmythtv/interactivetv.cpp   |   18 +--
+ mythtv/libs/libmythtv/interactivetv.h     |    2 +
+ mythtv/libs/libmythtv/mythplayer.cpp      |  169 ++++++++++++++++++++++++++---
+ mythtv/libs/libmythtv/mythplayer.h        |    7 ++
+ 5 files changed, 176 insertions(+), 23 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index 969e212..1a112e0 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -2169,6 +2169,9 @@ int AvFormatDecoder::ScanStreams(bool novideo)
+         }
+     }
+ 
++    if (bitrate == 0 && ic->bit_rate > 0)
++        bitrate = (uint)ic->bit_rate;
++
+     if (bitrate > 0)
+     {
+         bitrate = (bitrate + 999) / 1000;
+diff --git a/mythtv/libs/libmythtv/interactivetv.cpp b/mythtv/libs/libmythtv/interactivetv.cpp
+index 98180d3..3d588d9 100644
+--- a/mythtv/libs/libmythtv/interactivetv.cpp
++++ b/mythtv/libs/libmythtv/interactivetv.cpp
+@@ -20,14 +20,11 @@ InteractiveTV::InteractiveTV(MythPlayer *nvp)
+ {
+     Restart(0, 0, false);
+ 
+-    if (VERBOSE_LEVEL_CHECK(VB_MHEG))
+-    {
+-        MHSetLogging(stdout, MHLogAll);
+-    }
+-    else
+-    {
+-        MHSetLogging(stdout, MHLogError);
+-    }
++    MHSetLogging(stdout,
++        VERBOSE_LEVEL_CHECK(VB_MHEG|VB_EXTRA) ? MHLogAll :
++        VERBOSE_LEVEL_CHECK(VB_MHEG) ?
++            MHLogError | MHLogWarning | MHLogNotifications /*| MHLogLinks | MHLogActions | MHLogDetail*/ :
++        MHLogError | MHLogWarning );
+ }
+ 
+ InteractiveTV::~InteractiveTV()
+@@ -82,3 +79,8 @@ void InteractiveTV::SetNetBootInfo(const unsigned char *data, uint length)
+ {
+     m_context->SetNetBootInfo(data, length);
+ }
++
++bool InteractiveTV::StreamStarted(bool bStarted)
++{
++    return m_context->StreamStarted(bStarted);
++}
+diff --git a/mythtv/libs/libmythtv/interactivetv.h b/mythtv/libs/libmythtv/interactivetv.h
+index 0739390..52818dd 100644
+--- a/mythtv/libs/libmythtv/interactivetv.h
++++ b/mythtv/libs/libmythtv/interactivetv.h
+@@ -39,6 +39,8 @@ class InteractiveTV
+ 
+     // Get the initial component tags.
+     void GetInitialStreams(int &audioTag, int &videoTag);
++    // Called when a stream starts or stops. Returns true if event is handled
++    bool StreamStarted(bool bStarted = true);
+ 
+     MythPlayer *GetNVP(void) { return m_nvp; }
+ 
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 651c1b7..a3e5a10 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -907,7 +907,7 @@ int MythPlayer::OpenFile(uint retries, bool allow_libmpeg2)
+     if (!player_ctx || !player_ctx->buffer)
+         return -1;
+ 
+-    livetv = player_ctx->tvchain;
++    livetv = player_ctx->tvchain && player_ctx->buffer->LiveMode();
+ 
+     if (player_ctx->tvchain &&
+         player_ctx->tvchain->GetCardType(player_ctx->tvchain->GetCurPos()) ==
+@@ -932,7 +932,8 @@ int MythPlayer::OpenFile(uint retries, bool allow_libmpeg2)
+         MythTimer peekTimer; peekTimer.start();
+         while (player_ctx->buffer->Peek(testbuf, testreadsize) != testreadsize)
+         {
+-            if (peekTimer.elapsed() > 1000 || bigTimer.elapsed() > timeout)
++            // NB need to allow for streams encountering network congestion
++            if (peekTimer.elapsed() > 30000 || bigTimer.elapsed() > timeout)
+             {
+                 VERBOSE(VB_IMPORTANT, LOC_ERR +
+                         QString("OpenFile(): Could not read "
+@@ -942,7 +943,7 @@ int MythPlayer::OpenFile(uint retries, bool allow_libmpeg2)
+                 return -1;
+             }
+             VERBOSE(VB_IMPORTANT, LOC_WARN + "OpenFile() waiting on data");
+-            usleep(50 * 1000);
++            usleep(150 * 1000);
+         }
+ 
+         player_ctx->LockPlayingInfo(__FILE__, __LINE__);
+@@ -1852,6 +1853,7 @@ void MythPlayer::DisplayPauseFrame(void)
+     SetBuffering(false);
+ 
+     RefreshPauseFrame();
++    PreProcessNormalFrame(); // Allow interactiveTV to draw on pause frame
+ 
+     osdLock.lock();
+     videofiltersLock.lock();
+@@ -1915,7 +1917,7 @@ bool MythPlayer::PrebufferEnoughFrames(bool pause_audio, int min_buffers)
+             // to recover from serious problems if frames get leaked.
+             DiscardVideoFrames(true);
+         }
+-        if (waited_for > 20000) // 20 seconds
++        if (waited_for > 30000) // 30 seconds for internet streamed media
+         {
+             VERBOSE(VB_IMPORTANT, LOC_ERR +
+                 "Waited too long for decoder to fill video buffers. Exiting..");
+@@ -2531,6 +2533,16 @@ void MythPlayer::EventLoop(void)
+         JumpToProgram();
+     }
+ 
++    // Change interactive stream if requested
++    { QMutexLocker locker(&itvLock);
++    if (!m_newStream.isEmpty())
++    {
++        QString stream = m_newStream;
++        m_newStream.clear();
++        locker.unlock();
++        JumpToStream(stream);
++    }}
++
+     // Disable fastforward if we are too close to the end of the buffer
+     if (ffrew_skip > 1 && (CalcMaxFFTime(100, false) < 100))
+     {
+@@ -2568,22 +2580,25 @@ void MythPlayer::EventLoop(void)
+     }
+ 
+     // Handle end of file
+-    if (GetEof())
++    if (GetEof() && !allpaused)
+     {
+-        if (player_ctx->tvchain)
++#ifdef USING_MHEG
++        if (interactiveTV && interactiveTV->StreamStarted(false))
+         {
+-            if (!allpaused && player_ctx->tvchain->HasNext())
+-            {
+-                VERBOSE(VB_IMPORTANT, "LiveTV forcing JumpTo 1");
+-                player_ctx->tvchain->JumpToNext(true, 1);
+-                return;
+-            }
++            Pause();
++            return;
+         }
+-        else if (!allpaused)
++#endif
++
++        if (player_ctx->tvchain && player_ctx->tvchain->HasNext())
+         {
+-            SetPlaying(false);
++            VERBOSE(VB_IMPORTANT, "LiveTV forcing JumpTo 1");
++            player_ctx->tvchain->JumpToNext(true, 1);
+             return;
+         }
++
++        SetPlaying(false);
++        return;
+     }
+ 
+     // Handle rewind
+@@ -2719,7 +2734,7 @@ void MythPlayer::UnpauseDecoder(void)
+ 
+     unpauseDecoder = true;
+     int tries = 0;
+-    while (decoderPaused && decoderThread && !killdecoder && (tries++ < 1) &&
++    while (decoderPaused && decoderThread && !killdecoder && (tries++ < 10) &&
+           !decoderThreadUnpause.wait(locker.mutex(), 100))
+     {
+         VERBOSE(VB_IMPORTANT, LOC_WARN + "Waited 100ms for decoder to unpause");
+@@ -4555,6 +4570,130 @@ bool MythPlayer::SetVideoByComponentTag(int tag)
+     return false;
+ }
+ 
++static inline double SafeFPS(DecoderBase *decoder)
++{
++    if (!decoder)
++        return 25;
++    double fps = decoder->GetFPS();
++    return fps > 0 ? fps : 25.0;
++}
++
++// Called from MHIContext::Begin/End/Stream on the MHIContext::StartMHEGEngine thread
++bool MythPlayer::SetStream(const QString &stream)
++{
++    // The stream name is empty if the stream is closing
++    VERBOSE(VB_PLAYBACK, LOC + QString("SetStream '%1'").arg(stream));
++
++    QMutexLocker locker(&itvLock);
++    m_newStream = stream;
++    m_newStream.detach();
++    // Stream will be changed by JumpToStream called from EventLoop
++    // If successful will call interactiveTV->StreamStarted();
++
++    if (stream.isEmpty() && !watchingrecording && !livetv && player_ctx->tvchain)
++    {
++        // Restore livetv
++        SetEof(true);
++        player_ctx->tvchain->JumpToNext(false, 1);
++        player_ctx->tvchain->JumpToNext(true, 1);
++    }
++
++    return !stream.isEmpty();
++}
++
++void MythPlayer::JumpToStream(const QString &stream)
++{
++    VERBOSE(VB_PLAYBACK, LOC + "JumpToStream - begin");
++
++    if (stream.isEmpty())
++        return; // Shouldn't happen
++
++    Pause();
++    ResetCaptions();
++
++    ProgramInfo pginfo(stream);
++    SetPlayingInfo(pginfo);
++
++    player_ctx->buffer->Reset(true);
++    player_ctx->buffer->OpenFile(stream, 30000);
++    if (!player_ctx->buffer->IsOpen())
++    {
++        VERBOSE(VB_IMPORTANT, LOC_ERR + "JumpToStream buffer OpenFile failed");
++        SetEof(true);
++        SetErrored(QObject::tr("Error opening remote stream buffer"));
++        return;
++    }
++
++    watchingrecording = false;
++    totalLength = 0;
++    totalFrames = 0;
++    totalDuration = 0;
++
++    if (OpenFile(120) < 0) // 120 retries ~= 60 seconds
++    {
++        VERBOSE(VB_IMPORTANT, LOC_ERR + "JumpToStream OpenFile failed.");
++        SetEof(true);
++        SetErrored(QObject::tr("Error opening remote stream"));
++        return;
++    }
++
++    if (totalLength == 0)
++    {
++        long long len = player_ctx->buffer->GetRealFileSize();
++        totalLength = (int)(len / ((decoder->GetRawBitrate() * 1000) / 8));
++        totalFrames = (int)(totalLength * SafeFPS(decoder));
++    }
++    VERBOSE(VB_PLAYBACK, LOC +
++        QString("JumpToStream length %1 bytes @ %2 Kbps = %3 Secs, %4 frames @ %5 fps")
++        .arg(player_ctx->buffer->GetRealFileSize()).arg(decoder->GetRawBitrate())
++        .arg(totalLength).arg(totalFrames).arg(decoder->GetFPS()) );
++
++    SetEof(false);
++
++    // the bitrate is reset by player_ctx->buffer->OpenFile()...
++    player_ctx->buffer->UpdateRawBitrate(decoder->GetRawBitrate());
++    decoder->SetProgramInfo(pginfo);
++
++    Play();
++    ChangeSpeed();
++
++    player_ctx->SetPlayerChangingBuffers(false);
++#ifdef USING_MHEG
++    if (interactiveTV) interactiveTV->StreamStarted();
++#endif
++
++    VERBOSE(VB_PLAYBACK, LOC + "JumpToStream - end");
++}
++
++long MythPlayer::GetStreamPos()
++{
++    return (long)((1000 * GetFramesPlayed()) / SafeFPS(decoder));
++}
++
++long MythPlayer::GetStreamMaxPos()
++{
++    long maxpos = (long)(1000 * (totalDuration > 0 ? totalDuration : totalLength));
++    long pos = GetStreamPos();
++    return maxpos > pos ? maxpos : pos;
++}
++
++long MythPlayer::SetStreamPos(long ms)
++{
++    uint64_t frameNum = (uint64_t)((ms * SafeFPS(decoder)) / 1000);
++    VERBOSE(VB_PLAYBACK, LOC + QString("SetStreamPos %1 mS = frame %2, now=%3")
++        .arg(ms).arg(frameNum).arg(GetFramesPlayed()) );
++    JumpToFrame(frameNum);
++    return ms;
++}
++
++void MythPlayer::StreamPlay(bool play)
++{
++    if (play)
++        Play();
++    else
++        Pause();
++}
++
+ /** \fn MythPlayer::SetDecoder(DecoderBase*)
+  *  \brief Sets the stream decoder, deleting any existing recorder.
+  */
+diff --git a/mythtv/libs/libmythtv/mythplayer.h b/mythtv/libs/libmythtv/mythplayer.h
+index 338e569..e148ee5 100644
+--- a/mythtv/libs/libmythtv/mythplayer.h
++++ b/mythtv/libs/libmythtv/mythplayer.h
+@@ -255,6 +255,11 @@ class MPUBLIC MythPlayer
+     // Public MHEG/MHI stream selection
+     bool SetAudioByComponentTag(int tag);
+     bool SetVideoByComponentTag(int tag);
++    bool SetStream(const QString &);
++    long GetStreamPos(); // mS
++    long GetStreamMaxPos(); // mS
++    long SetStreamPos(long); // mS
++    void StreamPlay(bool play = true);
+ 
+     // LiveTV public stuff
+     void CheckTVChain();
+@@ -514,6 +519,7 @@ class MPUBLIC MythPlayer
+     // Private LiveTV stuff
+     void  SwitchToProgram(void);
+     void  JumpToProgram(void);
++    void  JumpToStream(const QString&);
+ 
+     void calcSliderPosPriv(osdInfo &info, bool paddedFields,
+                            int playbackLen, float secsplayed, bool islive);
+@@ -645,6 +651,7 @@ class MPUBLIC MythPlayer
+     InteractiveTV *interactiveTV;
+     bool       itvEnabled;
+     QMutex     itvLock;
++    QString    m_newStream; // Guarded by itvLock
+ 
+     // OSD stuff
+     OSD  *osd;
+-- 
+1.7.9.5
+

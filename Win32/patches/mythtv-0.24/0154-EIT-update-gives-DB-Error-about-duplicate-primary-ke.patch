@@ -1,0 +1,70 @@
+From a5e9dfa83989c62a2c1cb16555dd3b28fac51e9b Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 3 Oct 2012 19:50:58 +0200
+Subject: [PATCH 154/285] EIT update gives DB Error about duplicate primary
+ keys
+
+Fixes #10136
+
+2012-10-01 08:40:37.325 DB Error (change_program):
+Query was:
+UPDATE program SET starttime = ?,     endtime   = ? WHERE chanid    = ? AND       starttime = ?
+Bindings were:
+:CHANID=53235, :NEWEND=2012-10-01T16:00:00, :NEWSTART=2012-10-01T14:00:00,
+:OLDSTART=2012-10-01T13:45:00
+Driver error was [2/1062]:
+QMYSQL3: Unable to execute statement
+Database error was:
+Duplicate entry '53235-2012-10-01 14:00:00-0' for key 'PRIMARY'
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/programdata.cpp |   25 +++++++++++++++++++++++++
+ 1 file changed, 25 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/programdata.cpp b/mythtv/libs/libmythtv/programdata.cpp
+index 8b36660..c66bb69 100644
+--- a/mythtv/libs/libmythtv/programdata.cpp
++++ b/mythtv/libs/libmythtv/programdata.cpp
+@@ -620,6 +620,25 @@ static bool delete_program(MSqlQuery &query, uint chanid, const QDateTime &st)
+     return true;
+ }
+ 
++static bool program_exists(MSqlQuery &query, uint chanid, const QDateTime &st)
++{
++    query.prepare(
++        "SELECT title FROM program "
++        "WHERE chanid    = :CHANID AND "
++        "      starttime = :OLDSTART");
++    query.bindValue(":CHANID",   chanid);
++    query.bindValue(":OLDSTART", st);
++    if (!query.exec())
++    {
++        MythDB::DBError("program_exists", query);
++    }
++    if (query.next())
++    {
++        return true;
++    }
++    return false;
++}
++
+ static bool change_program(MSqlQuery &query, uint chanid, const QDateTime &st,
+                            const QDateTime &new_st, const QDateTime &new_end)
+ {
+@@ -677,6 +696,12 @@ bool DBEvent::MoveOutOfTheWayDB(
+     else if (prog.starttime < endtime && prog.endtime > endtime)
+     {
+         // starts during, but ends after our program
++        if (program_exists(query, chanid, endtime))
++        {
++            VERBOSE(VB_EIT | VB_EXTRA,
++                QString("Deleting program '%1'").arg(prog.title));
++            return delete_program(query, chanid, prog.starttime);
++        }
+         return change_program(query, chanid, prog.starttime,
+                               endtime, prog.endtime);
+     }
+-- 
+1.7.9.5
+

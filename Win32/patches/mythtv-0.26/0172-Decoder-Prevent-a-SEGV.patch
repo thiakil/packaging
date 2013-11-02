@@ -1,0 +1,43 @@
+From 579ebea89c36f2300bd144b05b7f7bff5e9b251c Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 12 Jun 2013 11:30:49 +0100
+Subject: [PATCH 172/227] Decoder: Prevent a SEGV
+
+Program terminated with signal 11, Segmentation fault.
+0  0xb6f2c821 in RingBuffer::IsDVD (this=0x0) at RingBuffer.cpp:2537
+2537	    bool ret = dvdPriv;
+(gdb) bt
+0  0xb6f2c821 in RingBuffer::IsDVD (this=0x0) at RingBuffer.cpp:2537
+1  0x0808cb29 in RingBuffer::isDVD (this=0x0)
+    at ../../libs/libmythtv/RingBuffer.h:108
+2  0xb722f0b3 in DecoderBase::DoFastForward (this=0x95875c0,
+    desiredFrame=1591, discardFrames=true) at decoderbase.cpp:649
+3  0xb71dcdee in MythPlayer::DecoderLoop (this=0x945b070, pause=false)
+    at mythplayer.cpp:2936
+4  0xb71bf3b6 in DecoderThread::run (this=0x9545ff8) at mythplayer.cpp:119
+5  0xb2ba3e2c in QThreadPrivate::start (arg=0x9545ff8)
+    at thread/qthread_unix.cpp:298
+6  0xb2b20e99 in start_thread (arg=0xa5a8ab70) at pthread_create.c:304
+7  0xb295ccbe in clone () at ../sysdeps/unix/sysv/linux/i386/clone.S:130
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/decoderbase.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/decoderbase.cpp b/mythtv/libs/libmythtv/decoderbase.cpp
+index 5053e75..8aa898f 100644
+--- a/mythtv/libs/libmythtv/decoderbase.cpp
++++ b/mythtv/libs/libmythtv/decoderbase.cpp
+@@ -662,7 +662,7 @@ bool DecoderBase::DoFastForward(long long desiredFrame, bool discardFrames)
+             .arg(desiredFrame).arg(framesPlayed)
+             .arg((discardFrames) ? "do" : "don't"));
+ 
+-    if (ringBuffer->IsDVD() &&
++    if (ringBuffer && ringBuffer->IsDVD() &&
+         !ringBuffer->IsInDiscMenuOrStillFrame() &&
+         ringBuffer->DVD()->TitleTimeLeft() < 5)
+     {
+-- 
+1.7.9.5
+

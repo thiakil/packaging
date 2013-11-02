@@ -1,0 +1,26 @@
+From fc8a6a083080bc832e401c3f9e0983fa23706378 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 11 Jul 2013 20:28:46 +0100
+Subject: [PATCH 255/285] DB: Make the jobqueue statustime auto update
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/dbcheck.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/dbcheck.cpp b/mythtv/libs/libmythtv/dbcheck.cpp
+index c2afd1c..a0e4d1e 100644
+--- a/mythtv/libs/libmythtv/dbcheck.cpp
++++ b/mythtv/libs/libmythtv/dbcheck.cpp
+@@ -5861,7 +5861,7 @@ bool InitializeMythSchema(void)
+ "  cmds int(11) NOT NULL default '0',"
+ "  flags int(11) NOT NULL default '0',"
+ "  `status` int(11) NOT NULL default '0',"
+-"  statustime timestamp NOT NULL default CURRENT_TIMESTAMP,"
++"  statustime timestamp NOT NULL default CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+ "  hostname varchar(64) NOT NULL default '',"
+ "  args blob NOT NULL,"
+ "  `comment` varchar(128) NOT NULL default '',"
+-- 
+1.7.9.5
+

@@ -1,0 +1,38 @@
+From 4f2d8bebd1526fe50fabab61c672249a1e69b25f Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 23 Jun 2012 18:31:53 +0200
+Subject: [PATCH 129/285] transcode: Tolerate mpeg errors when re-encoding to
+ I-frames around cut points
+
+If a recording has a cutlist and is transcoded using that cutlist then
+if there are MPEG decoding errors around the cut point the process of
+re-coding to I frames can fail and the whole transcoding fails.
+
+This patch makes the function MPEG2fixup::ConvertToI tolerant to
+decoding errors and just skips the offending frames.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythtranscode/mpeg2fix.cpp |    6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/programs/mythtranscode/mpeg2fix.cpp b/mythtv/programs/mythtranscode/mpeg2fix.cpp
+index b3e477d..1f0433e 100644
+--- a/mythtv/programs/mythtranscode/mpeg2fix.cpp
++++ b/mythtv/programs/mythtranscode/mpeg2fix.cpp
+@@ -1670,7 +1670,11 @@ int MPEG2fixup::ConvertToI(Q3PtrList<MPEG2frame> *orderedFrames, int headPos)
+     {
+         int i = GetFrameNum(it.current());
+         if ((spare = DecodeToFrame(i, headPos == 0)) == NULL)
+-            return 1;
++        {
++            VERBOSE(MPF_IMPORTANT,
++                QString("WARN ConvertToI skipping undecoded frame #%1").arg(i));
++            continue;
++        }
+         if(GetFrameTypeT(spare) == 'I')
+             continue;
+         pkt = spare->pkt;
+-- 
+1.7.9.5
+

@@ -1,0 +1,126 @@
+From 1a9e66bd1dd1e322ea7e2063138d0aa473c5b8be Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 5 Oct 2013 18:45:29 +0100
+Subject: [PATCH 192/202] Housekeeper: Add settings to disable the theme
+ update and artwork update tasks
+
+These tasks are daily housekeeper tasks that are run at startup.
+
+The artwork updater can impose a significant network load
+if the backend hosts thousands of recordings.
+
+The new settings are ArtworkTaskEnabled and ThemeUpdateTaskEnabled.
+0 - task disabled.
+1 - task enabled.
+2 - task enabled and run at startup
+
+ArtworkTaskEnabled defaults to 1 (new)
+ThemeUpdateTaskEnabled defaults to 2 (no change)
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythbackend/backendhousekeeper.cpp |   37 ++++++++++++++++----
+ mythtv/programs/mythbackend/backendhousekeeper.h   |   11 +++---
+ 2 files changed, 36 insertions(+), 12 deletions(-)
+
+diff --git a/mythtv/programs/mythbackend/backendhousekeeper.cpp b/mythtv/programs/mythbackend/backendhousekeeper.cpp
+index 7df0f24..d3d91bb 100644
+--- a/mythtv/programs/mythbackend/backendhousekeeper.cpp
++++ b/mythtv/programs/mythbackend/backendhousekeeper.cpp
+@@ -362,6 +362,25 @@ void CleanupTask::CleanupProgramListings(void)
+         MythDB::DBError("HouseKeeper Cleaning Program Listings", query);
+ }
+ 
++ThemeUpdateTask::ThemeUpdateTask(void) :
++    DailyHouseKeeperTask( "ThemeUpdateNotifications", kHKGlobal,
++        (gCoreContext->GetNumSetting("ThemeUpdateTaskEnabled", 2) >= 2) ? kHKRunOnStartup : kHKNormal
++    ),
++    m_running(false)
++{
++}
++
++bool ThemeUpdateTask::DoCheckRun(QDateTime now)
++{
++    if (!gCoreContext->GetNumSetting("ThemeUpdateTaskEnabled", 1))
++    {
++        LOG(VB_GENERAL, LOG_DEBUG, "ThemeUpdateTask is disabled. Cannot run.");
++        return false;
++    }
++
++    return DailyHouseKeeperTask::DoCheckRun(now);
++}
++
+ bool ThemeUpdateTask::DoRun(void)
+ {
+     QString MythVersion = MYTH_SOURCE_PATH;
+@@ -431,8 +450,10 @@ void ThemeUpdateTask::Terminate(void)
+     m_running = false;
+ }
+ 
+-ArtworkTask::ArtworkTask(void) : DailyHouseKeeperTask("RecordedArtworkUpdate",
+-                                         kHKGlobal, kHKRunOnStartup),
++ArtworkTask::ArtworkTask(void) :
++    DailyHouseKeeperTask("RecordedArtworkUpdate", kHKGlobal,
++        (gCoreContext->GetNumSetting("DailyArtworkUpdates", 0) >= 2) ? kHKRunOnStartup : kHKNormal
++    ),
+     m_msMML(NULL)
+ {
+ }
+@@ -482,10 +503,14 @@ ArtworkTask::~ArtworkTask(void)
+ 
+ bool ArtworkTask::DoCheckRun(QDateTime now)
+ {
+-    if (gCoreContext->GetNumSetting("DailyArtworkUpdates", 0) &&
+-            PeriodicHouseKeeperTask::DoCheckRun(now))
+-        return true;
+-    return false;
++    if (!gCoreContext->GetNumSetting("JobAllowMetadata", 1) ||
++        !gCoreContext->GetNumSetting("DailyArtworkUpdates", 0))
++    {
++        LOG(VB_GENERAL, LOG_DEBUG, "ArtworkTask is disabled. Cannot run.");
++        return false;
++    }
++
++    return DailyHouseKeeperTask::DoCheckRun(now);
+ }
+ 
+ void ArtworkTask::Terminate(void)
+diff --git a/mythtv/programs/mythbackend/backendhousekeeper.h b/mythtv/programs/mythbackend/backendhousekeeper.h
+index 12b2a46..76bcb1f 100644
+--- a/mythtv/programs/mythbackend/backendhousekeeper.h
++++ b/mythtv/programs/mythbackend/backendhousekeeper.h
+@@ -8,7 +8,7 @@ class LogCleanerTask : public DailyHouseKeeperTask
+ {
+   public:
+     LogCleanerTask(void) : DailyHouseKeeperTask("LogClean", kHKGlobal) {};
+-    bool DoRun(void);
++    virtual bool DoRun(void);
+ };
+ 
+ 
+@@ -16,7 +16,7 @@ class CleanupTask : public DailyHouseKeeperTask
+ {
+   public:
+     CleanupTask(void) : DailyHouseKeeperTask("DBCleanup", kHKGlobal) {};
+-    bool DoRun(void);
++    virtual bool DoRun(void);
+ 
+   private:
+     void CleanupOldRecordings(void);
+@@ -30,10 +30,9 @@ class CleanupTask : public DailyHouseKeeperTask
+ class ThemeUpdateTask : public DailyHouseKeeperTask
+ {
+   public:
+-    ThemeUpdateTask(void) : DailyHouseKeeperTask("ThemeUpdateNotifications",
+-                                            kHKGlobal, kHKRunOnStartup),
+-                            m_running(false) {};
+-    bool DoRun(void);
++    ThemeUpdateTask(void);
++    virtual bool DoCheckRun(QDateTime now);
++    virtual bool DoRun(void);
+     virtual void Terminate(void);
+   private:
+     bool m_running;
+-- 
+1.7.9.5
+

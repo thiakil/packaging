@@ -1,0 +1,60 @@
+From 4f39df9e22c8464b55489a4dde791dcc1b17b090 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 24 May 2013 16:14:42 +0100
+Subject: [PATCH 203/285] AO: Cache the result of IsPulseAudioRunning
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/audiopulsehandler.cpp |   27 +++++++++++++++++++++++++--
+ 1 file changed, 25 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/audiopulsehandler.cpp b/mythtv/libs/libmyth/audiopulsehandler.cpp
+index 63747c2..f02aae3 100644
+--- a/mythtv/libs/libmyth/audiopulsehandler.cpp
++++ b/mythtv/libs/libmyth/audiopulsehandler.cpp
+@@ -47,10 +47,32 @@ bool PulseHandler::Suspend(enum PulseAction action)
+         return true;
+     }
+ 
+-    // do nothing if PulseAudio is not currently running
+-    if (!IsPulseAudioRunning())
++    static int s_iPulseRunning = -1;
++    static QTime s_time;
++    static enum PulseAction s_ePulseAction = PulseAction(-1);
++
++    // Use the last result of IsPulseAudioRunning if within time
++    if (!s_time.isNull() && s_time.elapsed() < 30000)
++    {
++        if (!s_iPulseRunning)
++            return false;
++
++        // If the last action is repeated then do nothing
++        if (action == s_ePulseAction)
++            return true;
++    }
++    // NB IsPulseAudioRunning calls myth_system and can take up to 100mS
++    else if (IsPulseAudioRunning())
++    {
++        s_iPulseRunning = 1;
++        s_time.start();
++    }
++    else
+     {
++        // do nothing if PulseAudio is not currently running
+         VERBOSE(VB_AUDIO, LOC + "PulseAudio not running");
++        s_iPulseRunning = 0;
++        s_time.start();
+         return false;
+     }
+ 
+@@ -85,6 +107,7 @@ bool PulseHandler::Suspend(enum PulseAction action)
+     // disable processing of incoming callbacks in case we delete/recreate our
+     // instance due to a termination or other failure
+     g_pulseHandlerActive = false;
++    s_ePulseAction = action;
+     return result;
+ }
+ 
+-- 
+1.7.9.5
+

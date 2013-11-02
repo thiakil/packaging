@@ -1,0 +1,81 @@
+From e646ed2733e3285e8c04781723ce3864f78251a8 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 3 Jan 2013 15:05:37 +0000
+Subject: [PATCH 002/207] Allow configuration and building with Qt 4.7
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/configure                 |    8 ++++----
+ mythtv/configure                      |    8 ++++----
+ mythtv/libs/libmythbase/mythversion.h |    4 ++--
+ 3 files changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/mythplugins/configure b/mythplugins/configure
+index bda1fbc..18148bf 100755
+--- a/mythplugins/configure
++++ b/mythplugins/configure
+@@ -524,7 +524,7 @@ is_qmake5(){
+ }
+ 
+ is_qmake4(){
+-    $1 --version 2>&1 | egrep -q -e "Qt version 4\.[8-9]\.[0-9]"
++    $1 --version 2>&1 | egrep -q -e "Qt version 4\.[7-9]\.[0-9]"
+ }
+ 
+ # bring in mythtv config
+@@ -563,10 +563,10 @@ EXTRALIBS=${EXTRALIBS#EXTRALIBS=}
+ 
+ if ! is_qmake5 $qmake ; then
+   if ! is_qmake4 $qmake; then
+-      is_qmake4 qmake-qt4 && qmake=qmake-qt4 || die "qmake for Qt4.8 or newer not found.\nPlease specify the correct qmake with --qmake="
++      is_qmake4 qmake-qt4 && qmake=qmake-qt4 || die "qmake for Qt4.7 or newer not found.\nPlease specify the correct qmake with --qmake="
+   fi
+-  if ! expr $($qmake -query QT_VERSION) : "4\.[8-9]\.[0-9]" >/dev/null; then
+-      die "Qt4.8 or newer is required to build MythTV."
++  if ! expr $($qmake -query QT_VERSION) : "4\.[7-9]\.[0-9]" >/dev/null; then
++      die "Qt4.7 or newer is required to build MythTV."
+   fi
+ fi
+ 
+diff --git a/mythtv/configure b/mythtv/configure
+index 4aa8727..ea0bb63 100755
+--- a/mythtv/configure
++++ b/mythtv/configure
+@@ -4464,15 +4464,15 @@ is_qmake5(){
+ }
+ 
+ is_qmake4(){
+-    $1 --version 2>&1 | egrep -q -e "Qt version 4\.[8-9]\.[0-9]"
++    $1 --version 2>&1 | egrep -q -e "Qt version 4\.[7-9]\.[0-9]"
+ }
+ 
+ if ! is_qmake5 $qmake ; then
+   if ! is_qmake4 $qmake; then
+-      is_qmake4 qmake-qt4 && qmake=qmake-qt4 || die "qmake for Qt4.8 or newer not found.\nPlease specify the correct qmake with --qmake="
++      is_qmake4 qmake-qt4 && qmake=qmake-qt4 || die "qmake for Qt4.7 or newer not found.\nPlease specify the correct qmake with --qmake="
+   fi
+-  if ! expr $($qmake -query QT_VERSION) : "4\.[8-9]\.[0-9]" >/dev/null; then
+-      die "Qt4.8 or newer is required to build MythTV."
++  if ! expr $($qmake -query QT_VERSION) : "4\.[7-9]\.[0-9]" >/dev/null; then
++      die "Qt4.7 or newer is required to build MythTV."
+   fi
+ else
+     check_cxxflags -DQT_DISABLE_DEPRECATED_BEFORE
+diff --git a/mythtv/libs/libmythbase/mythversion.h b/mythtv/libs/libmythbase/mythversion.h
+index 4525eff..ca7c2ec 100644
+--- a/mythtv/libs/libmythbase/mythversion.h
++++ b/mythtv/libs/libmythbase/mythversion.h
+@@ -5,8 +5,8 @@
+ #include "mythbaseexp.h"
+ #include "version.h"
+ 
+-#if ( QT_VERSION < 0x040800 )
+-#error You need Qt version >= 4.8.0 to compile MythTV.
++#if ( QT_VERSION < 0x040700 )
++#error You need Qt version >= 4.7.0 to compile MythTV.
+ #endif
+ 
+ /// Update this whenever the plug-in ABI changes.
+-- 
+1.7.9.5
+

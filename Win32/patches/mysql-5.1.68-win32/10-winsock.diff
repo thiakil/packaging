@@ -1,0 +1,11 @@
+--- a/include/mysql.h	2011-02-03 19:25:45.000000000 +0100
++++ b/include/mysql.h	2011-02-11 10:55:22.000000000 +0100
+@@ -47,7 +47,7 @@ extern "C" {
+ #ifndef MYSQL_ABI_CHECK
+ #include <sys/types.h>
+ #endif
+-#ifdef __LCC__
++#if defined __LCC__ || defined __MINGW32__
+ #include <winsock2.h>				/* For windows */
+ #endif
+ typedef char my_bool;

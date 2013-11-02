@@ -1,0 +1,231 @@
+From 36ee0751a542fc9467c310b1415c599da2243d42 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 17 Sep 2013 21:07:56 +0100
+Subject: [PATCH 284/285] MHEG: Apply aspect correction to all images
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/interactivetv.cpp  |    4 ++--
+ mythtv/libs/libmythtv/interactivetv.h    |    2 +-
+ mythtv/libs/libmythtv/mhi.cpp            |   24 ++++++++++++++++++------
+ mythtv/libs/libmythtv/mhi.h              |    2 +-
+ mythtv/libs/libmythtv/mythplayer.cpp     |    4 ++--
+ mythtv/libs/libmythtv/videooutbase.cpp   |   23 +++++++++++++++--------
+ mythtv/libs/libmythtv/videooutwindow.cpp |   24 +++++++++---------------
+ 7 files changed, 48 insertions(+), 35 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/interactivetv.cpp b/mythtv/libs/libmythtv/interactivetv.cpp
+index 1e37dd1..103cb67 100644
+--- a/mythtv/libs/libmythtv/interactivetv.cpp
++++ b/mythtv/libs/libmythtv/interactivetv.cpp
+@@ -60,9 +60,9 @@ void InteractiveTV::ProcessDSMCCSection(
+                                 carouselId, dataBroadcastId);
+ }
+ 
+-void InteractiveTV::Reinit(const QRect &videoRect, const QRect &dispRect)
++void InteractiveTV::Reinit(const QRect &videoRect, const QRect &dispRect, float aspect)
+ {
+-    m_context->Reinit(videoRect, dispRect);
++    m_context->Reinit(videoRect, dispRect, aspect);
+ }
+ 
+ bool InteractiveTV::OfferKey(QString key)
+diff --git a/mythtv/libs/libmythtv/interactivetv.h b/mythtv/libs/libmythtv/interactivetv.h
+index a527ded..1fbf31b 100644
+--- a/mythtv/libs/libmythtv/interactivetv.h
++++ b/mythtv/libs/libmythtv/interactivetv.h
+@@ -31,7 +31,7 @@ class InteractiveTV
+     // Draw the (updated) image.
+     void UpdateOSD(InteractiveScreen *osdWindow, MythPainter *osdPainter);
+     // Called when the visible display area has changed.
+-    void Reinit(const QRect &videoRect, const QRect &dispRect);
++    void Reinit(const QRect &videoRect, const QRect &dispRect, float aspect);
+ 
+     // Offer a key press.  Returns true if it accepts it.
+     // This will depend on the current profile.
+diff --git a/mythtv/libs/libmythtv/mhi.cpp b/mythtv/libs/libmythtv/mhi.cpp
+index 724fcde..379d689 100644
+--- a/mythtv/libs/libmythtv/mhi.cpp
++++ b/mythtv/libs/libmythtv/mhi.cpp
+@@ -622,16 +622,28 @@ bool MHIContext::OfferKey(QString key)
+ }
+ 
+ // Called from MythPlayer::VideoStart and MythPlayer::ReinitOSD
+-void MHIContext::Reinit(const QRect &videoRect, const QRect &dispRect)
++void MHIContext::Reinit(const QRect &videoRect, const QRect &dispRect, float aspect)
+ {
+-    VERBOSE(VB_MHEG, QString("[mhi] Reinit video(y:%1 x:%2 w:%3 h:%4) vis(y:%5 x:%6 w:%7 h:%8)")
++    VERBOSE(VB_MHEG, QString("[mhi] Reinit "
++            "video(y:%1 x:%2 w:%3 h:%4) vis(y:%5 x:%6 w:%7 h:%8) aspect=%9")
+         .arg(videoRect.y()).arg(videoRect.x())
+         .arg(videoRect.width()).arg(videoRect.height())
+         .arg(dispRect.y()).arg(dispRect.x())
+-        .arg(dispRect.width()).arg(dispRect.height()));
++        .arg(dispRect.width()).arg(dispRect.height()).arg(aspect));
+     m_videoDisplayRect = QRect();
+-    m_videoRect = videoRect;
+-    m_displayRect = dispRect;
++
++    // MHEG presumes square pixels
++    enum { kNone, kHoriz, kBoth };
++    int mode = gCoreContext->GetNumSetting("MhegAspectCorrection", kNone);
++    double const vz = (mode == kBoth) ? min(1.15, 1. / sqrt(aspect)) : 1.;
++    double const hz = (mode > kNone) ? vz * aspect : 1.;
++
++    m_displayRect = QRect( int(dispRect.width() * (1 - hz) / 2),
++        int(dispRect.height() * (1 - vz) / 2),
++        int(dispRect.width() * hz), int(dispRect.height() * vz) );
++    m_videoRect = QRect( dispRect.x() + m_displayRect.x(),
++        dispRect.y() + int(dispRect.height() * (1 - hz) / 2),
++        int(dispRect.width() * hz), int(dispRect.height() * hz) );
+ }
+ 
+ void MHIContext::SetInputRegister(int num)
+@@ -754,7 +766,7 @@ inline int MHIContext::ScaleY(int n, bool roundup) const
+ 
+ inline QRect MHIContext::Scale(const QRect &r) const
+ {
+-    return QRect( //m_displayRect.topLeft() +
++    return QRect( m_displayRect.topLeft() +
+         QPoint(ScaleX(r.x()), ScaleY(r.y())),
+         QSize(ScaleX(r.width(), true), ScaleY(r.height(), true)) );
+ }
+diff --git a/mythtv/libs/libmythtv/mhi.h b/mythtv/libs/libmythtv/mhi.h
+index 724aeb0..a87d323 100644
+--- a/mythtv/libs/libmythtv/mhi.h
++++ b/mythtv/libs/libmythtv/mhi.h
+@@ -62,7 +62,7 @@ class MHIContext : public MHContext
+     /// Update the display
+     void UpdateOSD(InteractiveScreen *osdWindow, MythPainter *osdPainter);
+     /// The display area has changed.
+-    void Reinit(const QRect &videoRect, const QRect &dispRect);
++    void Reinit(const QRect &videoRect, const QRect &dispRect, float aspect);
+ 
+     /// Stop the MHEG engine if it's running and waits until it has.
+     void StopEngine(void);
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 0db1225..e778f52 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -580,7 +580,7 @@ void MythPlayer::ReinitOSD(void)
+         if (GetInteractiveTV())
+         {
+             QMutexLocker locker(&itvLock);
+-            interactiveTV->Reinit(total, visible);
++            interactiveTV->Reinit(total, visible, aspect);
+             itvVisible = false;
+         }
+ #endif // USING_MHEG
+@@ -2093,7 +2093,7 @@ void MythPlayer::VideoStart(void)
+         if (GetInteractiveTV())
+         {
+             QMutexLocker locker(&itvLock);
+-            interactiveTV->Reinit(total, visible);
++            interactiveTV->Reinit(total, visible, aspect);
+         }
+ #endif // USING_MHEG
+ 
+diff --git a/mythtv/libs/libmythtv/videooutbase.cpp b/mythtv/libs/libmythtv/videooutbase.cpp
+index d228cea..b79c37a 100644
+--- a/mythtv/libs/libmythtv/videooutbase.cpp
++++ b/mythtv/libs/libmythtv/videooutbase.cpp
+@@ -752,7 +752,12 @@ QRect VideoOutput::GetVisibleOSDBounds(
+     float dispPixelAdj = 1.0f;
+     if (dvr2.height() && dvr2.width())
+         dispPixelAdj = (GetDisplayAspect() * dvr2.height()) / dvr2.width();
+-    visible_aspect = themeaspect / dispPixelAdj;
++
++    float ova = window.GetOverridenVideoAspect();
++    QRect vr = window.GetVideoRect();
++    float vs = vr.height() ? (float)vr.width() / vr.height() : 1.f;
++    visible_aspect = themeaspect * (ova ? vs / ova : 1.f) * dispPixelAdj;
++
+     font_scaling   = 1.0f;
+     return QRect(QPoint(0,0), dvr2);
+ }
+@@ -997,17 +1002,17 @@ void VideoOutput::ShowPIP(VideoFrame  *frame,
+         return;
+ 
+     const float video_aspect           = window.GetVideoAspect();
+-    const QRect display_video_rect     = window.GetDisplayVideoRect();
+-    const QRect video_rect             = window.GetVideoRect();
+-    const QRect display_visible_rect   = window.GetDisplayVisibleRect();
+-    const QSize video_disp_dim         = window.GetVideoDispDim();
++//    const QRect display_video_rect     = window.GetDisplayVideoRect();
++//    const QRect video_rect             = window.GetVideoRect();
++//    const QRect display_visible_rect   = window.GetDisplayVisibleRect();
++//    const QSize video_disp_dim         = window.GetVideoDispDim();
+ 
+     int pipw, piph;
+     VideoFrame *pipimage       = pipplayer->GetCurrentFrame(pipw, piph);
+     const bool  pipActive      = pipplayer->IsPIPActive();
+     const bool  pipVisible     = pipplayer->IsPIPVisible();
+     const float pipVideoAspect = pipplayer->GetVideoAspect();
+-    const QSize pipVideoDim    = pipplayer->GetVideoBufferSize();
++//    const QSize pipVideoDim    = pipplayer->GetVideoBufferSize();
+ 
+     // If PiP is not initialized to values we like, silently ignore the frame.
+     if ((video_aspect <= 0) || (pipVideoAspect <= 0) ||
+@@ -1171,6 +1176,9 @@ void VideoOutput::ResizeVideo(VideoFrame *frame)
+                       frame->height, img_out.data, img_out.linesize);
+     }
+ 
++    // Blanking the unused area can appear better but it costs CPU cycles
++    //clear(frame);
++
+     int xoff = resize.left();
+     int yoff = resize.top();
+     int resw = resize.width();
+@@ -1242,8 +1250,7 @@ void VideoOutput::ShutdownVideoResize(void)
+ void VideoOutput::SetVideoResize(const QRect &videoRect)
+ {
+     if (!videoRect.isValid()    ||
+-         videoRect.width()  < 1 || videoRect.height() < 1 ||
+-         videoRect.left()   < 0 || videoRect.top()    < 0)
++         videoRect.width()  < 1 || videoRect.height() < 1)
+     {
+         ShutdownVideoResize();
+         vsz_desired_display_rect = QRect();
+diff --git a/mythtv/libs/libmythtv/videooutwindow.cpp b/mythtv/libs/libmythtv/videooutwindow.cpp
+index 92671ca..b7b7d51 100644
+--- a/mythtv/libs/libmythtv/videooutwindow.cpp
++++ b/mythtv/libs/libmythtv/videooutwindow.cpp
+@@ -756,26 +756,20 @@ QRect VideoOutWindow::GetVisibleOSDBounds(
+     vb = QRect(vb.x(), vb.y(), abs(vb.width()), abs(vb.height()));
+ 
+     // set the physical aspect ratio of the displayable area
+-    float dispPixelAdj = 1.0f;
+-    if (display_visible_rect.width())
+-    {
+-        dispPixelAdj = GetDisplayAspect() * display_visible_rect.height();
+-        dispPixelAdj /= display_visible_rect.width();
+-    }
++    const float dispPixelAdj = display_visible_rect.width() ?
++        (GetDisplayAspect() * display_visible_rect.height())
++                / display_visible_rect.width() : 1.f;
+ 
+-    if ((vb.height() >= 0) && overriden_video_aspect >= 0.0f)
+-    {
+-        // now adjust for scaling of the video on the aspect ratio
+-        float vs = ((float)vb.width())/vb.height();
+-        visible_aspect =
+-            themeaspect * (vs/overriden_video_aspect) * dispPixelAdj;
+-    }
++    float vs = video_rect.height() ? (float)video_rect.width() /
++                video_rect.height() : 1.f;
++    visible_aspect = themeaspect / dispPixelAdj *
++        (overriden_video_aspect ? vs / overriden_video_aspect : 1.f);
+ 
+-    if (themeaspect >= 0.0f)
++    if (themeaspect > 0.0f)
+     {
+         // now adjust for scaling of the video on the size
+         float tmp = sqrtf(2.0f/(sq(visible_aspect / themeaspect) + 1.0f));
+-        if (tmp >= 0.0f)
++        if (tmp > 0.0f)
+             font_scaling = 1.0f / tmp;
+         // now adjust for aspect ratio effect on font size
+         // (should be in osd.cpp?)
+-- 
+1.7.9.5
+

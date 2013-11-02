@@ -1,0 +1,57 @@
+diff -purN libvisual-0.4.0.orig/configure libvisual-0.4.0/configure
+--- libvisual-0.4.0.orig/configure	2006-03-20 19:42:25.000000000 +0100
++++ libvisual-0.4.0/configure	2010-12-06 13:13:49.000000000 +0100
+@@ -21612,9 +21612,9 @@ _ACEOF
+ esac
+ 
+ 
+-cat >>confdefs.h <<\_ACEOF
++#cat >>confdefs.h <<\_ACEOF
+ #define malloc rpl_malloc
+-_ACEOF
++#_ACEOF
+ 
+ fi
+ 
+@@ -21843,9 +21843,9 @@ _ACEOF
+ esac
+ 
+ 
+-cat >>confdefs.h <<\_ACEOF
++#cat >>confdefs.h <<\_ACEOF
+ #define realloc rpl_realloc
+-_ACEOF
++#_ACEOF
+ 
+ fi
+ 
+--- libvisual-0.4.0.orig/libvisual/lv_os.c	2006-01-26 16:13:37.000000000 +0100
++++ libvisual-0.4.0/libvisual/lv_os.c	2010-12-06 21:49:50.000000000 +0100
+@@ -53,7 +53,7 @@
+  */
+ int visual_os_scheduler_realtime_start ()
+ {
+-#ifdef HAVE_SCHED
++#if 0 && defined HAVE_SCHED
+ 	struct sched_param attr;
+ 	int ret;
+ 	attr.sched_priority = 99;
+@@ -72,7 +72,7 @@ int visual_os_scheduler_realtime_start (
+  */
+ int visual_os_scheduler_realtime_stop ()
+ {
+-#ifdef HAVE_SCHED
++#if 0 && defined HAVE_SCHED
+ 	struct sched_param attr;
+ 	int ret;
+ 	attr.sched_priority = 0;
+@@ -90,7 +90,7 @@ int visual_os_scheduler_realtime_stop ()
+  */
+ int visual_os_scheduler_yield ()
+ {
+-#ifdef HAVE_SCHED
++#if 0 && defined HAVE_SCHED
+ 	sched_yield ();
+ 
+ 	return VISUAL_OK;
+

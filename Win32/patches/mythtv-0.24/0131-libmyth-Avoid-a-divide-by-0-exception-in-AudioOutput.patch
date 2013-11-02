@@ -1,0 +1,50 @@
+From 9e68bff96a4c372ea935806ef662d1f837585906 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 24 Jun 2012 18:13:55 +0200
+Subject: [PATCH 131/285] libmyth: Avoid a divide by 0 exception in
+ AudioOutputBase
+
+If MythMusic starts when the default audio is ALSA and if the device
+is in use by another process then snd_pcm_open can fail.  In this
+case AudioOutputBase::SetAudiotime can cause a divide by 0 exception
+because this->effdsp is 0.
+
+This patch checks the value of effdsp and avoids the division if it's 0.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/audiooutputbase.cpp |    8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/audiooutputbase.cpp b/mythtv/libs/libmyth/audiooutputbase.cpp
+index 0d9bb27..374126a 100644
+--- a/mythtv/libs/libmyth/audiooutputbase.cpp
++++ b/mythtv/libs/libmyth/audiooutputbase.cpp
+@@ -814,9 +814,9 @@ int64_t AudioOutputBase::GetAudiotime(void)
+        of major post-stretched buffer contents
+        processing latencies are catered for in AddFrames/SetAudiotime
+        to eliminate race */
+-    audiotime = audbuf_timecode - (
++    audiotime = audbuf_timecode - (effdsp && obpf ? (
+         ((main_buffer + soundcard_buffer) * (int64_t)eff_stretchfactor ) /
+-        ((int64_t)effdsp * obpf));
++        ((int64_t)effdsp * obpf)) : 0);
+ 
+     /* audiotime should never go backwards, but we might get a negative
+        value if GetBufferedOnSoundcard() isn't updated by the driver very
+@@ -869,10 +869,10 @@ void AudioOutputBase::SetAudiotime(int frames, int64_t timecode)
+     }
+ 
+     audbuf_timecode =
+-        timecode + (
++        timecode + (effdsp ? (
+             ((int64_t)frames + processframes_unstretched * 100000LL) +
+             (processframes_stretched * (int64_t)eff_stretchfactor)
+-                    ) / (int64_t)effdsp;
++                    ) / (int64_t)effdsp : 0);
+ 
+     // check for timecode wrap and reset audiotime if detected
+     // timecode will always be monotonic asc if not seeked and reset
+-- 
+1.7.9.5
+

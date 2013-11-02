@@ -1,0 +1,775 @@
+From 1b1d445a488fc216b26004c8c2d7f289d9f36244 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 19 Jun 2012 13:22:56 +0200
+Subject: [PATCH 128/285] OSD: Add a graphical display of audio level to cut
+ list editor
+
+When using the cut list editor to remove ads etc it's difficult to place
+the cut precisely when the program is faded in or out.  In these cases
+it's common to cut the dialogue or retain voice-overs.  It's also
+impossible to create a cut list for DVB radio recordings.
+
+This patch adds a visual graph of the audio level +/-0.5 frame around the
+current paused frame.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/audiooutputbase.cpp  |    4 +-
+ mythtv/libs/libmyth/audiooutputgraph.cpp |  319 ++++++++++++++++++++++++++++++
+ mythtv/libs/libmyth/audiooutputgraph.h   |   43 ++++
+ mythtv/libs/libmyth/libmyth.pro          |    2 +
+ mythtv/libs/libmythtv/audioplayer.cpp    |   12 ++
+ mythtv/libs/libmythtv/audioplayer.h      |   11 ++
+ mythtv/libs/libmythtv/deletemap.cpp      |    7 +-
+ mythtv/libs/libmythtv/deletemap.h        |    1 +
+ mythtv/libs/libmythtv/mythplayer.cpp     |   22 ++-
+ mythtv/libs/libmythtv/mythplayer.h       |    5 +
+ mythtv/libs/libmythtv/osd.cpp            |   15 ++
+ mythtv/libs/libmythtv/osd.h              |    1 +
+ mythtv/themes/MythCenter-wide/osd.xml    |    7 +-
+ mythtv/themes/Terra/osd.xml              |    4 +
+ mythtv/themes/default-wide/osd.xml       |    5 +-
+ mythtv/themes/default/osd.xml            |    7 +-
+ 16 files changed, 455 insertions(+), 10 deletions(-)
+ create mode 100644 mythtv/libs/libmyth/audiooutputgraph.cpp
+ create mode 100644 mythtv/libs/libmyth/audiooutputgraph.h
+
+diff --git a/mythtv/libs/libmyth/audiooutputbase.cpp b/mythtv/libs/libmyth/audiooutputbase.cpp
+index 54e9371..0d9bb27 100644
+--- a/mythtv/libs/libmyth/audiooutputbase.cpp
++++ b/mythtv/libs/libmyth/audiooutputbase.cpp
+@@ -1082,10 +1082,10 @@ bool AudioOutputBase::AddFrames(void *in_buffer, int in_frames,
+         // Send original samples to mythmusic visualisation
+         timecode = (frames_buffered * 1000LL) / (int64_t)source_samplerate;
+         frames_buffered += (int64_t)frames;
+-        dispatchVisual((uchar *)in_buffer, len, timecode, source_channels,
+-                       output_settings->FormatToBits(format));
+         music = true;
+     }
++    dispatchVisual((uchar *)in_buffer, len, timecode, source_channels,
++                   output_settings->FormatToBits(format));
+ 
+     // Calculate amount of free space required in ringbuffer
+     if (processing)
+diff --git a/mythtv/libs/libmyth/audiooutputgraph.cpp b/mythtv/libs/libmyth/audiooutputgraph.cpp
+new file mode 100644
+index 0000000..9791916
+--- /dev/null
++++ b/mythtv/libs/libmyth/audiooutputgraph.cpp
+@@ -0,0 +1,319 @@
++#include "audiooutputgraph.h"
++
++#include <math.h>
++
++#include <QtGlobal>
++#include <QImage>
++#include <QByteArray>
++#include <QPair>
++
++#include "mythverbose.h"
++#include "mythpainter.h"
++#include "mythimage.h"
++
++#define LOC QString("AOG::%1").arg(__func__)
++
++const int kBufferMilliSecs = 500;
++
++/*
++ * Audio data buffer
++ */
++class AudioOutputGraph::Buffer : protected QByteArray
++{
++public:
++    Buffer() :
++        m_maxSamples(0),
++        m_sample_rate(44100),
++        m_tcFirst(0), m_tcNext(0),
++        m_bits(0),
++        m_channels(0),
++        m_sizeMax(0)
++    { }
++    virtual ~Buffer() { }
++
++    // Properties
++    void SetMaxSamples(unsigned samples) { m_maxSamples = samples; }
++    void SetSampleRate(unsigned sample_rate) { m_sample_rate = sample_rate; }
++
++    inline int BitsPerChannel() const { return m_bits; }
++    inline int Channels() const { return m_channels; }
++
++    inline int64_t Next() const { return m_tcNext; }
++    inline int64_t First() const { return m_tcFirst; }
++
++    typedef QPair<int64_t, int64_t> range_t;
++    range_t Avail(int64_t timecode) const
++    {
++        if (timecode == 0 || timecode == -1)
++            timecode = m_tcNext;
++
++        int64_t tc1 = timecode - Samples2MS(m_maxSamples / 2);
++        if (tc1 < m_tcFirst)
++            tc1 = m_tcFirst;
++
++        int64_t tc2 = tc1 + Samples2MS(m_maxSamples);
++        if (tc2 > m_tcNext)
++        {
++            tc2 = m_tcNext;
++            if (tc2 < tc1 + Samples2MS(m_maxSamples))
++            {
++                tc1 = tc2 - Samples2MS(m_maxSamples);
++                if (tc1 < m_tcFirst)
++                    tc1 = m_tcFirst;
++            }
++        }
++        return range_t(tc1, tc2);
++    }
++
++    int Samples(const range_t &avail) const
++    {
++        return MS2Samples(avail.second - avail.first);
++    }
++
++    // Operations
++    void Empty()
++    {
++        m_tcFirst = m_tcNext = 0;
++        m_bits = m_channels = 0;
++        resize(0);
++    }
++
++    void Append(const uchar *b, unsigned long len, unsigned long timecode, int channels, int bits)
++    {
++        if (m_bits != bits || m_channels != channels)
++        {
++            VERBOSE(VB_PLAYBACK, LOC + QString("(%1, %2 channels, %3 bits)")
++                .arg(timecode).arg(channels).arg(bits));
++            Resize(channels, bits);
++            m_tcNext = m_tcFirst = timecode;
++        }
++
++        unsigned samples = Bytes2Samples(len);
++        int64_t tcNext = timecode + Samples2MS(samples);
++
++        if (qAbs(timecode - m_tcNext) <= 1)
++        {
++            append( reinterpret_cast< const char* >(b), len);
++            m_tcNext = tcNext;
++        }
++        else if (timecode >= m_tcFirst && tcNext <= m_tcNext)
++        {
++            // Duplicate
++            return;
++        }
++        else
++        {
++            VERBOSE(VB_PLAYBACK, LOC + QString(" discontinuity %1 -> %2")
++                .arg(m_tcNext).arg(timecode));
++            Resize(channels, bits);
++            append( reinterpret_cast< const char* >(b), len);
++            m_tcFirst = timecode;
++            m_tcNext = tcNext;
++        }
++
++        int overflow = size() - m_sizeMax;
++        if (overflow > 0)
++        {
++            remove(0, overflow);
++            m_tcFirst = m_tcNext - Samples2MS(Bytes2Samples(m_sizeMax));
++        }
++    }
++
++    const int16_t* Data16(const range_t &avail) const
++    {
++        unsigned start = MS2Samples(avail.first - m_tcFirst);
++        return reinterpret_cast< const int16_t* >(constData() + start * BytesPerSample());
++    }
++
++protected:
++    inline unsigned BytesPerSample() const
++    {
++        return m_channels * ((m_bits + 7) / 8);
++    }
++
++    inline unsigned Bytes2Samples(unsigned bytes) const
++    {
++        return  (m_channels && m_bits) ? bytes / BytesPerSample() : 0;
++    }
++
++    inline unsigned long Samples2MS(unsigned samples) const
++    {
++        return (samples * 1000UL + m_sample_rate - 1) / m_sample_rate; // round up
++    }
++
++    inline unsigned MS2Samples(int64_t ms) const
++    {
++        return ms > 0 ? (ms * m_sample_rate) / 1000 : 0; // NB round down
++    }
++
++private:
++    void Resize(int channels, int bits)
++    {
++        m_bits = bits;
++        m_channels = channels;
++        m_sizeMax = ((m_sample_rate * kBufferMilliSecs) / 1000) * BytesPerSample();
++        resize(0);
++    }
++
++private:
++    unsigned m_maxSamples;
++    unsigned m_sample_rate;
++    unsigned long m_tcFirst, m_tcNext;
++    int m_bits;
++    int m_channels;
++    int m_sizeMax;
++};
++
++
++/*
++ * Audio graphic
++ */
++AudioOutputGraph::AudioOutputGraph() :
++    m_painter(0),
++    m_dBsilence(-72), m_dBquiet(-60), m_dBLoud(-12), m_dbMax(-6),
++    m_buffer(new AudioOutputGraph::Buffer())
++{ }
++
++AudioOutputGraph::~AudioOutputGraph()
++{
++    delete m_buffer;
++}
++
++void AudioOutputGraph::SetPainter(MythPainter* painter)
++{
++    m_painter = painter;
++}
++
++void AudioOutputGraph::SetSampleRate(unsigned sample_rate)
++{
++    VERBOSE(VB_PLAYBACK, LOC + QString("(%1)").arg(sample_rate));
++
++    m_buffer->SetSampleRate(sample_rate);
++}
++
++void AudioOutputGraph::SetSampleCount(unsigned sample_count)
++{
++    VERBOSE(VB_PLAYBACK, LOC + QString("(%1)").arg(sample_count));
++
++    m_buffer->SetMaxSamples(sample_count);
++}
++
++void AudioOutputGraph::prepare()
++{
++}
++
++void AudioOutputGraph::add(uchar *buf, unsigned long len, unsigned long timecode, int channels, int bits)
++{
++    m_buffer->Append(buf, len, timecode, channels, bits);
++}
++
++void AudioOutputGraph::Reset()
++{
++    VERBOSE(VB_PLAYBACK, LOC);
++
++    m_buffer->Empty();
++}
++
++//#define USE_TEMPLATE 1
++#if USE_TEMPLATE
++template <typename T> QImage Draw(int width, const T *p,
++    int channels, int bits, int dBsilence, int dBquiet, int dBloud, int dBmax)
++{
++    const unsigned range = 1U << bits;
++    const double threshold = 20 * log10(1.0 / range); // 16bit=-96.3296dB => ~6dB/bit
++    const int height = (int)-ceil(threshold); // 96
++
++    QImage image(width, height, QImage::Format_ARGB32);
++    image.fill(0);
++
++    for (int x = 0; x < width; ++x)
++    {
++        int left = p[0];
++        int right = channels > 1 ? p[1] : left;
++        p += channels;
++
++        unsigned avg = qAbs(left) + qAbs(right);
++        double db = 20 * log10( (double)(avg ? avg : 1) / range);
++
++        int idb = (int)ceil(db);
++        QRgb rgb = idb <= dBsilence ? qRgb(255, 255, 255)
++                 : idb <= dBquiet   ? qRgb(  0, 255, 255)
++                 : idb <= dBloud    ? qRgb(  0, 255,   0)
++                 : idb <= dBmax     ? qRgb(255, 255,   0)
++                 :                    qRgb(255,   0,   0);
++
++        int v = height - (int)(height * (db / threshold));
++        if (v >= height)
++            v = height - 1;
++        else if (v < 0)
++            v = 0;
++
++        for (int y = 0; y <= v; ++y)
++            image.setPixel(x, height - 1 - y, rgb);
++    }
++
++    return image;
++}
++#endif
++
++MythImage *AudioOutputGraph::GetImage(int64_t timecode) const
++{
++    Buffer::range_t avail = m_buffer->Avail(timecode);
++
++    VERBOSE(VB_PLAYBACK, LOC +
++        QString("(%1) using [%2..%3] avail [%4..%5]")
++        .arg(timecode).arg(avail.first).arg(avail.second)
++        .arg(m_buffer->First()).arg(m_buffer->Next()) );
++
++    const int width = m_buffer->Samples(avail);
++    if (width <= 0)
++        return 0;
++
++#if USE_TEMPLATE
++    QImage image = Draw(width, m_buffer->Data16(avail),
++        m_buffer->Channels(), m_buffer->BitsPerChannel(),
++        m_dBsilence, m_dBquiet, m_dBLoud, m_dbMax);
++#else
++    const unsigned range = 1U << m_buffer->BitsPerChannel();
++    const double threshold = 20 * log10(1.0 / range); // 16bit=-96.3296dB => ~6dB/bit
++    const int height = (int)-ceil(threshold); // 96
++
++    QImage image(width, height, QImage::Format_ARGB32);
++    image.fill(0);
++
++    const int channels = m_buffer->Channels();
++
++    // Assume signed 16 bit/sample
++    const int16_t *p = m_buffer->Data16(avail);
++
++    for (int x = 0; x < width; ++x)
++    {
++        int left = p[0];
++        int right = channels > 1 ? p[1] : left;
++        p += channels;
++
++        unsigned avg = qAbs(left) + qAbs(right);
++        double db = 20 * log10( (double)(avg ? avg : 1) / range);
++
++        int idb = (int)ceil(db);
++        QRgb rgb = idb <= m_dBsilence ? qRgb(255, 255, 255)
++                 : idb <= m_dBquiet   ? qRgb(  0, 255, 255)
++                 : idb <= m_dBLoud    ? qRgb(  0, 255,   0)
++                 : idb <= m_dbMax     ? qRgb(255, 255,   0)
++                 :                      qRgb(255,   0,   0);
++
++        int v = height - (int)(height * (db / threshold));
++        if (v >= height)
++            v = height - 1;
++        else if (v < 0)
++            v = 0;
++
++        for (int y = 0; y <= v; ++y)
++            image.setPixel(x, height - 1 - y, rgb);
++    }
++#endif
++
++    MythImage *mi = new MythImage(m_painter);
++    mi->Assign(image);
++    return mi;
++}
+diff --git a/mythtv/libs/libmyth/audiooutputgraph.h b/mythtv/libs/libmyth/audiooutputgraph.h
+new file mode 100644
+index 0000000..8a823f4
+--- /dev/null
++++ b/mythtv/libs/libmyth/audiooutputgraph.h
+@@ -0,0 +1,43 @@
++#ifndef AUDIOOUTPUTGRAPH_H
++#define AUDIOOUTPUTGRAPH_H
++#include <stdint.h>
++
++#include "visual.h"
++
++class MythImage;
++class MythPainter;
++
++class AudioOutputGraph : public MythTV::Visual
++{
++public:
++    AudioOutputGraph();
++    virtual ~AudioOutputGraph();
++
++    // Properties
++    void SetPainter(MythPainter*);
++    void SetSampleRate(unsigned sample_rate);
++    void SetSampleCount(unsigned sample_count);
++
++    void SetSilenceLevel(int db = -72) { m_dBsilence = db; }
++    void SetQuietLevel(int db = -60) { m_dBquiet = db; }
++    void SetLoudLevel(int db = -12) { m_dBLoud = db; }
++    void SetMaxLevel(int db = -6) { m_dbMax = db; }
++
++    // Operations
++    MythImage *GetImage(int64_t timecode) const;
++    void Reset();
++
++    // MythTV::Visual implementation
++public:
++    virtual void add(uchar *b, unsigned long b_len, unsigned long timecode, int chnls, int bits);
++    virtual void prepare();
++
++    // Implementation
++private:
++    MythPainter *m_painter;
++    int m_dBsilence, m_dBquiet, m_dBLoud, m_dbMax;
++    class Buffer;
++    Buffer * const m_buffer;
++};
++
++#endif // AUDIOOUTPUTGRAPH_H
+diff --git a/mythtv/libs/libmyth/libmyth.pro b/mythtv/libs/libmyth/libmyth.pro
+index d39d773..dca18d0 100644
+--- a/mythtv/libs/libmyth/libmyth.pro
++++ b/mythtv/libs/libmyth/libmyth.pro
+@@ -12,6 +12,7 @@ QMAKE_CLEAN += $(TARGET) $(TARGETA) $(TARGETD) $(TARGET0) $(TARGET1) $(TARGET2)
+ 
+ # Input
+ HEADERS += audiooutput.h audiooutputbase.h audiooutputnull.h
++HEADERS += audiooutputgraph.h
+ HEADERS += audiooutpututil.h audiooutputdownmix.h
+ HEADERS += audiooutputdigitalencoder.h audiosettings.h audiooutputsettings.h
+ HEADERS += backendselect.h dbsettings.h dialogbox.h
+@@ -39,6 +40,7 @@ HEADERS += rssparse.h             netutils.h
+ HEADERS += virtualkeyboard_qt.h
+ 
+ SOURCES += audiooutput.cpp audiooutputbase.cpp audiooutputnull.cpp
++SOURCES += audiooutputgraph.cpp
+ SOURCES += audiooutpututil.cpp audiooutputdownmix.cpp
+ SOURCES += audiooutputdigitalencoder.cpp audiosettings.cpp audiooutputsettings.cpp
+ SOURCES += backendselect.cpp dbsettings.cpp dialogbox.cpp
+diff --git a/mythtv/libs/libmythtv/audioplayer.cpp b/mythtv/libs/libmythtv/audioplayer.cpp
+index 74ef6f7..f9f4950 100644
+--- a/mythtv/libs/libmythtv/audioplayer.cpp
++++ b/mythtv/libs/libmythtv/audioplayer.cpp
+@@ -370,3 +370,15 @@ bool AudioPlayer::IsBufferAlmostFull(void)
+     }
+     return false;
+ }
++
++void AudioPlayer::addVisual(MythTV::Visual *vis)
++{
++    if (m_audioOutput)
++        m_audioOutput->addVisual(vis);
++}
++
++void AudioPlayer::removeVisual(MythTV::Visual *vis)
++{
++    if (m_audioOutput)
++        m_audioOutput->removeVisual(vis);
++}
+diff --git a/mythtv/libs/libmythtv/audioplayer.h b/mythtv/libs/libmythtv/audioplayer.h
+index 16e47e9..6874e27 100644
+--- a/mythtv/libs/libmythtv/audioplayer.h
++++ b/mythtv/libs/libmythtv/audioplayer.h
+@@ -3,6 +3,13 @@
+ 
+ #include <stdint.h>
+ 
++#include <QString>
++#include <QMutex>
++
++#include "volumebase.h" /* for MuteState */
++#include "audiooutputsettings.h" /* for AudioFormat */
++#include "visual.h"
++
+ class MythPlayer;
+ class AudioOutput;
+ 
+@@ -34,6 +41,7 @@ class MPUBLIC AudioPlayer
+     int   GetCodec(void)        { return m_codec;         }
+     int   GetNumChannels(void)  { return m_channels;      }
+     int   GetOrigChannels(void) { return m_orig_channels; }
++    int   GetSampleRate() const { return m_samplerate; }
+     uint  GetVolume(void);
+     uint  AdjustVolume(int change);
+     float GetStretchFactor(void) { return m_stretchfactor;   }
+@@ -56,6 +64,9 @@ class MPUBLIC AudioPlayer
+     bool GetBufferStatus(uint &fill, uint &total);
+     bool IsBufferAlmostFull(void);
+ 
++    void addVisual(MythTV::Visual *);
++    void removeVisual(MythTV::Visual *);
++
+   private:
+     MythPlayer  *m_parent;
+     AudioOutput *m_audioOutput;
+diff --git a/mythtv/libs/libmythtv/deletemap.cpp b/mythtv/libs/libmythtv/deletemap.cpp
+index 014e312..20d6d33 100644
+--- a/mythtv/libs/libmythtv/deletemap.cpp
++++ b/mythtv/libs/libmythtv/deletemap.cpp
+@@ -110,6 +110,11 @@ void DeleteMap::UpdateOSD(uint64_t frame, uint64_t total, double frame_rate,
+     m_changed = false;
+ }
+ 
++void DeleteMap::UpdateOSD(int64_t timecode, OSD *osd)
++{
++    osd->SetGraph("osd_program_editor", "audiograph", timecode);
++}
++
+ /// Set the edit mode and optionally hide the edit mode OSD.
+ void DeleteMap::SetEditing(bool edit, OSD *osd)
+ {
+@@ -674,7 +679,7 @@ bool DeleteMap::TrackerWantsToJump(uint64_t frame, uint64_t total, uint64_t &to)
+         return false;
+ 
+     to = GetNearestMark(m_nextCutStart, total, true);
+-    VERBOSE(VB_PLAYBACK, LOC + QString("Tracker wants to jump to: %1").arg(to));
++    VERBOSE(VB_PLAYBACK|VB_EXTRA, LOC + QString("Tracker wants to jump to: %1").arg(to));
+     return true;
+ }
+ 
+diff --git a/mythtv/libs/libmythtv/deletemap.h b/mythtv/libs/libmythtv/deletemap.h
+index dfb4975..1664e3e 100644
+--- a/mythtv/libs/libmythtv/deletemap.h
++++ b/mythtv/libs/libmythtv/deletemap.h
+@@ -18,6 +18,7 @@ class DeleteMap
+ 
+     void UpdateOSD(uint64_t frame, uint64_t total, double frame_rate,
+                    PlayerContext *ctx, OSD *osd);
++    void UpdateOSD(int64_t timecode, OSD *osd);
+ 
+     bool IsEditing(void) { return m_editing; }
+     void SetEditing(bool edit, OSD *osd = NULL);
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 649aa72..20a1fe3 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -154,6 +154,7 @@ MythPlayer::MythPlayer(bool muted)
+       totalFrames(0),               totalLength(0),
+       totalDuration(0),
+       rewindtime(0),
++      m_latestVideoTimecode(-1),
+       // Input Video Attributes
+       video_disp_dim(0,0), video_dim(0,0),
+       video_frame_rate(29.97f), video_aspect(4.0f / 3.0f),
+@@ -1106,6 +1107,7 @@ void MythPlayer::ReleaseNextVideoFrame(VideoFrame *buffer,
+     if (wrap)
+         WrapTimecode(timecode, TC_VIDEO);
+     buffer->timecode = timecode;
++    m_latestVideoTimecode = timecode;
+ 
+     videoOutput->ReleaseFrame(buffer);
+ 
+@@ -1829,6 +1831,14 @@ void MythPlayer::RefreshPauseFrame(void)
+         {
+             videoOutput->UpdatePauseFrame();
+             needNewPauseFrame = false;
++
++            if (deleteMap.IsEditing())
++            {
++                osdLock.lock();
++                if (osd)
++                    deleteMap.UpdateOSD(GetLatestVideoTimecode(), osd);
++                osdLock.unlock();
++            }
+         }
+         else
+         {
+@@ -2890,7 +2900,7 @@ void MythPlayer::DecoderLoop(bool pause)
+             continue;
+         }
+ 
+-        DecodeType dt = (audio.HasAudioOut() && normal_speed) ?
++        DecodeType dt = deleteMap.IsEditing() || (audio.HasAudioOut() && normal_speed) ?
+             kDecodeAV : kDecodeVideo;
+         //if (noVideoTracks && audio.HasAudioOut())
+         //    dt = kDecodeAudio;
+@@ -2922,7 +2932,7 @@ bool MythPlayer::DecoderGetFrameFFREW(void)
+     {
+         DecoderGetFrameREW();
+     }
+-    return decoder->GetFrame(kDecodeVideo);
++    return decoder->GetFrame(deleteMap.IsEditing() ? kDecodeAV : kDecodeVideo);
+ }
+ 
+ bool MythPlayer::DecoderGetFrameREW(void)
+@@ -3586,6 +3596,12 @@ bool MythPlayer::EnableEdit(void)
+     if (!osd)
+         return false;
+ 
++    m_audiograph.SetPainter(videoOutput->GetOSDPainter());
++    int sample_rate = GetAudio()->GetSampleRate();
++    m_audiograph.SetSampleRate(sample_rate);
++    m_audiograph.SetSampleCount((unsigned)(sample_rate / video_frame_rate));
++    GetAudio()->addVisual(&m_audiograph);
++
+     speedBeforeEdit = play_speed;
+     pausedBeforeEdit = Pause();
+     deleteMap.SetEditing(true);
+@@ -3622,6 +3638,8 @@ void MythPlayer::DisableEdit(bool save)
+     if (player_ctx->playingInfo)
+         player_ctx->playingInfo->SaveEditing(false);
+     player_ctx->UnlockPlayingInfo(__FILE__, __LINE__);
++    GetAudio()->removeVisual(&m_audiograph);
++    m_audiograph.Reset();
+     if (!pausedBeforeEdit)
+         Play(speedBeforeEdit);
+     else
+diff --git a/mythtv/libs/libmythtv/mythplayer.h b/mythtv/libs/libmythtv/mythplayer.h
+index e148ee5..8edb838 100644
+--- a/mythtv/libs/libmythtv/mythplayer.h
++++ b/mythtv/libs/libmythtv/mythplayer.h
+@@ -28,6 +28,7 @@
+ #include "deletemap.h"
+ #include "commbreakmap.h"
+ #include "audioplayer.h"
++#include "audiooutputgraph.h"
+ 
+ #include "mythexp.h"
+ 
+@@ -157,11 +158,13 @@ class MPUBLIC MythPlayer
+     int     GetFFRewSkip(void) const          { return ffrew_skip; }
+     float   GetPlaySpeed(void) const          { return play_speed; }
+     AudioPlayer* GetAudio(void)               { return &audio; }
++    const AudioOutputGraph& GetAudioGraph() const { return m_audiograph; }
+     float   GetAudioStretchFactor(void)       { return audio.GetStretchFactor(); }
+     float   GetNextPlaySpeed(void) const      { return next_play_speed; }
+     int     GetLength(void) const             { return totalLength; }
+     uint64_t GetTotalFrameCount(void) const   { return totalFrames; }
+     uint64_t GetFramesPlayed(void) const      { return framesPlayed; }
++    int64_t  GetLatestVideoTimecode() const   { return m_latestVideoTimecode; }
+     virtual  uint64_t GetBookmark(void);
+     QString   GetError(void) const;
+     bool      IsErrorRecoverable(void) const
+@@ -598,6 +601,7 @@ class MPUBLIC MythPlayer
+     long long totalLength;
+     int64_t   totalDuration;
+     long long rewindtime;
++    int64_t   m_latestVideoTimecode;
+ 
+     // -- end state stuff --
+ 
+@@ -660,6 +664,7 @@ class MPUBLIC MythPlayer
+ 
+     // Audio stuff
+     AudioPlayer audio;
++    AudioOutputGraph m_audiograph;
+ 
+     // Picture-in-Picture
+     PIPMap         pip_players;
+diff --git a/mythtv/libs/libmythtv/osd.cpp b/mythtv/libs/libmythtv/osd.cpp
+index bfa7262..7b192c0 100644
+--- a/mythtv/libs/libmythtv/osd.cpp
++++ b/mythtv/libs/libmythtv/osd.cpp
+@@ -527,6 +527,21 @@ void OSD::SetRegions(const QString &window, frm_dir_map_t &map,
+     bar->Display();
+ }
+ 
++void OSD::SetGraph(const QString &window, const QString &graph, int64_t timecode)
++{
++    MythScreenType *win = GetWindow(window);
++    if (!win)
++        return;
++
++    MythUIImage *image = dynamic_cast<MythUIImage* >(win->GetChild(graph));
++    if (!image)
++        return;
++
++    MythImage* mi = m_parent->GetAudioGraph().GetImage(timecode);
++    if (mi)
++        image->SetImage(mi);
++}
++
+ bool OSD::DrawDirect(MythPainter* painter, QSize size, bool repaint)
+ {
+     if (!painter)
+diff --git a/mythtv/libs/libmythtv/osd.h b/mythtv/libs/libmythtv/osd.h
+index 6095b84..a330193 100644
+--- a/mythtv/libs/libmythtv/osd.h
++++ b/mythtv/libs/libmythtv/osd.h
+@@ -165,6 +165,7 @@ class OSD
+                  OSDTimeout timeout);
+     void SetRegions(const QString &window, frm_dir_map_t &map,
+                  long long total);
++    void SetGraph(const QString &window, const QString &graph, int64_t timecode);
+     bool IsWindowVisible(const QString &window);
+ 
+     bool DialogVisible(QString window = QString());
+diff --git a/mythtv/themes/MythCenter-wide/osd.xml b/mythtv/themes/MythCenter-wide/osd.xml
+index f35f567..ab7b669 100644
+--- a/mythtv/themes/MythCenter-wide/osd.xml
++++ b/mythtv/themes/MythCenter-wide/osd.xml
+@@ -414,11 +414,14 @@
+         </shape>
+         <textarea name="title">
+             <font>medium</font>
+-            <area>10,10,870,40</area>
++            <area>10,10,130,40</area>
+             <align>left,vcenter</align>
+         </textarea>
++        <imagetype name="audiograph">
++            <area>140,4,500,44</area>
++        </imagetype>
+         <textarea name="seekamount" from="title">
+-            <area>10,10,870,40</area>
++            <area>640,10,240,40</area>
+             <align>right,vcenter</align>
+         </textarea>
+         <textarea name="timedisplay" from="title">
+diff --git a/mythtv/themes/Terra/osd.xml b/mythtv/themes/Terra/osd.xml
+index 4090364..d96e973 100644
+--- a/mythtv/themes/Terra/osd.xml
++++ b/mythtv/themes/Terra/osd.xml
+@@ -378,6 +378,10 @@
+             <value>Video Editor</value>
+         </textarea>
+ 
++        <imagetype name="audiograph">
++            <area>250,30,290,34</area>
++        </imagetype>
++
+         <textarea name="timedisplay">
+             <area>540,38,200,30</area>
+             <font>basesmall</font>
+diff --git a/mythtv/themes/default-wide/osd.xml b/mythtv/themes/default-wide/osd.xml
+index 6f8f4f5..ea7de93 100644
+--- a/mythtv/themes/default-wide/osd.xml
++++ b/mythtv/themes/default-wide/osd.xml
+@@ -344,10 +344,13 @@
+             <cornerradius>12</cornerradius>
+         </shape>
+         <textarea name="title">
+-            <area>10,10,600,30</area>
++            <area>10,10,130,30</area>
+             <align>left,top</align>
+             <font>small</font>
+         </textarea>
++        <imagetype name="audiograph">
++            <area>140,4,630,34</area>
++        </imagetype>
+         <textarea name="seekamount" from="title">
+             <area>770,10,300,30</area>
+             <align>right,top</align>
+diff --git a/mythtv/themes/default/osd.xml b/mythtv/themes/default/osd.xml
+index b189aa4..f725d91 100644
+--- a/mythtv/themes/default/osd.xml
++++ b/mythtv/themes/default/osd.xml
+@@ -347,12 +347,15 @@
+             <cornerradius>12</cornerradius>
+         </shape>
+         <textarea name="title">
+-            <area>6,8,375,25</area>
++            <area>6,8,120,25</area>
+             <align>left,top</align>
+             <font>small</font>
+         </textarea>
++        <imagetype name="audiograph">
++            <area>126,2,412,23</area>
++        </imagetype>
+         <textarea name="seekamount" from="title">
+-            <area>481,8,187,25</area>
++            <area>538,8,130,25</area>
+             <align>right,top</align>
+         </textarea>
+         <textarea name="timedisplay" from="title">
+-- 
+1.7.9.5
+

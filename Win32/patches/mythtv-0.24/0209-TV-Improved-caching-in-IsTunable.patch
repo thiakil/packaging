@@ -1,0 +1,202 @@
+From e0489684c6ade5db0ac9e1dac9f0513cc558b1f4 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 27 May 2013 17:13:22 +0100
+Subject: [PATCH 209/285] TV: Improved caching in IsTunable
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/channelutil.cpp |   51 +++++++++++++++++++++++++++++++++
+ mythtv/libs/libmythtv/channelutil.h   |    1 +
+ mythtv/libs/libmythtv/tv_play.cpp     |   50 +++++++++++++++++++++-----------
+ mythtv/libs/libmythtv/tv_play.h       |    2 ++
+ 4 files changed, 88 insertions(+), 16 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/channelutil.cpp b/mythtv/libs/libmythtv/channelutil.cpp
+index 9fda1ce..a97ee5d 100644
+--- a/mythtv/libs/libmythtv/channelutil.cpp
++++ b/mythtv/libs/libmythtv/channelutil.cpp
+@@ -11,6 +11,10 @@ using namespace std;
+ #include <QFile>
+ #include <QReadWriteLock>
+ #include <QHash>
++#include <QMap>
++#include <QPair>
++#include <QMutex>
++#include <QMutexLocker>
+ 
+ #include "channelutil.h"
+ #include "mythdb.h"
+@@ -2060,4 +2064,51 @@ uint ChannelUtil::GetNextChannel(
+     return it->chanid;
+ }
+ 
++//static
++bool ChannelUtil::GetMplexAndSourceID(uint &mplexid, uint &sourceid, uint chanid)
++{
++    typedef QPair< uint,uint > src_t; // mplexid, sourceid
++    typedef QMap< uint,src_t > cache_src_t;
++    static cache_src_t s_cache_src;
++    static QMutex s_mutex;
++
++    {
++        QMutexLocker locker(&s_mutex);
++        cache_src_t::const_iterator it = s_cache_src.find(chanid);
++        if (it != s_cache_src.end())
++        {
++            mplexid = it->first;
++            sourceid = it->second;
++            return true;
++        }
++    }
++
++    MSqlQuery query(MSqlQuery::InitCon());
++
++    query.prepare(
++        "SELECT mplexid, sourceid "
++        "FROM channel "
++        "WHERE chanid = :CHANID");
++    query.bindValue(":CHANID", chanid);
++
++    if (!query.exec())
++    {
++        MythDB::DBError("GetMplexAndSourceID", query);
++        mplexid = sourceid = 0;
++        return false;
++    }
++    else if (!query.next())
++    {
++        mplexid = sourceid = 0;
++        return false;
++    }
++
++    mplexid = query.value(0).toUInt();
++    sourceid = query.value(1).toUInt();
++
++    QMutexLocker locker(&s_mutex);
++    s_cache_src[chanid] = src_t(mplexid, sourceid);
++    return true;
++}
++
+ /* vim: set expandtab tabstop=4 shiftwidth=4: */
+diff --git a/mythtv/libs/libmythtv/channelutil.h b/mythtv/libs/libmythtv/channelutil.h
+index 863de93..83378fd 100644
+--- a/mythtv/libs/libmythtv/channelutil.h
++++ b/mythtv/libs/libmythtv/channelutil.h
+@@ -210,6 +210,7 @@ class MPUBLIC ChannelUtil
+     static int     GetSourceID(int mplexid);
+     static uint    GetSourceIDForChannel(uint chanid);
+     static int     GetInputID(int sourceid, int cardid);
++    static bool    GetMplexAndSourceID(uint &mplexid, uint &sourceid, uint chanid);
+ 
+     // Misc sets
+     static bool    SetChannelValue(const QString &field_name,
+diff --git a/mythtv/libs/libmythtv/tv_play.cpp b/mythtv/libs/libmythtv/tv_play.cpp
+index 6450296..2159f49 100644
+--- a/mythtv/libs/libmythtv/tv_play.cpp
++++ b/mythtv/libs/libmythtv/tv_play.cpp
+@@ -7527,34 +7527,51 @@ void TV::ShowLCDDVDInfo(const PlayerContext *ctx)
+ 
+ bool TV::IsTunable(const PlayerContext *ctx, uint chanid, bool use_cache)
+ {
+-    VERBOSE(VB_PLAYBACK, QString("IsTunable(%1)").arg(chanid));
++    VERBOSE(VB_PLAYBACK|VB_EXTRA, QString("IsTunable(%1)").arg(chanid));
+ 
+     if (!chanid)
+         return false;
+ 
+-    uint mplexid = ChannelUtil::GetMplexID(chanid);
+-    mplexid = (32767 == mplexid) ? 0 : mplexid;
++    uint mplexid = 0, sourceid = 0;
++    if (!ChannelUtil::GetMplexAndSourceID(mplexid, sourceid, chanid))
++        return false;
++
++    if (mplexid == 32767)
++        mplexid = 0;
+ 
+     vector<uint> excluded_cards;
+     if (ctx->recorder && ctx->pseudoLiveTVState == kPseudoNormalLiveTV)
+         excluded_cards.push_back(ctx->GetCardID());
+ 
+-    uint sourceid = ChannelUtil::GetSourceIDForChannel(chanid);
+-    vector<uint> connected   = RemoteRequestFreeRecorderList();
+-    vector<uint> interesting = CardUtil::GetCardIDs(sourceid);
+-
+-    // filter disconnected cards
+-    vector<uint> cardids = excluded_cards;
+-    for (uint i = 0; i < connected.size(); i++)
++    bool bFound = false;
++    vector<uint> cardids;
+     {
+-        for (uint j = 0; j < interesting.size(); j++)
++        QMutexLocker locker(&is_tunable_cache_lock);
++        cache_cards_t::const_iterator it = is_tunable_cache_cards.find(chanid);
++        if ((bFound = (it != is_tunable_cache_cards.end())))
++            cardids = *it;
++    }
++    if (!bFound)
++    {
++        cardids = excluded_cards;
++        vector<uint> connected = RemoteRequestFreeRecorderList();
++        vector<uint> interesting = CardUtil::GetCardIDs(sourceid);
++
++        // filter disconnected cards
++        for (uint i = 0; i < connected.size(); i++)
+         {
+-            if (connected[i] == interesting[j])
++            for (uint j = 0; j < interesting.size(); j++)
+             {
+-                cardids.push_back(interesting[j]);
+-                break;
++                if (connected[i] == interesting[j])
++                {
++                    cardids.push_back(interesting[j]);
++                    break;
++                }
+             }
+         }
++
++        QMutexLocker locker(&is_tunable_cache_lock);
++        is_tunable_cache_cards[chanid] = cardids;
+     }
+ 
+ #if 0
+@@ -7602,20 +7619,21 @@ bool TV::IsTunable(const PlayerContext *ctx, uint chanid, bool use_cache)
+                 inputs[j].mplexid != mplexid)
+                 continue;
+ 
+-            VERBOSE(VB_PLAYBACK, QString("IsTunable(%1) -> true\n")
++            VERBOSE(VB_PLAYBACK|VB_EXTRA, QString("IsTunable(%1) -> true")
+                     .arg(chanid));
+ 
+             return true;
+         }
+     }
+ 
+-    VERBOSE(VB_PLAYBACK, QString("IsTunable(%1) -> false\n").arg(chanid));
++    VERBOSE(VB_PLAYBACK|VB_EXTRA, QString("IsTunable(%1) -> false").arg(chanid));
+ 
+     return false;
+ }
+ 
+ void TV::ClearTunableCache(void)
+ {
++    VERBOSE(VB_PLAYBACK, "ClearTunableCache");
+     QMutexLocker locker(&is_tunable_cache_lock);
+     is_tunable_cache_inputs.clear();
+ }
+diff --git a/mythtv/libs/libmythtv/tv_play.h b/mythtv/libs/libmythtv/tv_play.h
+index 89230cf..4f1a4f6 100644
+--- a/mythtv/libs/libmythtv/tv_play.h
++++ b/mythtv/libs/libmythtv/tv_play.h
+@@ -811,6 +811,8 @@ class MPUBLIC TV : public QObject
+     // IsTunable() cache, used by embedded program guide
+     mutable QMutex                 is_tunable_cache_lock;
+     QMap< uint,vector<InputInfo> > is_tunable_cache_inputs;
++    typedef QMap< uint,vector<uint> > cache_cards_t;
++    cache_cards_t                  is_tunable_cache_cards;
+ 
+ #ifdef PLAY_FROM_RECORDER
+     /// Info requested by PlayFromRecorder
+-- 
+1.7.9.5
+

@@ -1,0 +1,37 @@
+From 73d6dcaf6a834cdb37ecbbc21438bf2a3a48d183 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 28 Sep 2013 14:28:46 +0100
+Subject: [PATCH 226/227] AFD: Fix vdpau hack to force MPEG1 streams to use an
+ MPEG2 decoder
+
+Ffmpeg's avcodec_open2 fails if the stream's type doesn't match
+the decoder's type.  This patch forces the codec type to mpeg2 as
+well as the stream to work around this limitation.
+
+Without this patch the playback of mpeg1 videos is broken.
+This bug affects older videos and cameras using MPEG1 encoding.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |    5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index deb8c9e..1934034 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -1927,8 +1927,9 @@ int AvFormatDecoder::ScanStreams(bool novideo)
+                     // MPEG2 streams as MPEG1 streams, and should
+                     // be harmless for unbroken ones.
+                     if (enc->codec_id == CODEC_ID_MPEG1VIDEO)
+-                        enc->codec_id = CODEC_ID_MPEG2VIDEO;
+-                    // HACK -- end
++                        codec = avcodec_find_decoder(
++                                    enc->codec_id = CODEC_ID_MPEG2VIDEO);
++                     // HACK -- end
+ #endif // USING_VDPAU
+ #ifdef USING_VDPAU
+                     MythCodecID vdpau_mcid;
+-- 
+1.7.9.5
+

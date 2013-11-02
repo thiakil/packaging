@@ -1,0 +1,132 @@
+From 9ce34d7b9d64fc5cf2f0545bd2db2c8c41bcce1c Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 13 Mar 2011 18:15:52 +0100
+Subject: [PATCH 002/285] Win32: Link with correct thread library
+
+The mythtv configure script contains some logic for detecting the correct
+compiler flags and libraries to use when pthread support is required on
+Windows.  However, a number of mythtv projects ignore this and just add
+"LIBS += -lpthread" for Windows builds.
+
+The attached patch replaces "mingw:LIBS += -lpthread" with mingw:LIBS +=
+$$EXTRA_LIBS where EXTRA_LIBS is set in configure to the correct value.
+
+This affects the following projects: kerneldeint yadif libmyth libmythdb
+libmythhdhomerun libmythtv mythtvosd and programs-libs
+
+Ticket URL: <http://code.mythtv.org/trac/ticket/9470>
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/filters/kerneldeint/kerneldeint.pro        |    2 +-
+ mythtv/filters/yadif/yadif.pro                    |    2 +-
+ mythtv/libs/libmyth/libmyth.pro                   |    2 +-
+ mythtv/libs/libmythdb/libmythdb.pro               |    2 +-
+ mythtv/libs/libmythhdhomerun/libmythhdhomerun.pro |    2 +-
+ mythtv/libs/libmythtv/libmythtv.pro               |    1 -
+ mythtv/programs/mythtvosd/mythtvosd.pro           |    2 +-
+ mythtv/programs/programs-libs.pro                 |    1 -
+ 8 files changed, 6 insertions(+), 8 deletions(-)
+
+diff --git a/mythtv/filters/kerneldeint/kerneldeint.pro b/mythtv/filters/kerneldeint/kerneldeint.pro
+index 91514a2..b0dc012 100644
+--- a/mythtv/filters/kerneldeint/kerneldeint.pro
++++ b/mythtv/filters/kerneldeint/kerneldeint.pro
+@@ -5,7 +5,7 @@ LIBS += -lmyth-$${LIBVERSION} -L../../libs/libmyth
+ LIBS += -lmythdb-$${LIBVERSION} -L../../libs/libmythdb
+ macx:LIBS += -lmythui-$${LIBVERSION} -L../../libs/libmythui
+ macx:LIBS += -lmythupnp-$${LIBVERSION} -L../../libs/libmythupnp
+-mingw:LIBS += -lpthread
++mingw:LIBS += $$EXTRA_LIBS
+ 
+ # Input
+ SOURCES += filter_kerneldeint.c
+diff --git a/mythtv/filters/yadif/yadif.pro b/mythtv/filters/yadif/yadif.pro
+index ec45a0a..8d679a8 100644
+--- a/mythtv/filters/yadif/yadif.pro
++++ b/mythtv/filters/yadif/yadif.pro
+@@ -2,7 +2,7 @@ include ( ../filter-common.pro )
+ include ( ../filter-avcodec.pro )
+ 
+ INCLUDEPATH += ../../libs/libmythtv ../../libs/libavcodec ../..
+-mingw:LIBS += -lpthread
++mingw:LIBS += $$EXTRA_LIBS
+ 
+ # Input
+ SOURCES += filter_yadif.c
+diff --git a/mythtv/libs/libmyth/libmyth.pro b/mythtv/libs/libmyth/libmyth.pro
+index 143d513..820c9b3 100644
+--- a/mythtv/libs/libmyth/libmyth.pro
++++ b/mythtv/libs/libmyth/libmyth.pro
+@@ -153,7 +153,7 @@ mingw {
+     DEFINES += USING_MINGW
+     SOURCES += mediamonitor-windows.cpp audiooutputwin.cpp audiooutputdx.cpp
+     HEADERS += mediamonitor-windows.h   audiooutputwin.h   audiooutputdx.h
+-    LIBS += -lpthread -lwinmm -lws2_32
++    LIBS += -lwinmm -lws2_32
+ }
+ 
+ macx {
+diff --git a/mythtv/libs/libmythdb/libmythdb.pro b/mythtv/libs/libmythdb/libmythdb.pro
+index 83e612e..daa8990 100644
+--- a/mythtv/libs/libmythdb/libmythdb.pro
++++ b/mythtv/libs/libmythdb/libmythdb.pro
+@@ -64,7 +64,7 @@ use_hidesyms {
+     QMAKE_CXXFLAGS += -fvisibility=hidden
+ }
+ 
+-mingw:LIBS += -lpthread -lws2_32
++mingw:LIBS += -lws2_32
+ 
+ QT += xml sql network
+ 
+diff --git a/mythtv/libs/libmythhdhomerun/libmythhdhomerun.pro b/mythtv/libs/libmythhdhomerun/libmythhdhomerun.pro
+index e17202b..dd6598b 100644
+--- a/mythtv/libs/libmythhdhomerun/libmythhdhomerun.pro
++++ b/mythtv/libs/libmythhdhomerun/libmythhdhomerun.pro
+@@ -30,7 +30,7 @@ mingw {
+     HEADERS += hdhomerun_os_windows.h
+     SOURCES += hdhomerun_os_windows.c hdhomerun_sock_windows.c
+     SOURCES -= hdhomerun_os_posix.c
+-    LIBS += -lws2_32 -liphlpapi -lpthread
++    LIBS += -lws2_32 -liphlpapi
+ }
+ 
+ LIBS += $$EXTRALIBS 
+diff --git a/mythtv/libs/libmythtv/libmythtv.pro b/mythtv/libs/libmythtv/libmythtv.pro
+index 3d26e0a..662587b 100644
+--- a/mythtv/libs/libmythtv/libmythtv.pro
++++ b/mythtv/libs/libmythtv/libmythtv.pro
+@@ -585,7 +585,6 @@ mingw {
+     SOURCES -= NuppelVideoRecorder.cpp
+     SOURCES += videoout_d3d.cpp
+ 
+-    LIBS += -lpthread
+     LIBS += -lws2_32
+ }
+ 
+diff --git a/mythtv/programs/mythtvosd/mythtvosd.pro b/mythtv/programs/mythtvosd/mythtvosd.pro
+index 859cede..36a4ceb 100644
+--- a/mythtv/programs/mythtvosd/mythtvosd.pro
++++ b/mythtv/programs/mythtvosd/mythtvosd.pro
+@@ -17,4 +17,4 @@ QMAKE_CLEAN += $(TARGET)
+ # Input
+ SOURCES += main.cpp
+ 
+-mingw: LIBS += -lpthread -lwinmm -lws2_32
++mingw: LIBS += -lwinmm -lws2_32
+diff --git a/mythtv/programs/programs-libs.pro b/mythtv/programs/programs-libs.pro
+index 0085ada..6cecb17 100644
+--- a/mythtv/programs/programs-libs.pro
++++ b/mythtv/programs/programs-libs.pro
+@@ -30,7 +30,6 @@ using_mheg:LIBS += -L../../libs/libmythfreemheg -lmythfreemheg-$$LIBVERSION
+ using_hdhomerun:LIBS += -L../../libs/libmythhdhomerun -lmythhdhomerun-$$LIBVERSION
+ 
+ mingw {
+-    LIBS += -lpthread
+     CONFIG += console
+ }
+ 
+-- 
+1.7.9.5
+

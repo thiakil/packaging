@@ -1,0 +1,72 @@
+From 42d95a91f200619e735b09850be043acd0c84af1 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 19 Jul 2011 14:44:23 +0200
+Subject: [PATCH 056/285] freemheg: Add PrintMe to ParseNode for improved
+ logging of MHEG parameters
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythfreemheg/ParseNode.cpp |   36 +++++++++++++++++++++++++++++
+ mythtv/libs/libmythfreemheg/ParseNode.h   |    2 ++
+ 2 files changed, 38 insertions(+)
+
+diff --git a/mythtv/libs/libmythfreemheg/ParseNode.cpp b/mythtv/libs/libmythfreemheg/ParseNode.cpp
+index 4286600..0230a72 100644
+--- a/mythtv/libs/libmythfreemheg/ParseNode.cpp
++++ b/mythtv/libs/libmythfreemheg/ParseNode.cpp
+@@ -147,3 +147,39 @@ void MHParseNode::GetStringValue(MHOctetString &str)
+     str.Copy(((MHPString*)this)->m_Value);
+ }
+ 
++void MHParseNode::PrintMe(FILE *f)
++{
++    for (int i = 0; i < GetArgCount(); ++i)
++    {
++        if (i) fprintf(f, ", ");
++        MHParseNode* pn = GetArgN(i);
++        switch (pn->m_nNodeType)
++        {
++        case MHParseNode::PNTagged:
++            fprintf(f, "tagged { "); pn->PrintMe(f); fprintf(f, "}");
++            break;
++        case MHParseNode::PNBool:
++            fprintf(f, "bool %s", pn->GetBoolValue() ? "true" : "false");
++            break;
++        case MHParseNode::PNInt:
++            fprintf(f, "int %d", pn->GetIntValue());
++            break;
++        case MHParseNode::PNEnum:
++            fprintf(f, "enum %d", pn->GetEnumValue());
++            break;
++        case MHParseNode::PNString: {
++            MHOctetString str;
++            pn->GetStringValue(str);
++            fprintf(f, "string '%s'", str.Bytes());
++            break;
++        }
++        case MHParseNode::PNNull:
++            fprintf(f, "null");
++            break;
++        case MHParseNode::PNSeq:
++            fprintf(f, "seq { "); pn->PrintMe(f); fprintf(f, "}");
++            break;
++        }
++    }
++    fprintf(f, "\n");
++}
+diff --git a/mythtv/libs/libmythfreemheg/ParseNode.h b/mythtv/libs/libmythfreemheg/ParseNode.h
+index ed8b44e..e2a76b4 100644
+--- a/mythtv/libs/libmythfreemheg/ParseNode.h
++++ b/mythtv/libs/libmythfreemheg/ParseNode.h
+@@ -67,6 +67,8 @@ public:
+     bool GetBoolValue();
+     // String
+     void GetStringValue(MHOctetString &str);
++
++    void PrintMe(FILE *);
+ };
+ 
+ // Sequence of parse nodes.
+-- 
+1.7.9.5
+

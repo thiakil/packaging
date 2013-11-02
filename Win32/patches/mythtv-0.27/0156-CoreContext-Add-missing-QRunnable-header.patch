@@ -1,0 +1,25 @@
+From 13a997a9243993b6a95ad5c90383af3b8efc84f7 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 31 Jul 2013 14:59:40 +0100
+Subject: [PATCH 156/207] CoreContext: Add missing QRunnable header
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythbase/mythcorecontext.cpp |    1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/mythtv/libs/libmythbase/mythcorecontext.cpp b/mythtv/libs/libmythbase/mythcorecontext.cpp
+index 2637544..d9f0e28 100644
+--- a/mythtv/libs/libmythbase/mythcorecontext.cpp
++++ b/mythtv/libs/libmythbase/mythcorecontext.cpp
+@@ -12,6 +12,7 @@
+ #include <QNetworkInterface>
+ #include <QNetworkAddressEntry>
+ #include <QLocale>
++#include <QRunnable>
+ 
+ #include <cmath>
+ #include <cstdarg>
+-- 
+1.7.9.5
+

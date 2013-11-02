@@ -1,0 +1,30 @@
+From ea28e62483928c6b7ddd7b79d63a0370e065bdeb Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 6 May 2012 21:39:32 +0200
+Subject: [PATCH 107/285] libmythui: Workaround for fglrx tearfree redraw
+ problesm with lirc keypresses
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythui/lirc.cpp |    5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/mythtv/libs/libmythui/lirc.cpp b/mythtv/libs/libmythui/lirc.cpp
+index ed474de..7e251b9 100644
+--- a/mythtv/libs/libmythui/lirc.cpp
++++ b/mythtv/libs/libmythui/lirc.cpp
+@@ -398,6 +398,11 @@ void LIRC::Process(const QByteArray &data)
+                     QEvent::KeyRelease, keycode, mod, text, lirctext));
+         }
+ 
++        // With Catalyst 12.3 fglrx tearfree desktop enabled the display can
++        // become out of step with that drawn until a keyevent occurs.
++        // This delay works around this bug.  A delay of < 10ms is insufficient
++        usleep(20000);
++
+         for (int i = (int)keyReleases.size() - 1; i>=0; i--)
+             QCoreApplication::postEvent(m_mainWindow, keyReleases[i]);
+ 
+-- 
+1.7.9.5
+

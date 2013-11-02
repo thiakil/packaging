@@ -1,0 +1,28 @@
+From b813c422c77d61ea824ae056ec45683c643f8b8b Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 20 Aug 2013 18:46:16 +0100
+Subject: [PATCH 272/285] PlayerContext: Handle errors when starting to play a
+ recording
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/playercontext.cpp |    3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/playercontext.cpp b/mythtv/libs/libmythtv/playercontext.cpp
+index 4cd42ff..f1de0fb 100644
+--- a/mythtv/libs/libmythtv/playercontext.cpp
++++ b/mythtv/libs/libmythtv/playercontext.cpp
+@@ -472,7 +472,8 @@ bool PlayerContext::StartPlaying(int maxWait)
+     if (!player)
+         return false;
+ 
+-    player->StartPlaying();
++    if (!player->StartPlaying())
++        return false;
+ 
+     maxWait = (maxWait <= 0) ? 20000 : maxWait;
+ #ifdef USING_VALGRIND
+-- 
+1.7.9.5
+

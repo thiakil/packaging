@@ -1,0 +1,38 @@
+From c44e6198560247127b2a1a0dc7e5c21060c4241e Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 11 Sep 2013 17:40:23 +0100
+Subject: [PATCH 183/207] AFD: Read packets until audio PTS >= video PTS
+
+If the 'Extra audio buffering' setting is disabled then the audio
+stream PTS can lag the video by up to a second.  This can sometimes
+cause A/V sync problems but also causes sync problems when displaying
+the audio output graph when editing the cutlist.
+
+This patch ensures that the last audio PTS at least equals the video
+PTS before exiting GetFrame.  This ensures there are matching audio
+samples for the pause frame shown in the cutlkist editor.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |    4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index 659b0cf..3740779 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -4661,9 +4661,9 @@ bool AvFormatDecoder::GetFrame(DecodeType decodetype)
+                 // NB but allow for data only (MHEG) streams
+                 allowedquit = true;
+             }
+-            else if (lowbuffers && ((decodetype & kDecodeAV) == kDecodeAV) &&
++            else if ((decodetype & kDecodeAV) == kDecodeAV &&
+                      (storedPackets.count() < max_video_queue_size) &&
+-                     (lastapts < lastvpts + 100) &&
++                     lastapts < (lowbuffers ? lastvpts + 100 : lastvpts) &&
+                      !ringBuffer->IsInStillFrame())
+             {
+                 storevideoframes = true;
+-- 
+1.7.9.5
+

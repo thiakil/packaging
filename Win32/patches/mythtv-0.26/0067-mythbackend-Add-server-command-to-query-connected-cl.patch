@@ -1,0 +1,125 @@
+From 2e8d1bb6909df24a09997fa8324290b36efdc39d Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 18 Apr 2013 19:32:50 +0100
+Subject: [PATCH 067/227] mythbackend: Add server command to query connected
+ clients
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythbackend/filetransfer.cpp |    7 +++-
+ mythtv/programs/mythbackend/filetransfer.h   |    2 ++
+ mythtv/programs/mythbackend/mainserver.cpp   |   44 ++++++++++++++++++++++++++
+ mythtv/programs/mythbackend/mainserver.h     |    1 +
+ 4 files changed, 53 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/programs/mythbackend/filetransfer.cpp b/mythtv/programs/mythbackend/filetransfer.cpp
+index 18d5963..079a3a3 100644
+--- a/mythtv/programs/mythbackend/filetransfer.cpp
++++ b/mythtv/programs/mythbackend/filetransfer.cpp
+@@ -202,7 +202,7 @@ long long FileTransfer::Seek(long long curpos, long long pos, int whence)
+ 
+     Pause();
+ 
+-    if (whence == SEEK_CUR)
++    if (whence == SEEK_CUR && curpos >= 0)
+     {
+         long long desired = curpos + pos;
+         long long realpos = rbuffer->GetReadPosition();
+@@ -236,4 +236,9 @@ void FileTransfer::SetTimeout(bool fast)
+     rbuffer->SetOldFile(fast);
+ }
+ 
++QString FileTransfer::GetFilename() const
++{
++    return rbuffer->GetFilename();
++}
++
+ /* vim: set expandtab tabstop=4 shiftwidth=4: */
+diff --git a/mythtv/programs/mythbackend/filetransfer.h b/mythtv/programs/mythbackend/filetransfer.h
+index d8e5235..8b77a94 100644
+--- a/mythtv/programs/mythbackend/filetransfer.h
++++ b/mythtv/programs/mythbackend/filetransfer.h
+@@ -47,6 +47,8 @@ class FileTransfer : public ReferenceCounter
+ 
+     void SetTimeout(bool fast);
+ 
++    QString GetFilename() const;
++
+   private:
+    ~FileTransfer();
+ 
+diff --git a/mythtv/programs/mythbackend/mainserver.cpp b/mythtv/programs/mythbackend/mainserver.cpp
+index 3a4316e..daa39a2 100644
+--- a/mythtv/programs/mythbackend/mainserver.cpp
++++ b/mythtv/programs/mythbackend/mainserver.cpp
+@@ -832,6 +832,13 @@ void MainServer::ProcessRequestWork(MythSocket *sock)
+         LOG(VB_GENERAL, LOG_INFO ,"Reloading backend settings");
+         HandleBackendRefresh(sock);
+     }
++    else if (command == "QUERY_CLIENTS")
++    {
++        if (tokens.size() != 1)
++            LOG(VB_GENERAL, LOG_ERR, "Bad QUERY_CLIENTS");
++        else
++            HandleQueryClients(pbs);
++    }
+     else if (command == "OK")
+     {
+         LOG(VB_GENERAL, LOG_ERR, "Got 'OK' out of sequence.");
+@@ -6290,4 +6297,41 @@ void MainServer::SendSlaveDisconnectedEvent(
+     gCoreContext->dispatch(me);
+ }
+ 
++void MainServer::HandleQueryClients(PlaybackSock *pbsock)
++{
++    QStringList retlist;
++
++    sockListLock.lockForRead();
++
++    retlist << QString::number(playbackList.size() + fileTransferList.size());
++
++    for ( vector<PlaybackSock *>::iterator iter = playbackList.begin();
++        iter != playbackList.end(); ++iter)
++    {
++        PlaybackSock *pbs = *iter;
++
++        retlist << pbs->getHostname();
++        retlist << QString::number(pbs->isSlaveBackend() ? 1 : 0);
++        retlist << QString::number((int)pbs->eventsMode());
++        retlist << QString::number(pbs->getBlockShutdown());
++        retlist << pbs->getIP();
++    }
++
++    for ( vector<FileTransfer *>::iterator iter = fileTransferList.begin();
++        iter != fileTransferList.end(); ++iter)
++    {
++        FileTransfer *ft = *iter;
++        MythSocket *sock = ft->getSocket();
++
++        retlist << sock->peerAddress().toString();
++        retlist << QString::number(2); // 2= file transfer client
++        retlist << QString::number(sock->socket());
++        retlist << QString::number(true);
++        retlist << ft->GetFilename();
++    }
++
++    sockListLock.unlock();
++
++    SendResponse(pbsock->getSocket(), retlist);
++}
+ /* vim: set expandtab tabstop=4 shiftwidth=4: */
+diff --git a/mythtv/programs/mythbackend/mainserver.h b/mythtv/programs/mythbackend/mainserver.h
+index e27c9ae..b6ab365 100644
+--- a/mythtv/programs/mythbackend/mainserver.h
++++ b/mythtv/programs/mythbackend/mainserver.h
+@@ -226,6 +226,7 @@ class MainServer : public QObject, public MythSocketCBs
+     void HandleBlockShutdown(bool blockShutdown, PlaybackSock *pbs);
+     void HandleDownloadFile(const QStringList &command, PlaybackSock *pbs);
+     void HandleSlaveDisconnectedEvent(const MythEvent &event);
++    void HandleQueryClients(PlaybackSock *);
+ 
+     void SendResponse(MythSocket *pbs, QStringList &commands);
+     void SendSlaveDisconnectedEvent(const QList<uint> &offlineEncoderIDs,
+-- 
+1.7.9.5
+

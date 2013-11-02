@@ -1,0 +1,77 @@
+From 6cde3cf33f08bb632940b910d628900eca328087 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 29 Oct 2011 11:43:35 +0200
+Subject: [PATCH 070/285] libavformat: Report MPEG TS continuity errors
+
+This patch corrects the test for TS continuity errors by ignoring packets
+with no payload and also reports any such errors.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/external/FFmpeg/libavformat/mpegts.c |   38 +++++++++++++++++++--------
+ 1 file changed, 27 insertions(+), 11 deletions(-)
+
+diff --git a/mythtv/external/FFmpeg/libavformat/mpegts.c b/mythtv/external/FFmpeg/libavformat/mpegts.c
+index 9721060..805782f 100644
+--- a/mythtv/external/FFmpeg/libavformat/mpegts.c
++++ b/mythtv/external/FFmpeg/libavformat/mpegts.c
+@@ -1980,7 +1980,7 @@ static int handle_packet(MpegTSContext *ts, const uint8_t *packet)
+ {
+     AVFormatContext *s = ts->stream;
+     MpegTSFilter *tss;
+-    int len, pid, cc, cc_ok, afc, is_start;
++    int len, pid, cc, cc_ok, is_start;
+     const uint8_t *p, *p_end;
+     int64_t pos;
+ 
+@@ -2007,21 +2007,37 @@ static int handle_packet(MpegTSContext *ts, const uint8_t *packet)
+     if (!tss)
+         return 0;
+ 
+-    /* continuity check (currently not used) */
++    /* continuity check */
+     cc = (packet[3] & 0xf);
+-    cc_ok = (tss->last_cc < 0) || ((((tss->last_cc + 1) & 0x0f) == cc));
+-    tss->last_cc = cc;
++    if (tss->last_cc < 0)
++    {
++        tss->last_cc = cc;
++        cc_ok = 1;
++    }
++    else if (packet[3] & 0x10) /* hasPayload */
++    {
++        int next_cc = (tss->last_cc + 1) & 0x0f;
++        cc_ok = (next_cc == cc);
++        if (!cc_ok && (tss->last_cc != cc))
++            av_log(s, AV_LOG_INFO, "Discontinuity on PID=0x%x, got %d expected %d\n", pid, cc, next_cc);
++        tss->last_cc = cc;
++    }
++    else
++        cc_ok = 0;
+ 
+-    /* skip adaptation field */
+-    afc = (packet[3] >> 4) & 3;
+     p = packet + 4;
+-    if (afc == 0) /* reserved value */
+-        return 0;
+-    if (afc == 2) /* adaptation field only */
++    switch (packet[3] & 0x30)
++    {
++    case 0x10: /* payload only */
++        break;
++    case 0x20: /* adaptation field only */
+         return 0;
+-    if (afc == 3) {
+-        /* skip adapation field */
++    case 0x30: /* skip adapation field */
+         p += p[0] + 1;
++        break;
++    default: /* reserved value */
++        av_log(s, AV_LOG_ERROR, "Invalid adaptation field on PID=0x%x\n", pid);
++        return 0;
+     }
+     /* if past the end of packet, ignore */
+     p_end = packet + TS_PACKET_SIZE;
+-- 
+1.7.9.5
+

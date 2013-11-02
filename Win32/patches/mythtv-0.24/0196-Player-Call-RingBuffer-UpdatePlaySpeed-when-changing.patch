@@ -1,0 +1,28 @@
+From 4e78f11c1d1fda1a6fbbe6ca7fe8cdbb0e92ec2a Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 14 Jun 2013 08:33:27 +0100
+Subject: [PATCH 196/285] Player: Call RingBuffer::UpdatePlaySpeed when
+ changing speed
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |    3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index a1983da..d2f51bd 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -3260,6 +3260,9 @@ void MythPlayer::ChangeSpeed(void)
+             .arg(video_frame_rate).arg(play_speed)
+             .arg(ffrew_skip).arg(frame_interval));
+ 
++    if (play_speed != 0)
++        player_ctx->buffer->UpdatePlaySpeed(play_speed);
++
+     if (videoOutput && videosync)
+     {
+         // We need to tell it this for automatic deinterlacer settings
+-- 
+1.7.9.5
+

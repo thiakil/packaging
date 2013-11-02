@@ -1,0 +1,29 @@
+From c81189e62ec3e528d2cacb0948f12c41bbcc08e3 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 17 Jun 2013 14:34:05 +0100
+Subject: [PATCH 224/285] AFD: Increase timeout in GetFrame
+
+The current timeout is insufficient when playing at x8 and the frontend
+is on a slow network.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index 153220a..b225584 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -4255,7 +4255,7 @@ bool AvFormatDecoder::GetFrame(DecodeType decodetype)
+     // Must return in a timely fashion to check if decoder is pausing
+     // This is important for low bit rate streams like radio
+     QTime timer = QTime::currentTime();
+-    while (!allowedquit && timer.elapsed() < 100)
++    while (!allowedquit && timer.elapsed() < 1000)
+     {
+         if ((decodetype & kDecodeAudio) &&
+             ((currentTrack[kTrackTypeAudio] < 0) ||
+-- 
+1.7.9.5
+

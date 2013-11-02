@@ -1,0 +1,45 @@
+From 5f8c983fe0836df6b5b921ba8ca0673e5ac4837e Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 22 Oct 2013 17:10:13 +0100
+Subject: [PATCH 205/207] MainWindow: Log level for locking & idle reduced to
+ debug
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythui/mythmainwindow.cpp |    8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/mythtv/libs/libmythui/mythmainwindow.cpp b/mythtv/libs/libmythui/mythmainwindow.cpp
+index 744adb8..adca418 100644
+--- a/mythtv/libs/libmythui/mythmainwindow.cpp
++++ b/mythtv/libs/libmythui/mythmainwindow.cpp
+@@ -2700,9 +2700,9 @@ void MythMainWindow::StartLIRC(void)
+ void MythMainWindow::LockInputDevices( bool locked )
+ {
+     if( locked )
+-        LOG(VB_GENERAL, LOG_INFO, "Locking input devices");
++        LOG(VB_GENERAL, LOG_DEBUG, "Locking input devices");
+     else
+-        LOG(VB_GENERAL, LOG_INFO, "Unlocking input devices");
++        LOG(VB_GENERAL, LOG_DEBUG, "Unlocking input devices");
+ 
+ #ifdef USE_LIRC
+     d->ignore_lirc_keys = locked;
+@@ -2748,12 +2748,12 @@ void MythMainWindow::PauseIdleTimer(bool pause)
+ {
+     if (pause)
+     {
+-        LOG(VB_GENERAL, LOG_NOTICE, "Suspending idle timer");
++        LOG(VB_GENERAL, LOG_DEBUG, "Suspending idle timer");
+         d->idleTimer->stop();
+     }
+     else
+     {
+-        LOG(VB_GENERAL, LOG_NOTICE, "Resuming idle timer");
++        LOG(VB_GENERAL, LOG_DEBUG, "Resuming idle timer");
+         d->idleTimer->start();
+     }
+ 
+-- 
+1.7.9.5
+

@@ -1,0 +1,49 @@
+From 86e2261d656aecdb303c002fd32ce22fd0eb208c Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 19 Sep 2013 15:12:55 +0100
+Subject: [PATCH 285/285] mytharchive: Workaround DVDAuthor chapterlist
+ problem
+
+DVDAuthor 0.7.0 needs n+1 timestamps for n chapters otherwise DVD
+creation with chapter buttons fails
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../mytharchive/mythburn/scripts/mythburn.py       |   14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/mythplugins/mytharchive/mythburn/scripts/mythburn.py b/mythplugins/mytharchive/mythburn/scripts/mythburn.py
+index cf5ab72..2f249ef 100755
+--- a/mythplugins/mytharchive/mythburn/scripts/mythburn.py
++++ b/mythplugins/mytharchive/mythburn/scripts/mythburn.py
+@@ -255,7 +255,7 @@ def fatalError(msg):
+     write("ERROR: " + msg)
+     write("*"*60)
+     write("")
+-    saveSetting("MythArchiveLastRunResult", "Failed: " + quoteString(msg));
++    saveSetting("MythArchiveLastRunStatus", "Failed: " + quoteString(msg));
+     saveSetting("MythArchiveLastRunEnd", time.strftime("%Y-%m-%d %H:%M:%S "))
+     sys.exit(0)
+ 
+@@ -3178,11 +3178,13 @@ def createDVDAuthorXML(screensize, numberofitems):
+ 
+             vob = dvddom.createElement("vob")
+             if wantChapterMenu:
+-                vob.setAttribute("chapters",
+-                    createVideoChapters(itemnum,
+-                                        chapters,
+-                                        getLengthOfVideo(itemnum),
+-                                        False))
++                thumblist = createVideoChapters(itemnum, chapters, getLengthOfVideo(itemnum), False)
++                chapterlist = string.split(thumblist, ",")
++                if chapterlist[0] != '00:00:00':
++                    thumblist = '00:00:00,' + thumblist
++                # dvdauthor 0.7.0 wants a final timestamp
++                thumblist = thumblist + time.strftime(",%H:%M:%S",time.gmtime(getLengthOfVideo(itemnum)))
++                vob.setAttribute("chapters", thumblist)
+             else:
+                 vob.setAttribute("chapters", 
+                     createVideoChaptersFixedLength(itemnum,
+-- 
+1.7.9.5
+

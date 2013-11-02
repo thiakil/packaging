@@ -1,0 +1,33 @@
+--- qt-everywhere-opensource-src-4.7.0.orig/src/plugins/sqldrivers/mysql/mysql.pro	2010-09-10 11:05:26.000000000 +0200
++++ qt-everywhere-opensource-src-4.7.0/src/plugins/sqldrivers/mysql/mysql.pro	2011-01-26 17:15:28.000000000 +0100
+@@ -4,20 +4,17 @@ HEADERS		= ../../../sql/drivers/mysql/qs
+ SOURCES		= main.cpp \
+ 		  ../../../sql/drivers/mysql/qsql_mysql.cpp
+ 
+-unix: {
+-    isEmpty(QT_LFLAGS_MYSQL) {
+-        !contains(LIBS, .*mysqlclient.*):!contains(LIBS, .*mysqld.*) {
+-            use_libmysqlclient_r:LIBS *= -lmysqlclient_r
+-            else:LIBS *= -lmysqlclient
+-        }
+-    } else {
+-        LIBS *= $$QT_LFLAGS_MYSQL
+-        QMAKE_CXXFLAGS *= $$QT_CFLAGS_MYSQL
++isEmpty(QT_LFLAGS_MYSQL) {
++    unix:!contains(LIBS, .*mysqlclient.*):!contains(LIBS, .*mysqld.*) {
++        use_libmysqlclient_r:LIBS *= -lmysqlclient_r
++        else:LIBS *= -lmysqlclient
+     }
+-}
+-
+-win32:!contains(LIBS, .*mysql.*):!contains(LIBS, .*mysqld.*) {
+-    LIBS     *= -llibmysql    
++    win32:!contains(LIBS, .*mysql.*):!contains(LIBS, .*mysqld.*) {
++        LIBS     *= -llibmysql    
++    }
++} else {
++    LIBS *= $$QT_LFLAGS_MYSQL
++    QMAKE_CXXFLAGS *= $$QT_CFLAGS_MYSQL
+ }
+ 
+ include(../qsqldriverbase.pri)

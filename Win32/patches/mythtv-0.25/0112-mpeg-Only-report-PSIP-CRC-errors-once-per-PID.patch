@@ -1,0 +1,32 @@
+From 66e54585236b82ce29144cddff92fec720a4002b Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 9 Aug 2012 20:28:55 +0200
+Subject: [PATCH 112/124] mpeg: Only report PSIP CRC errors once per PID
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mpeg/mpegstreamdata.cpp |    6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/mpeg/mpegstreamdata.cpp b/mythtv/libs/libmythtv/mpeg/mpegstreamdata.cpp
+index 5785fb8..80e2100 100644
+--- a/mythtv/libs/libmythtv/mpeg/mpegstreamdata.cpp
++++ b/mythtv/libs/libmythtv/mpeg/mpegstreamdata.cpp
+@@ -950,9 +950,13 @@ void MPEGStreamData::HandleTSTables(const TSPacket* tspacket)
+          (TableID::PAT == psip->TableID()));
+     if (!buggy && !psip->IsGood())
+     {
+-        LOG(VB_RECORD, LOG_ERR,
++        // To prevent a flood of log messages record the PID of last error
++        // S*y/FreeSat Astra 2A/2B/1N have no CRC on PID 0xc0 type 0x82 (ECM priv)
++        static int s_pid;
++        LOG(VB_RECORD, s_pid != tspacket->PID() ? LOG_ERR : LOG_DEBUG,
+             QString("PSIP packet failed CRC check. pid(0x%1) type(0x%2)")
+                 .arg(tspacket->PID(),0,16).arg(psip->TableID(),0,16));
++        s_pid = tspacket->PID();
+         DONE_WITH_PSIP_PACKET();
+     }
+ 
+-- 
+1.7.9.5
+

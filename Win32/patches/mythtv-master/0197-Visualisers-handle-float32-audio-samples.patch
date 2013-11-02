@@ -1,0 +1,71 @@
+From 2055b528b8b26705853e990dce1ea53d61cf000a Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 7 Oct 2013 11:09:22 +0100
+Subject: [PATCH 197/202] Visualisers: handle float32 audio samples
+
+Ogg and wma audio recordings are passed to the visualiser as
+32-bit floating point buffers which are currently incorrectly
+displayed.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../libs/libmythtv/visualisations/videovisual.cpp  |   29 ++++++++++++++++++++
+ 1 file changed, 29 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/visualisations/videovisual.cpp b/mythtv/libs/libmythtv/visualisations/videovisual.cpp
+index ede4464..8accb3f 100644
+--- a/mythtv/libs/libmythtv/visualisations/videovisual.cpp
++++ b/mythtv/libs/libmythtv/visualisations/videovisual.cpp
+@@ -106,6 +106,27 @@ VisualNode* VideoVisual::GetNode(void)
+     return m_nodes.first();
+ }
+ 
++// TODO Add MMX path
++static inline void stereo16_from_stereofloat32(
++    short l[], short r[], const float s[], unsigned long cnt)
++{
++    const float f((1 << 15) - 1);
++    while (cnt--)
++    {
++        *l++ = short(f * *s++);
++        *r++ = short(f * *s++);
++    }
++}
++
++// TODO Add MMX path
++static inline void mono16_from_monofloat32(
++    short l[], const float s[], unsigned long cnt)
++{
++    const float f((1 << 15) - 1);
++    while (cnt--)
++        *l++ = short(f * *s++);
++}
++
+ // caller holds lock
+ void VideoVisual::add(uchar *b, unsigned long b_len, unsigned long w, int c,
+                       int p)
+@@ -141,6 +162,10 @@ void VideoVisual::add(uchar *b, unsigned long b_len, unsigned long w, int c,
+             stereo16_from_stereopcm8(l, r, b, cnt);
+         else if (p == 16)
+             stereo16_from_stereopcm16(l, r, (short *) b, cnt);
++        else if (p == 32)
++            stereo16_from_stereofloat32(l, r, reinterpret_cast<const float * >(b), cnt);
++        else
++            len = 0;
+     }
+     else if (c == 1)
+     {
+@@ -150,6 +175,10 @@ void VideoVisual::add(uchar *b, unsigned long b_len, unsigned long w, int c,
+             mono16_from_monopcm8(l, b, cnt);
+         else if (p == 16)
+             mono16_from_monopcm16(l, (short *) b, cnt);
++        else if (p == 32)
++            mono16_from_monofloat32(l, reinterpret_cast<const float * >(b), cnt);
++        else
++            len = 0;
+     }
+     else
+         len = 0;
+-- 
+1.7.9.5
+

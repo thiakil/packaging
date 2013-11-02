@@ -1,0 +1,280 @@
+From 7b7ea854c6a56c9b44636c9c18a323db1be96cc3 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 25 May 2013 15:37:40 +0100
+Subject: [PATCH 206/285] TV: MythPlayer: Optimize JumpToProgram and
+ SwitchToProgram
+
+1. buffer->UpdateRawBitrate can wait for several 100mS so only call
+   it if absolutely necessary i.e. if stream type hasn't changed.
+
+2. Omit unnecessary call to buffer->IgnoreLiveEOF which also can wait
+   for several 100mS.
+
+3. Omit some lengthy calls to read the deleteMap and bookmarks if liveTV
+
+4. Ensure there are sufficient video frames buffered before starting playback.
+   This reduces stutters in the first few seconds on remote frontends.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |  104 ++++++++++++++++++----------------
+ 1 file changed, 55 insertions(+), 49 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index bc7c136..14bbd4c 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -1000,14 +1000,18 @@ int MythPlayer::OpenFile(uint retries, bool allow_libmpeg2)
+     if (ret > 0)
+     {
+         hasFullPositionMap = true;
+-        deleteMap.LoadMap(totalFrames, player_ctx);
++        if (!livetv)
++            deleteMap.LoadMap(totalFrames, player_ctx);
+         deleteMap.TrackerReset(0, totalFrames);
+     }
+ 
+     // Determine the initial bookmark and update it for the cutlist
+-    bookmarkseek = GetBookmark();
+-    deleteMap.TrackerReset(bookmarkseek, totalFrames);
+-    deleteMap.TrackerWantsToJump(bookmarkseek, totalFrames, bookmarkseek);
++    if (!livetv)
++    {
++        bookmarkseek = GetBookmark();
++        deleteMap.TrackerReset(bookmarkseek, totalFrames);
++        deleteMap.TrackerWantsToJump(bookmarkseek, totalFrames, bookmarkseek);
++    }
+ 
+     if (player_ctx->playingInfo->QueryAutoExpire() == kLiveTVAutoExpire)
+         gCoreContext->SaveSetting("DefaultChanid",
+@@ -1882,13 +1886,13 @@ void MythPlayer::SetBuffering(bool new_buffering, bool pause_audio)
+     {
+         VERBOSE(VB_PLAYBACK, LOC + "Waiting for video buffers...");
+         buffering = true;
+-        audio.Pause(pause_audio);
++        if (pause_audio) audio.Pause(true);
+         buffering_start = QTime::currentTime();
+     }
+     else if (buffering && !new_buffering)
+     {
+         buffering = false;
+-        audio.Pause(false);
++        if (pause_audio) audio.Pause(false);
+     }
+ }
+ 
+@@ -1939,7 +1943,7 @@ bool MythPlayer::PrebufferEnoughFrames(bool pause_audio, int min_buffers)
+         return false;
+     }
+ 
+-    SetBuffering(false);
++    SetBuffering(false, pause_audio);
+     return true;
+ }
+ 
+@@ -2109,7 +2113,6 @@ void MythPlayer::VideoStart(void)
+         ChangeSpeed();
+ 
+     InitAVSync();
+-    videosync->Start();
+ }
+ 
+ bool MythPlayer::VideoLoop(void)
+@@ -2212,9 +2215,6 @@ void MythPlayer::CheckTVChain(void)
+ 
+ void MythPlayer::SwitchToProgram(void)
+ {
+-    if (!IsReallyNearEnd())
+-        return;
+-
+     VERBOSE(VB_PLAYBACK, LOC + "SwitchToProgram - start");
+     bool discontinuity = false, newtype = false;
+     int newid = -1;
+@@ -2232,12 +2232,17 @@ void MythPlayer::SwitchToProgram(void)
+ 
+     if (newIsDummy)
+     {
++        Pause();
+         OpenDummy();
+         ResetPlaying();
+         SetEof(false);
+         return;
+     }
+ 
++    VERBOSE(VB_PLAYBACK, LOC + QString("SwitchToProgram(void) "
++            "discont: %1 newtype: %2 newid: %3 decoderEof: %4")
++            .arg(discontinuity).arg(newtype).arg(newid).arg(GetEof()));
++
+     player_ctx->buffer->OpenFile(
+         pginfo->GetPlaybackURL(), RingBuffer::kLiveTVOpenTimeout);
+ 
+@@ -2252,31 +2257,23 @@ void MythPlayer::SwitchToProgram(void)
+         return;
+     }
+ 
+-    if (GetEof())
+-        discontinuity = true;
+-
+-    VERBOSE(VB_PLAYBACK, LOC + QString("SwitchToProgram(void) "
+-            "discont: %1 newtype: %2 newid: %3 decoderEof: %4")
+-            .arg(discontinuity).arg(newtype).arg(newid).arg(GetEof()));
+-
+-    if (discontinuity || newtype)
++    if (discontinuity || newtype || GetEof())
+     {
+         Pause();
+-        ChangeSpeed();
+         ResetCaptions();
+ 
+         player_ctx->tvchain->SetProgram(*pginfo);
+         player_ctx->buffer->Reset(true);
+ 
++        ResetPlaying();
++
+         if (newtype)
+         {
+             if (OpenFile() < 0)
+                 SetErrored(QObject::tr("Error opening switch program file"));
+         }
+-        else
+-            ResetPlaying();
+ 
+-        if (IsErrored())
++        if (IsErrored() || !decoder)
+         {
+             VERBOSE(VB_IMPORTANT, LOC_ERR + "SwitchToProgram failed.");
+             SetEof(true);
+@@ -2285,16 +2282,16 @@ void MythPlayer::SwitchToProgram(void)
+ 
+         SetEof(false);
+ 
+-        if (decoder)
+-        {
+-            // the bitrate is reset by player_ctx->buffer->OpenFile()...
++        // the bitrate is reset by player_ctx->buffer->OpenFile()...
++        // but set in OpenFile in decoder->OpenFile
++        if (!newtype)
+             player_ctx->buffer->UpdateRawBitrate(decoder->GetRawBitrate());
+-            decoder->SetProgramInfo(*pginfo);
+-        }
++        decoder->SetProgramInfo(*pginfo);
+ 
+         CheckTVChain();
+         forcePositionMapSync = true;
+         Play();
++        ChangeSpeed();
+     }
+     else
+     {
+@@ -2327,7 +2324,6 @@ void MythPlayer::FileChangedCallback(void)
+     player_ctx->UnlockPlayingInfo(__FILE__, __LINE__);
+ 
+     CheckTVChain();
+-    forcePositionMapSync = true;
+ }
+ 
+ void MythPlayer::JumpToProgram(void)
+@@ -2348,9 +2344,9 @@ void MythPlayer::JumpToProgram(void)
+     SetPlayingInfo(*pginfo);
+ 
+     Pause();
+-    ResetCaptions();
+     player_ctx->tvchain->SetProgram(*pginfo);
+     player_ctx->buffer->Reset(true);
++    player_ctx->SetPlayerChangingBuffers(false);
+ 
+     if (newIsDummy)
+     {
+@@ -2360,6 +2356,7 @@ void MythPlayer::JumpToProgram(void)
+         return;
+     }
+ 
++    ResetCaptions();
+     SendMythSystemPlayEvent("PLAY_CHANGED", pginfo.data());
+ 
+     player_ctx->buffer->OpenFile(
+@@ -2376,45 +2373,53 @@ void MythPlayer::JumpToProgram(void)
+         return;
+     }
+ 
+-    bool wasDummy = isDummy;
+-    if (newtype || wasDummy)
++    ResetPlaying();
++
++    if (newtype || isDummy)
+     {
+         if (OpenFile() < 0)
++        {
+             SetErrored(QObject::tr("Error opening jump program file"));
++            return;
++        }
++        if (IsErrored() || !decoder)
++        {
++            VERBOSE(VB_IMPORTANT, LOC_ERR + "JumpToProgram failed.");
++            SetErrored(QObject::tr("Error reopening video decoder"));
++            return;
++        }
+     }
+     else
+-        ResetPlaying();
+-
+-    if (IsErrored() || !decoder)
+     {
+-        VERBOSE(VB_IMPORTANT, LOC_ERR + "JumpToProgram failed.");
+-        if (!IsErrored())
+-            SetErrored(QObject::tr("Error reopening video decoder"));
+-        return;
++        // the bitrate is reset by player_ctx->buffer->OpenFile()...
++        // but set in OpenFile in decoder->OpenFile
++        player_ctx->buffer->UpdateRawBitrate(decoder->GetRawBitrate());
+     }
+ 
+     SetEof(false);
+ 
+-    // the bitrate is reset by player_ctx->buffer->OpenFile()...
+-    player_ctx->buffer->UpdateRawBitrate(decoder->GetRawBitrate());
+-    player_ctx->buffer->IgnoreLiveEOF(false);
+-
+     decoder->SetProgramInfo(*pginfo);
+-
+     CheckTVChain();
++
+     forcePositionMapSync = true;
+-    Play();
+-    ChangeSpeed();
++
++    UnpauseDecoder();
+ 
+     if (nextpos < 0)
+         nextpos += totalFrames;
+     if (nextpos < 0)
+         nextpos = 0;
+-
+     if (nextpos > 10)
+         DoFastForward(nextpos, true, false);
+ 
+-    player_ctx->SetPlayerChangingBuffers(false);
++    // Delay starting a/v playback until enough video buffers
++    // This avoids stutters during initial few secs on remote frontends
++    while (!noVideoTracks && !PrebufferEnoughFrames() && !IsErrored())
++        usleep(10000);
++
++    Play();
++    ChangeSpeed();
++
+     VERBOSE(VB_PLAYBACK, LOC + "JumpToProgram - end");
+ }
+ 
+@@ -2486,7 +2491,8 @@ void MythPlayer::EventStart(void)
+             player_ctx->playingInfo->SetIgnoreBookmark(false);
+     }
+     player_ctx->UnlockPlayingInfo(__FILE__, __LINE__);
+-    commBreakMap.LoadMap(player_ctx, framesPlayed);
++    if (!livetv)
++        commBreakMap.LoadMap(player_ctx, framesPlayed);
+ }
+ 
+ void MythPlayer::EventLoop(void)
+-- 
+1.7.9.5
+

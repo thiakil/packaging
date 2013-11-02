@@ -1,0 +1,59 @@
+From 7edfec3359e08f8fa66fffd2b2be3427e193ad1a Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 19 Sep 2013 18:44:54 +0100
+Subject: [PATCH 181/202] UI: Fix uninitialised warning in xmlparsebase
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythui/xmlparsebase.cpp |   28 +++++++++++++---------------
+ 1 file changed, 13 insertions(+), 15 deletions(-)
+
+diff --git a/mythtv/libs/libmythui/xmlparsebase.cpp b/mythtv/libs/libmythui/xmlparsebase.cpp
+index dd3b18f..4822645 100644
+--- a/mythtv/libs/libmythui/xmlparsebase.cpp
++++ b/mythtv/libs/libmythui/xmlparsebase.cpp
+@@ -86,28 +86,26 @@ MythPoint XMLParseBase::parsePoint(QDomElement &element, bool normalize)
+ 
+ QSize XMLParseBase::parseSize(const QString &text, bool normalize)
+ {
+-    int x, y;
+     QSize retval;
+ 
+     QStringList tmp = text.split(",");
+-    bool x_ok = false, y_ok = false;
+     if (tmp.size() >= 2)
+     {
+-        x = tmp[0].toInt(&x_ok);
+-        y = tmp[1].toInt(&y_ok);
+-    }
+-
+-    if (x_ok && y_ok)
+-    {
+-        if (x == -1 || y == -1)
++        bool x_ok = false, y_ok = false;
++        int x = tmp[0].toInt(&x_ok);
++        int y = tmp[1].toInt(&y_ok);
++        if (x_ok && y_ok)
+         {
+-            QRect uiSize = GetMythMainWindow()->GetUIScreenRect();
+-            x = uiSize.width();
+-            y = uiSize.height();
+-            normalize = false;
+-        }
++            if (x == -1 || y == -1)
++            {
++                QRect uiSize = GetMythMainWindow()->GetUIScreenRect();
++                x = uiSize.width();
++                y = uiSize.height();
++                normalize = false;
++            }
+ 
+-        retval = QSize(x, y);
++            retval = QSize(x, y);
++        }
+     }
+ 
+     if (normalize)
+-- 
+1.7.9.5
+

@@ -1,0 +1,27 @@
+From 7343ba9a735c72cad8daec83c8067c3dabc50014 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 12 Feb 2013 17:34:12 +0000
+Subject: [PATCH 056/202] mythtranscode: Prevent a divide by 0 exception
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../programs/mythtranscode/audioreencodebuffer.cpp |    3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/programs/mythtranscode/audioreencodebuffer.cpp b/mythtv/programs/mythtranscode/audioreencodebuffer.cpp
+index 6f4d299..5410d40 100644
+--- a/mythtv/programs/mythtranscode/audioreencodebuffer.cpp
++++ b/mythtv/programs/mythtranscode/audioreencodebuffer.cpp
+@@ -175,7 +175,8 @@ bool AudioReencodeBuffer::AddData(void *buffer, int len, int64_t timecode,
+         // and use 'frames' directly rather than 'len / m_bytes_per_frame',
+         // thus also covering the passthrough case.
+         m_saveBuffer = new AudioBuffer();
+-        timecode += frames * 1000 / m_eff_audiorate;
++        if (m_eff_audiorate)
++            timecode += frames * 1000 / m_eff_audiorate;
+         m_saveBuffer->appendData(buf, len, frames, timecode);
+ 
+         QMutexLocker locker(&m_bufferMutex);
+-- 
+1.7.9.5
+

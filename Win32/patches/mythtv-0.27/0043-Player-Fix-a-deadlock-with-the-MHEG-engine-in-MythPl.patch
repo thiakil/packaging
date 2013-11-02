@@ -1,0 +1,143 @@
+From bb9d8cae8e10b4981d0d771a098a0caf8787f681 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 21 Jun 2013 20:11:55 +0100
+Subject: [PATCH 043/207] Player: Fix a deadlock with the MHEG engine in
+ MythPlayer's dtor
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |   28 +++++++++++++++++++---------
+ mythtv/libs/libmythtv/mythplayer.h   |    3 ++-
+ 2 files changed, 21 insertions(+), 10 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 16d471e..b5b96a9 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -259,6 +259,14 @@ MythPlayer::MythPlayer(PlayerFlags flags)
+ 
+ MythPlayer::~MythPlayer(void)
+ {
++    // NB the interactiveTV thread is a client of OSD so must be deleted
++    // before locking and deleting the OSD
++    {
++        QMutexLocker lk0(&itvLock);
++        delete interactiveTV;
++        interactiveTV = NULL;
++    }
++
+     QMutexLocker lk1(&osdLock);
+     QMutexLocker lk2(&vidExitLock);
+     QMutexLocker lk3(&videofiltersLock);
+@@ -277,12 +285,6 @@ MythPlayer::~MythPlayer(void)
+         decoderThread = NULL;
+     }
+ 
+-    if (interactiveTV)
+-    {
+-        delete interactiveTV;
+-        interactiveTV = NULL;
+-    }
+-
+     if (FiltMan)
+     {
+         delete FiltMan;
+@@ -2919,7 +2921,7 @@ void MythPlayer::EventLoop(void)
+     }
+ 
+     // Change interactive stream if requested
+-    { QMutexLocker locker(&itvLock);
++    { QMutexLocker locker(&streamLock);
+     if (!m_newStream.isEmpty())
+     {
+         QString stream = m_newStream;
+@@ -5082,6 +5084,7 @@ void MythPlayer::ITVRestart(uint chanid, uint cardid, bool isLiveTV)
+ #endif // USING_MHEG
+ }
+ 
++// Called from the interactiveTV (MHIContext) thread
+ void MythPlayer::SetVideoResize(const QRect &videoRect)
+ {
+     QMutexLocker locker(&osdLock);
+@@ -5092,6 +5095,7 @@ void MythPlayer::SetVideoResize(const QRect &videoRect)
+ /** \fn MythPlayer::SetAudioByComponentTag(int tag)
+  *  \brief Selects the audio stream using the DVB component tag.
+  */
++// Called from the interactiveTV (MHIContext) thread
+ bool MythPlayer::SetAudioByComponentTag(int tag)
+ {
+     QMutexLocker locker(&decoder_change_lock);
+@@ -5103,6 +5107,7 @@ bool MythPlayer::SetAudioByComponentTag(int tag)
+ /** \fn MythPlayer::SetVideoByComponentTag(int tag)
+  *  \brief Selects the video stream using the DVB component tag.
+  */
++// Called from the interactiveTV (MHIContext) thread
+ bool MythPlayer::SetVideoByComponentTag(int tag)
+ {
+     QMutexLocker locker(&decoder_change_lock);
+@@ -5119,15 +5124,16 @@ static inline double SafeFPS(DecoderBase *decoder)
+     return fps > 0 ? fps : 25.0;
+ }
+ 
+-// Called from MHIContext::Begin/End/Stream on the MHIContext::StartMHEGEngine thread
++// Called from the interactiveTV (MHIContext) thread
+ bool MythPlayer::SetStream(const QString &stream)
+ {
+     // The stream name is empty if the stream is closing
+     LOG(VB_PLAYBACK, LOG_INFO, LOC + QString("SetStream '%1'").arg(stream));
+ 
+-    QMutexLocker locker(&itvLock);
++    QMutexLocker locker(&streamLock);
+     m_newStream = stream;
+     m_newStream.detach();
++    locker.unlock();
+     // Stream will be changed by JumpToStream called from EventLoop
+     // If successful will call interactiveTV->StreamStarted();
+ 
+@@ -5211,11 +5217,13 @@ void MythPlayer::JumpToStream(const QString &stream)
+     LOG(VB_PLAYBACK, LOG_INFO, LOC + "JumpToStream - end");
+ }
+ 
++// Called from the interactiveTV (MHIContext) thread
+ long MythPlayer::GetStreamPos()
+ {
+     return (long)((1000 * GetFramesPlayed()) / SafeFPS(decoder));
+ }
+ 
++// Called from the interactiveTV (MHIContext) thread
+ long MythPlayer::GetStreamMaxPos()
+ {
+     long maxpos = (long)(1000 * (totalDuration > 0 ? totalDuration : totalLength));
+@@ -5223,6 +5231,7 @@ long MythPlayer::GetStreamMaxPos()
+     return maxpos > pos ? maxpos : pos;
+ }
+ 
++// Called from the interactiveTV (MHIContext) thread
+ long MythPlayer::SetStreamPos(long ms)
+ {
+     uint64_t frameNum = (uint64_t)((ms * SafeFPS(decoder)) / 1000);
+@@ -5232,6 +5241,7 @@ long MythPlayer::SetStreamPos(long ms)
+     return ms;
+ }
+ 
++// Called from the interactiveTV (MHIContext) thread
+ void MythPlayer::StreamPlay(bool play)
+ {
+     if (play)
+diff --git a/mythtv/libs/libmythtv/mythplayer.h b/mythtv/libs/libmythtv/mythplayer.h
+index 4efe768..423d041 100644
+--- a/mythtv/libs/libmythtv/mythplayer.h
++++ b/mythtv/libs/libmythtv/mythplayer.h
+@@ -752,7 +752,8 @@ class MTV_PUBLIC MythPlayer
+     InteractiveTV *interactiveTV;
+     bool       itvEnabled;
+     QMutex     itvLock;
+-    QString    m_newStream; // Guarded by itvLock
++    QMutex     streamLock;
++    QString    m_newStream; // Guarded by streamLock
+ 
+     // OSD stuff
+     OSD  *osd;
+-- 
+1.7.9.5
+

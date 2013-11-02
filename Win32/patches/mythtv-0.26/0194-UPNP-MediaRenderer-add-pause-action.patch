@@ -1,0 +1,96 @@
+From 93f2c35b09f2e64be2aca7bbe2fd9dbc885b85a7 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 10 Aug 2013 16:43:30 +0100
+Subject: [PATCH 194/227] UPNP: MediaRenderer add pause action
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythupnp/upnpavt.cpp |   46 ++++++++++++++++++++++++++++++++---
+ mythtv/libs/libmythupnp/upnpavt.h   |    2 +-
+ 2 files changed, 43 insertions(+), 5 deletions(-)
+
+diff --git a/mythtv/libs/libmythupnp/upnpavt.cpp b/mythtv/libs/libmythupnp/upnpavt.cpp
+index 11b74ad..4e5f8ab 100644
+--- a/mythtv/libs/libmythupnp/upnpavt.cpp
++++ b/mythtv/libs/libmythupnp/upnpavt.cpp
+@@ -69,6 +69,7 @@ UPnpAVTransport::UPnpAVTransport( UPnpDevice *pDevice , const QString &sSharePat
+     m_mapAction.insert( "Seek", &UPnpAVTransport::Seek);
+     m_mapAction.insert( "Next", &UPnpAVTransport::Next);
+     m_mapAction.insert( "Previous", &UPnpAVTransport::Previous);
++    m_mapAction.insert( "Pause", &UPnpAVTransport::Pause);
+ 
+     // Add our Service Definition to the device.
+     RegisterService( pDevice );
+@@ -389,11 +390,19 @@ void UPnpAVTransport::Play( HTTPRequest *pRequest )
+ 
+     LOG(VB_UPNP, LOG_INFO, QString("UPnpAVTransport::Play(speed=%1)").arg(speed));
+ 
+-    UPnPResultCode res = StartPlay();
+-    if ( UPnPResult_Success != res)
++    if ( GetValue<QString>("TransportState") == "PAUSED_PLAYBACK")
+     {
+-        UPnp::FormatErrorResponse( pRequest, res);
+-        return;
++        SendEvent("NETWORK_CONTROL SPEED 1x");
++        SetValue< QString >( "TransportState", "PLAYING" );
++    }
++    else
++    {
++        UPnPResultCode res = StartPlay();
++        if ( UPnPResult_Success != res)
++        {
++            UPnp::FormatErrorResponse( pRequest, res);
++            return;
++        }
+     }
+ 
+     SetValue< QString >( "TransportPlaySpeed", speed );
+@@ -608,3 +617,32 @@ void UPnpAVTransport::Previous( HTTPRequest *pRequest )
+ /////////////////////////////////////////////////////////////////////////////
+ //
+ /////////////////////////////////////////////////////////////////////////////
++void UPnpAVTransport::Pause( HTTPRequest *pRequest )
++{
++    unsigned short nId = pRequest->m_mapParams[ "InstanceID" ].toUShort();
++    if ( nId != 0)
++    {
++        LOG(VB_UPNP, LOG_INFO, "UPnpAVTransport::Pause invalid InstanceID");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueInvalid );
++        return;
++    }
++
++    if ( GetValue<QString>("TransportState") == "STOPPED")
++    {
++        LOG(VB_UPNP, LOG_INFO, "UPnpAVTransport::Pause not permitted when STOPPED");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_InvalidSequence );
++        return;
++    }
++
++    LOG(VB_UPNP, LOG_INFO, "UPnpAVTransport::Pause");
++
++    SendEvent("NETWORK_CONTROL SPEED 0x");
++    if ( GetValue<QString>("TransportState") == "PLAYING")
++        SetValue< QString >( "TransportState", "PAUSED_PLAYBACK" );
++
++    pRequest->FormatActionResponse(NameValues());
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
+diff --git a/mythtv/libs/libmythupnp/upnpavt.h b/mythtv/libs/libmythupnp/upnpavt.h
+index 63bcae3..1d68ac1 100644
+--- a/mythtv/libs/libmythupnp/upnpavt.h
++++ b/mythtv/libs/libmythupnp/upnpavt.h
+@@ -32,7 +32,7 @@ class UPNP_PUBLIC UPnpAVTransport : public Eventing
+     Action Unknown, GetServDesc;
+     Action SetAVTransportURI, GetMediaInfo, GetTransportInfo;
+     Action GetPositionInfo, GetDeviceCapabilities, GetTransportSettings;
+-    Action Stop, Play, Seek, Next, Previous;
++    Action Stop, Play, Seek, Next, Previous, Pause;
+ 
+     UPnPResultCode StartPlay();
+ 
+-- 
+1.7.9.5
+

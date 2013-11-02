@@ -1,0 +1,86 @@
+From b50921880aa6eb6196437f269dc5e36ea0856124 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 29 Jun 2013 14:55:05 +0100
+Subject: [PATCH 011/227] FFmpeg: Exit mpegts parsing when encrypted stream
+ encountered
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/external/FFmpeg/libavformat/mpegts-mythtv.c |   33 +++++++++++++++++++-
+ 1 file changed, 32 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/external/FFmpeg/libavformat/mpegts-mythtv.c b/mythtv/external/FFmpeg/libavformat/mpegts-mythtv.c
+index 37d25f9..7b3874e 100644
+--- a/mythtv/external/FFmpeg/libavformat/mpegts-mythtv.c
++++ b/mythtv/external/FFmpeg/libavformat/mpegts-mythtv.c
+@@ -1057,6 +1057,10 @@ static int mpegts_push_data(MpegTSFilter *filter,
+                     }
+                 } else {
+                     /* otherwise, it should be a table */
++                    av_log(pes->stream, AV_LOG_DEBUG, "mpegts_push_data: pid %#x invalid PES header\n", pes->pid);
++#ifdef DEBUG
++                    av_hex_dump_log(pes->stream, AV_LOG_DEBUG, pes->header, pes->data_index);
++#endif
+                     /* skip packet */
+                 skip:
+                     pes->state = MPEGTS_SKIP;
+@@ -1164,6 +1168,10 @@ static int mpegts_push_data(MpegTSFilter *filter,
+             }
+             break;
+         case MPEGTS_SKIP:
++            av_log(pes->stream, AV_LOG_DEBUG, "mpegts_push_data: pid %#x skipping %d bytes\n", pes->pid, buf_size);
++#ifdef DEBUG
++            av_hex_dump_log(pes->stream, AV_LOG_DEBUG, p, buf_size);
++#endif
+             buf_size = 0;
+             break;
+         }
+@@ -2438,6 +2446,16 @@ static SectionContext *add_section_stream(MpegTSContext *ts, int pid, int stream
+     return sect;
+ }
+ 
++/* De-crypt a packet */
++/* cc: 1=reserved, 2=even, 3=odd */
++static int ff_mpegcrypt_dec(AVFormatContext *s, const uint8_t *p, size_t len, int cc) {
++    (void)s;
++    (void)p;
++    (void)len;
++    (void)cc;
++    return -1;
++}
++
+ /* handle one TS packet */
+ static int handle_packet(MpegTSContext *ts, const uint8_t *packet)
+ {
+@@ -2511,6 +2529,19 @@ static int handle_packet(MpegTSContext *ts, const uint8_t *packet)
+     if (p >= p_end)
+         return 0;
+ 
++    cc = packet[3] >> 6;
++    if (cc) {
++        /* Decrypt the packet */
++        int ret = ff_mpegcrypt_dec(ts->stream, p, p_end - p, cc);
++        if (ret < 0) {
++            if (is_start && !ts->scanning) {
++                av_log(ts->stream, AV_LOG_WARNING, "Failed to decrypt pid %#x\n", pid);
++                return AVERROR(EINVAL);
++            }
++            return 0;
++        }
++    }
++
+     pos = avio_tell(ts->stream->pb);
+     ts->pos47= pos % ts->raw_packet_size;
+ 
+@@ -2949,7 +2980,7 @@ static int mpegts_read_packet(AVFormatContext *s,
+     int ret, i;
+ 
+     ts->pkt = pkt;
+-    ret = handle_packets(ts, 0);
++    ret = handle_packets(ts, s->probesize / ts->raw_packet_size);
+     if (ret < 0) {
+         /* flush pes data left */
+         for (i = 0; i < NB_PID_MAX; i++) {
+-- 
+1.7.9.5
+

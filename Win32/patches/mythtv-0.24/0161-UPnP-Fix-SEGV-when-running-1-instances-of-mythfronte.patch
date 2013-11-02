@@ -1,0 +1,69 @@
+From 68e4fe258cf8158dabf1d8c827059de8e0f83b2a Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 1 Feb 2013 12:47:08 +0000
+Subject: [PATCH 161/285] UPnP: Fix SEGV when running >1 instances of
+ mythfrontend
+
+When a 2nd instance of mythfrontend is started the MediaRenderer ctor
+can't start the HttpServer listening because the port is already in use
+by the 1st instance.  The HttpServer is then deleted which often results
+in a SEGV.  This is caused by the HttpServer dtor destroying the
+inherited ThreadPool object.
+
+ThreadPool's dtor calls deleteLater() for each WorkerThread.  However,
+each WorkerThread has a pointer to the ThreadPool which is used to call
+ThreadTerminating when the trhread exits run().  This causes reference to
+free'd memory.
+
+This patch makes ThreadPool's dtor wait for all worker threads to exit.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythupnp/threadpool.cpp |   27 ++++++++++++++-------------
+ 1 file changed, 14 insertions(+), 13 deletions(-)
+
+diff --git a/mythtv/libs/libmythupnp/threadpool.cpp b/mythtv/libs/libmythupnp/threadpool.cpp
+index 8badd16..3c6ced4 100644
+--- a/mythtv/libs/libmythupnp/threadpool.cpp
++++ b/mythtv/libs/libmythupnp/threadpool.cpp
+@@ -314,23 +314,24 @@ ThreadPool::~ThreadPool( )
+     // --------------------------------------------------------------
+     // Request Termination of all worker threads.
+     // --------------------------------------------------------------
++    m_mList.lock();
+ 
+-    // --------------------------------------------------------------
+-    // If we lock the m_mList mutex, a deadlock will occur due to the Worker 
+-    // thread removing themselves from the Avail Deque... should be relatively
+-    // safe to use this list's iterator at this time without the lock.
+-    // --------------------------------------------------------------
+-
+-    WorkerThreadList::iterator it = m_lstThreads.begin(); 
+-    
+-    while (it != m_lstThreads.end() )
++    for ( WorkerThreadList::iterator it = m_lstThreads.begin();
++        it != m_lstThreads.end();
++        ++it)
+     {
+-        WorkerThread *pThread = *it;
+-        it = m_lstThreads.erase( it );
++        (*it)->quit();
++    }
+ 
+-        if (pThread != NULL) 
+-            pThread->deleteLater();
++    // Each worker thread holds a pointer to this (m_pThreadPool) and calls
++    // ThreadTerminating when exiting run() so wait for all to die
++    while (!m_lstThreads.empty())
++    {
++        m_mList.unlock();
++        m_mList.lock();
+     }
++
++    m_mList.unlock();
+ }
+ 
+ /////////////////////////////////////////////////////////////////////////////
+-- 
+1.7.9.5
+

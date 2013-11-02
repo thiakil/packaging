@@ -1,0 +1,26 @@
+From cfe6e647c9aa7713f6e777b6d392bf7967ccc74d Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 15 Aug 2013 16:17:44 +0100
+Subject: [PATCH 202/227] AFD: Quieten compiler warning
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index 3dae990..9427a8f 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -4074,7 +4074,7 @@ int AvFormatDecoder::AutoSelectAudioTrack(void)
+         {
+             LOG(VB_AUDIO, LOG_WARNING, "No audio tracks matched the type filter, "
+                                        "so trying all tracks.");
+-            for (int i = 0; i < atracks.size(); i++)
++            for (uint i = 0; i < atracks.size(); i++)
+                 ftype.push_back(i);
+         }
+ 
+-- 
+1.7.9.5
+

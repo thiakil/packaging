@@ -1,0 +1,31 @@
+From 33dcd7bb253a536de8405b96569e876940aaac16 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 10 Sep 2011 09:40:43 +0200
+Subject: [PATCH 066/285] libmythtv: Add an entry to the cut list menu to load
+ the ad skip list
+
+Although there's a hotkey (Z) to load the cut list from the commercial
+skip list there's no menu item so this operation is not possible to
+perform with an RC without special programming.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/tv_play.cpp |    2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/tv_play.cpp b/mythtv/libs/libmythtv/tv_play.cpp
+index 5514bfc..2bafb06 100644
+--- a/mythtv/libs/libmythtv/tv_play.cpp
++++ b/mythtv/libs/libmythtv/tv_play.cpp
+@@ -8974,6 +8974,8 @@ void TV::ShowOSDCutpoint(PlayerContext *ctx, const QString &type)
+                              "DIALOG_CUTPOINT_CLEARMAP_0");
+         osd->DialogAddButton(QObject::tr("Invert Cut List"),
+                              "DIALOG_CUTPOINT_INVERTMAP_0");
++        osd->DialogAddButton(QObject::tr("Load Ad Skip List"),
++                             "DIALOG_CUTPOINT_LOADCOMMSKIP_0");
+         osd->DialogAddButton(QObject::tr("Undo Changes"),
+                              "DIALOG_CUTPOINT_REVERT_0");
+         osd->DialogAddButton(QObject::tr("Exit Without Saving"),
+-- 
+1.7.9.5
+

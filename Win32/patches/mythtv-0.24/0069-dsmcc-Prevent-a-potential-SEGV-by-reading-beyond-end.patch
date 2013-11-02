@@ -1,0 +1,43 @@
+From 00b06303806d78d7b26095d763c7c775ea689501 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 29 Oct 2011 11:29:32 +0200
+Subject: [PATCH 069/285] dsmcc: Prevent a potential SEGV by reading beyond
+ end of buffer
+
+Add a test to Dsmcc::ProcessSection to detect if the section length field
+is greater than the actual buffer length.  This prevents the CRC
+calculation from reading beyond the buffer and causing a SEGV.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/dsmcc.cpp |    7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/dsmcc.cpp b/mythtv/libs/libmythtv/dsmcc.cpp
+index 9009f50..a55e9c7 100644
+--- a/mythtv/libs/libmythtv/dsmcc.cpp
++++ b/mythtv/libs/libmythtv/dsmcc.cpp
+@@ -497,6 +497,7 @@ void Dsmcc::ProcessSection(const unsigned char *data, int length,
+         // This will only happen at start-up
+         if (AddTap(componentTag, carouselId))
+         {
++            VERBOSE(VB_DSMCC, QString("[dsmcc] Initial stream tag %1").arg(componentTag));
+             m_startTag = componentTag;
+             found = true;
+         }
+@@ -514,6 +515,12 @@ void Dsmcc::ProcessSection(const unsigned char *data, int length,
+ 
+     unsigned short section_len = ((data[1] & 0xF) << 8) | (data[2]);
+     section_len += 3;/* 3 bytes before length count starts */
++    if (section_len > length)
++    {
++        VERBOSE(VB_DSMCC, "[dsmcc] WARN section length > data length");
++        return;
++    }
++
+     /* Check CRC before trying to parse */
+     unsigned long crc32_decode = crc32(data, section_len);
+ 
+-- 
+1.7.9.5
+

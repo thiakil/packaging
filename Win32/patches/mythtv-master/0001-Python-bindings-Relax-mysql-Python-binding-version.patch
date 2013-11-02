@@ -1,0 +1,36 @@
+From 0f96e01c6e053d85fb7f40ba9118548018a8d99c Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 25 May 2012 18:03:54 +0200
+Subject: [PATCH 001/202] Python bindings: Relax mysql Python binding version
+
+Commit 02162459d68a added a check for version 1.2.3 or later of the
+mysql Python binding.  Unfortunately, this version only ships with
+Ubuntu 11.10 and later preventing all but the very latest Ubuntu
+systems from using any MythTV Python app.
+
+Ubuntu 10.04 LTS ships with version 1.2.2 of the mysql binding and
+from basic testing this appears to work OK.
+
+This patch relexaes the mysql Python binding version to 1.2,2 or later.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/bindings/python/MythTV/_conn_mysqldb.py |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/bindings/python/MythTV/_conn_mysqldb.py b/mythtv/bindings/python/MythTV/_conn_mysqldb.py
+index a3ac3b6..3f95674 100644
+--- a/mythtv/bindings/python/MythTV/_conn_mysqldb.py
++++ b/mythtv/bindings/python/MythTV/_conn_mysqldb.py
+@@ -8,7 +8,7 @@ import warnings
+ with warnings.catch_warnings():
+     warnings.simplefilter('ignore')
+     import MySQLdb, MySQLdb.cursors
+-if (MySQLdb.version_info < (1,2,3)) and (sys.version_info >= (2,7)):
++if (MySQLdb.version_info < (1,2,2)) and (sys.version_info >= (2,7)):
+     raise ImportError('MySQLdb is too old for this version of Python')
+ 
+ __version__ = tuple(['MySQLdb']+list(MySQLdb.version_info))
+-- 
+1.7.9.5
+

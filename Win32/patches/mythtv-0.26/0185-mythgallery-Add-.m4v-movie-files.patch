@@ -1,0 +1,26 @@
+From 2e504d764d1c68d20161b71ba19399902f11936c Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 2 Aug 2013 12:56:42 +0100
+Subject: [PATCH 185/227] mythgallery: Add .m4v movie files
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+(cherry picked from commit b5322c150c0cf8b4caf89729c230f511c0ef6e18)
+---
+ .../mythgallery/mythgallery/galleryutil.cpp        |    1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/mythplugins/mythgallery/mythgallery/galleryutil.cpp b/mythplugins/mythgallery/mythgallery/galleryutil.cpp
+index 6bfea60..9de843f 100644
+--- a/mythplugins/mythgallery/mythgallery/galleryutil.cpp
++++ b/mythplugins/mythgallery/mythgallery/galleryutil.cpp
+@@ -77,6 +77,7 @@ QStringList GalleryUtil::GetMovieFilter(void)
+     filt.push_back("*.img");
+     filt.push_back("*.mpg");
+     filt.push_back("*.mp4");
++    filt.push_back("*.m4v");
+     filt.push_back("*.mpeg");
+     filt.push_back("*.mov");
+     filt.push_back("*.mts");
+-- 
+1.7.9.5
+

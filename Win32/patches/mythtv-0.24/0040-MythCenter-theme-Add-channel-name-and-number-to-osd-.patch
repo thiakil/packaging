@@ -1,0 +1,52 @@
+From 41f539a7cdacc845db632e833024787209b4b5c4 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 2 Jun 2011 18:33:59 +0200
+Subject: [PATCH 040/285] MythCenter theme: Add channel name and number to osd
+ program info Signed-off-by: Lawrence Rust
+ <lvr@softsystem.co.uk>
+
+---
+ mythtv/themes/MythCenter-wide/osd.xml |   18 ++++++++++++++++--
+ 1 file changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/themes/MythCenter-wide/osd.xml b/mythtv/themes/MythCenter-wide/osd.xml
+index 49387cb..8604a6e 100644
+--- a/mythtv/themes/MythCenter-wide/osd.xml
++++ b/mythtv/themes/MythCenter-wide/osd.xml
+@@ -24,9 +24,23 @@
+             <area>0,520,1180,200</area>
+             <filename>osd/prog_bot.png</filename>
+         </imagetype>
++
++        <textarea name="channame">
++            <font>medium</font>
++            <weight>bold</weight>
++            <area>20,20,860,40</area>
++            <align>left,bottom</align>
++        </textarea>
++        <textarea name="channum">
++            <font>medium</font>
++            <weight>bold</weight>
++            <area>880,20,280,40</area>
++            <align>right,bottom</align>
++        </textarea>
++
+         <textarea name="title">
+             <font>large</font>
+-            <area>20,40,860,70</area>
++            <area>20,50,860,60</area>
+             <align>left,bottom</align>
+         </textarea>
+         <shape name="divider1">
+@@ -37,7 +51,7 @@
+             <area>880,40,280,70</area>
+             <font>medium</font>
+             <template>%LENMINS%</template>
+-            <align>hcenter,bottom</align>
++            <align>right,bottom</align>
+         </textarea>
+         <shape name="divider2">
+             <area>890,520,2,180</area>
+-- 
+1.7.9.5
+

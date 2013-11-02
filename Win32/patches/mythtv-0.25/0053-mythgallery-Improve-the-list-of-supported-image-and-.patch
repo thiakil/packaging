@@ -1,0 +1,91 @@
+From 46383e3e0461b6ddadce634ef0648c4fa7f9385c Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 8 Dec 2011 19:43:24 +0100
+Subject: [PATCH 053/124] mythgallery: Improve the list of supported image and
+ movie file formats
+
+Since images are read using QImage::load() it is correct to use
+QImageReader::supportedImageFormats to specify the list of supported types.
+
+Add *.iso, *.img and *.bin to the list of movie files supoorted by mplayer.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../mythgallery/mythgallery/galleryutil.cpp        |   14 ++++++++------
+ mythplugins/mythgallery/mythgallery/main.cpp       |   11 ++++++++++-
+ 2 files changed, 18 insertions(+), 7 deletions(-)
+
+diff --git a/mythplugins/mythgallery/mythgallery/galleryutil.cpp b/mythplugins/mythgallery/mythgallery/galleryutil.cpp
+index a00bd02..c5ab56f 100644
+--- a/mythplugins/mythgallery/mythgallery/galleryutil.cpp
++++ b/mythplugins/mythgallery/mythgallery/galleryutil.cpp
+@@ -19,6 +19,7 @@
+ // qt
+ #include <QDir>
+ #include <QApplication>
++#include <QImageReader>
+ 
+ // myth
+ #include <mythcontext.h>
+@@ -54,13 +55,11 @@ static bool FileDelete(const QFileInfo &file);
+ QStringList GalleryUtil::GetImageFilter(void)
+ {
+     QStringList filt;
+-    filt.push_back("*.jpg");
+-    filt.push_back("*.jpeg");
+-    filt.push_back("*.png");
++
++    Q_FOREACH(QByteArray format, QImageReader::supportedImageFormats())
++        filt.push_back("*." + format);
++
+     filt.push_back("*.tif");
+-    filt.push_back("*.tiff");
+-    filt.push_back("*.bmp");
+-    filt.push_back("*.gif");
+ 
+ #ifdef DCRAW_SUPPORT
+     filt << DcrawFormats::getFilters();
+@@ -73,6 +72,9 @@ QStringList GalleryUtil::GetMovieFilter(void)
+ {
+     QStringList filt;
+     filt.push_back("*.avi");
++    filt.push_back("*.bin");
++    filt.push_back("*.iso");
++    filt.push_back("*.img");
+     filt.push_back("*.mpg");
+     filt.push_back("*.mp4");
+     filt.push_back("*.mpeg");
+diff --git a/mythplugins/mythgallery/mythgallery/main.cpp b/mythplugins/mythgallery/mythgallery/main.cpp
+index c6d39d5..516a9a1 100644
+--- a/mythplugins/mythgallery/mythgallery/main.cpp
++++ b/mythplugins/mythgallery/mythgallery/main.cpp
+@@ -4,6 +4,7 @@
+ // qt
+ #include <QDir>
+ #include <QtPlugin>
++#include <QImageReader>
+ 
+ // myth
+ #include <mythcontext.h>
+@@ -130,9 +131,17 @@ static void setupKeys(void)
+     REG_MEDIA_HANDLER(QT_TRANSLATE_NOOP("MythControls",
+         "MythGallery Media Handler 1/2"), "", "", handleMedia,
+         MEDIATYPE_DATA | MEDIATYPE_MIXED, QString::null);
++    QString filt;
++    Q_FOREACH(QByteArray format, QImageReader::supportedImageFormats())
++    {
++        if (filt.isEmpty())
++            filt = format;
++        else
++            filt += "," + format;
++    }
+     REG_MEDIA_HANDLER(QT_TRANSLATE_NOOP("MythControls",
+         "MythGallery Media Handler 2/2"), "", "", handleMedia,
+-        MEDIATYPE_MGALLERY, "gif,jpg,png");
++        MEDIATYPE_MGALLERY, filt);
+ }
+ 
+ int mythplugin_init(const char *libversion)
+-- 
+1.7.9.5
+

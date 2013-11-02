@@ -1,0 +1,29 @@
+From 3c715d7d3ee2ce401bf78b5bcd7e820524d32dc6 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 28 May 2012 15:29:35 +0200
+Subject: [PATCH 115/285] MediaMonitor: Delay after pmount to permit
+ /proc/mounts to update
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/mythmedia.cpp |    4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/mythtv/libs/libmyth/mythmedia.cpp b/mythtv/libs/libmyth/mythmedia.cpp
+index 299cf56..698a438 100644
+--- a/mythtv/libs/libmyth/mythmedia.cpp
++++ b/mythtv/libs/libmyth/mythmedia.cpp
+@@ -127,6 +127,10 @@ bool MythMediaDevice::performMountCmd(bool DoMount)
+             {
+                 // we cannot tell beforehand what the pmount mount point is
+                 // so verify the mount status of the device
++                // In the case that m_DevicePath is a symlink to a device
++                // in /etc/fstab then pmount delegates to mount which
++                // performs the mount asynchronously so we must wait a bit
++                usleep(1000000);
+                 if (!findMountPath())
+                 {
+                     VERBOSE(VB_MEDIA, "performMountCmd() attempted to"
+-- 
+1.7.9.5
+

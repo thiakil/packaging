@@ -1,0 +1,62 @@
+From 95ee2e9334a7636146ab13e70e4336ba86e31851 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 29 Sep 2012 15:11:37 +0200
+Subject: [PATCH 123/124] libmyth: Prevent a SEGV when a database connection
+ warning dialog is closed
+
+MythContextPrivate::ShowConnectionFailurePopup displays a dialog box
+to warn of a database connection failure.  If the connection is
+subsequently re-established after the user clicks OK then
+MythContextPrivate::HideConnectionFailurePopup can call the virtual
+method Close on a deleted object.
+
+This patch adds a synchronous handlder for the dialog destroyed signal
+and removes the dangling reference.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/mythcontext.cpp |    7 ++++---
+ mythtv/libs/libmyth/mythcontext.h   |    2 +-
+ 2 files changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/mythcontext.cpp b/mythtv/libs/libmyth/mythcontext.cpp
+index 12acaf6..476fdfb 100644
+--- a/mythtv/libs/libmyth/mythcontext.cpp
++++ b/mythtv/libs/libmyth/mythcontext.cpp
+@@ -972,8 +972,9 @@ void MythContextPrivate::ShowConnectionFailurePopup(bool persistent)
+ 
+     if (HasMythMainWindow() && m_ui && m_ui->IsScreenSetup())
+     {
+-        MBEconnectPopup = ShowOkPopup(
+-            message, m_sh, SLOT(ConnectFailurePopupClosed()));
++        MBEconnectPopup = ShowOkPopup(message);
++        QObject::connect(MBEconnectPopup, SIGNAL(destroyed(QObject*)),
++            m_sh, SLOT(ConnectFailurePopupClosed(QObject*)), Qt::DirectConnection);
+     }
+ }
+ 
+@@ -1010,7 +1011,7 @@ void MythContextPrivate::ShowVersionMismatchPopup(uint remote_version)
+     }
+ }
+ 
+-void MythContextSlotHandler::ConnectFailurePopupClosed(void)
++void MythContextSlotHandler::ConnectFailurePopupClosed(QObject*)
+ {
+     d->MBEconnectPopup = NULL;
+ }
+diff --git a/mythtv/libs/libmyth/mythcontext.h b/mythtv/libs/libmyth/mythcontext.h
+index 64f0d67..8d1bc25 100644
+--- a/mythtv/libs/libmyth/mythcontext.h
++++ b/mythtv/libs/libmyth/mythcontext.h
+@@ -20,7 +20,7 @@ class MythContextSlotHandler : public QObject
+     MythContextSlotHandler(MythContextPrivate *x) : d(x) { }
+ 
+   private slots:
+-    void ConnectFailurePopupClosed(void);
++    void ConnectFailurePopupClosed(QObject*);
+     void VersionMismatchPopupClosed(void);
+ 
+   private:
+-- 
+1.7.9.5
+

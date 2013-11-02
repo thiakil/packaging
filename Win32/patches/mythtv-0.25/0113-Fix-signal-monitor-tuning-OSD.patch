@@ -1,0 +1,26 @@
+From 1a6b08983d723a31babcb40c40ce08963a5ed040 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 10 Aug 2012 20:09:11 +0200
+Subject: [PATCH 113/124] Fix signal monitor tuning OSD
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/tv_play.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/tv_play.cpp b/mythtv/libs/libmythtv/tv_play.cpp
+index 4cb288b..3ec31b1 100644
+--- a/mythtv/libs/libmythtv/tv_play.cpp
++++ b/mythtv/libs/libmythtv/tv_play.cpp
+@@ -7569,7 +7569,7 @@ void TV::UpdateOSDSignal(const PlayerContext *ctx, const QStringList &strlist)
+             ber = it->GetValue();
+         else if ("pos" == it->GetShortName())
+             pos = it->GetValue();
+-        else if ("tuned" == it->GetShortName())
++        else if ("script" == it->GetShortName())
+             tuned = it->GetValue();
+         else if ("seen_pat" == it->GetShortName())
+             pat = it->IsGood() ? "a" : "_";
+-- 
+1.7.9.5
+

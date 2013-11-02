@@ -1,0 +1,67 @@
+From e3c4ceb3d01118fcf78cb08e5c9b029e89385b82 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 30 Jun 2013 15:49:12 +0100
+Subject: [PATCH 243/285] AFD: Save/restore AVInputFormat flags in OpenFile
+
+The AVInputFormat flags are set and then cleared in AvFormatDecoder::OpenFile
+however the mpegts formats requires the AVFMT_NOFILE bit to be clear in
+order to probe and detect an mpegts stream.
+
+This patch saves and restores the flags on exit from OpenFile
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |   18 +++++++++++++++---
+ 1 file changed, 15 insertions(+), 3 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index 99e2dea..9419f00 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -388,13 +388,14 @@ void AvFormatDecoder::CloseContext()
+         CloseCodecs();
+ 
+         AVInputFormat *fmt = ic->iformat;
+-        ic->iformat->flags |= AVFMT_NOFILE;
++        int flags = fmt->flags;
++        fmt->flags |= AVFMT_NOFILE;
+ 
+         av_free(ic->pb->buffer);
+         av_free(ic->pb);
+         av_close_input_file(ic);
+         ic = NULL;
+-        fmt->flags &= ~AVFMT_NOFILE;
++        fmt->flags = flags;
+     }
+ 
+     delete private_dec;
+@@ -917,6 +918,17 @@ int AvFormatDecoder::OpenFile(RingBuffer *rbuffer, bool novideo,
+         return -1;
+     }
+ 
++    struct FlagSaver
++    {
++        FlagSaver(AVInputFormat *fmt) : m_fmt(fmt), m_flags(fmt->flags) { }
++        ~FlagSaver() { Restore(); }
++
++        void Restore() { m_fmt->flags = m_flags; }
++
++        AVInputFormat * const m_fmt;
++        int const m_flags;
++    } flags(fmt);
++
+     fmt->flags |= AVFMT_NOFILE;
+ 
+     ic = avformat_alloc_context();
+@@ -967,7 +979,7 @@ int AvFormatDecoder::OpenFile(RingBuffer *rbuffer, bool novideo,
+         ic->streams_changed = HandleDVDStreamChange;
+     ic->stream_change_data = this;
+ 
+-    fmt->flags &= ~AVFMT_NOFILE;
++    flags.Restore();
+ 
+     if (!ringBuffer->isDVD() && !ringBuffer->isBD() && !livetv && !isStream)
+     {
+-- 
+1.7.9.5
+

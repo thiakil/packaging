@@ -1,0 +1,148 @@
+From 14d5f3497fe4aecae916ec19ecc4f2608b3eb793 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 30 Jul 2013 10:30:28 +0100
+Subject: [PATCH 009/202] Mythsystemwindows: Add Qt namespace to HANDLE for
+ cross compiling with mingw
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythbase/mythsystemwindows.cpp |   20 ++++++++++----------
+ mythtv/libs/libmythbase/mythsystemwindows.h   |   20 ++++++++++----------
+ 2 files changed, 20 insertions(+), 20 deletions(-)
+
+diff --git a/mythtv/libs/libmythbase/mythsystemwindows.cpp b/mythtv/libs/libmythbase/mythsystemwindows.cpp
+index 589bfce..06116c9 100644
+--- a/mythtv/libs/libmythbase/mythsystemwindows.cpp
++++ b/mythtv/libs/libmythbase/mythsystemwindows.cpp
+@@ -133,7 +133,7 @@ void MythSystemLegacyIOHandler::run(void)
+     RunEpilog();
+ }
+ 
+-bool MythSystemLegacyIOHandler::HandleRead(HANDLE h, QBuffer *buff)
++bool MythSystemLegacyIOHandler::HandleRead(Qt::HANDLE h, QBuffer *buff)
+ {
+     DWORD lenAvail;
+ 
+@@ -166,7 +166,7 @@ bool MythSystemLegacyIOHandler::HandleRead(HANDLE h, QBuffer *buff)
+     return true;
+ }
+ 
+-bool MythSystemLegacyIOHandler::HandleWrite(HANDLE h, QBuffer *buff)
++bool MythSystemLegacyIOHandler::HandleWrite(Qt::HANDLE h, QBuffer *buff)
+ {
+     if( buff->atEnd() )
+     {
+@@ -191,7 +191,7 @@ bool MythSystemLegacyIOHandler::HandleWrite(HANDLE h, QBuffer *buff)
+     return true;
+ }
+ 
+-void MythSystemLegacyIOHandler::insert(HANDLE h, QBuffer *buff)
++void MythSystemLegacyIOHandler::insert(Qt::HANDLE h, QBuffer *buff)
+ {
+     m_pLock.lock();
+     m_pMap.insert(h, buff);
+@@ -199,7 +199,7 @@ void MythSystemLegacyIOHandler::insert(HANDLE h, QBuffer *buff)
+     wake();
+ }
+ 
+-void MythSystemLegacyIOHandler::Wait(HANDLE h)
++void MythSystemLegacyIOHandler::Wait(Qt::HANDLE h)
+ {
+     QMutexLocker locker(&m_pLock);
+     while (m_pMap.contains(h))
+@@ -210,7 +210,7 @@ void MythSystemLegacyIOHandler::Wait(HANDLE h)
+     }
+ }
+ 
+-void MythSystemLegacyIOHandler::remove(HANDLE h)
++void MythSystemLegacyIOHandler::remove(Qt::HANDLE h)
+ {
+     m_pLock.lock();
+     if (m_read)
+@@ -280,7 +280,7 @@ void MythSystemLegacyManager::run(void)
+             m_mapLock.unlock();
+             continue;
+         }
+-        HANDLE child = m_children[index];
++        Qt::HANDLE child = m_children[index];
+ 
+         // pop exited process off managed list, add to cleanup list
+         MythSystemLegacyWindows  *ms = m_pMap.take(child);
+@@ -381,13 +381,13 @@ void MythSystemLegacyManager::ChildListRebuild()
+ 
+     MSMap_t::iterator   i;
+     int                 j;
+-    HANDLE              child;
++    Qt::HANDLE              child;
+ 
+     if ( oldCount != m_childCount )
+     {
+-        HANDLE *new_children;
+-        new_children = (HANDLE *)realloc(m_children, 
+-                                         m_childCount * sizeof(HANDLE));
++        Qt::HANDLE *new_children;
++        new_children = (Qt::HANDLE *)realloc(m_children, 
++                                         m_childCount * sizeof(Qt::HANDLE));
+         if (!new_children && m_childCount)
+         {
+             LOG(VB_SYSTEM, LOG_CRIT, "No memory to allocate new children");
+diff --git a/mythtv/libs/libmythbase/mythsystemwindows.h b/mythtv/libs/libmythbase/mythsystemwindows.h
+index 7839ee5..1791947 100644
+--- a/mythtv/libs/libmythbase/mythsystemwindows.h
++++ b/mythtv/libs/libmythbase/mythsystemwindows.h
+@@ -20,8 +20,8 @@
+ 
+ class MythSystemLegacyWindows;
+ 
+-typedef QMap<HANDLE, MythSystemLegacyWindows *> MSMap_t;
+-typedef QMap<HANDLE, QBuffer *> PMap_t;
++typedef QMap<Qt::HANDLE, MythSystemLegacyWindows *> MSMap_t;
++typedef QMap<Qt::HANDLE, QBuffer *> PMap_t;
+ typedef QList<MythSystemLegacyWindows *> MSList_t;
+ 
+ class MythSystemLegacyIOHandler: public MThread
+@@ -31,14 +31,14 @@ class MythSystemLegacyIOHandler: public MThread
+         ~MythSystemLegacyIOHandler() { wait(); }
+         void   run(void);
+ 
+-        void   insert(HANDLE h, QBuffer *buff);
+-        void   Wait(HANDLE h);
+-        void   remove(HANDLE h);
++        void   insert(Qt::HANDLE h, QBuffer *buff);
++        void   Wait(Qt::HANDLE h);
++        void   remove(Qt::HANDLE h);
+         void   wake();
+ 
+     private:
+-        bool   HandleRead(HANDLE h, QBuffer *buff);
+-        bool   HandleWrite(HANDLE h, QBuffer *buff);
++        bool   HandleRead(Qt::HANDLE h, QBuffer *buff);
++        bool   HandleWrite(Qt::HANDLE h, QBuffer *buff);
+ 
+         QMutex          m_pWaitLock;
+         QWaitCondition  m_pWait;
+@@ -62,7 +62,7 @@ class MythSystemLegacyManager : public MThread
+         void ChildListRebuild();
+ 
+         int        m_childCount;
+-        HANDLE    *m_children;
++        Qt::HANDLE    *m_children;
+         MSMap_t    m_pMap;
+         QMutex     m_mapLock;
+ 
+@@ -103,10 +103,10 @@ class MBASE_PUBLIC MythSystemLegacyWindows : public MythSystemLegacyPrivate
+         friend class MythSystemLegacyIOHandler;
+ 
+     private:
+-        HANDLE      m_child;
++        Qt::HANDLE      m_child;
+         time_t      m_timeout;
+ 
+-        HANDLE      m_stdpipe[3];
++        Qt::HANDLE      m_stdpipe[3];
+ };
+ 
+ #endif // _MYTHSYSTEM_WINDOWS_H_
+-- 
+1.7.9.5
+

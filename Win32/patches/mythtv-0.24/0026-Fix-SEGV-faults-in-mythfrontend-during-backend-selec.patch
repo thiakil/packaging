@@ -1,0 +1,188 @@
+From 49fa10d9fda4c6179200479f284deb8662defa8a Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 18 Apr 2011 10:30:43 +0200
+Subject: [PATCH 026/285] Fix SEGV faults in mythfrontend during backend
+ selection
+
+Fix several segv faults and logic problems with mythfrontend during backend
+configuration either after a fresh install or by specifying the -p option.
+
+1 Can't select Manual dbase configuration with -p option
+2 Can't Cancel
+3 Segv after selecting Save on win32
+4 Segv in ShowOkPopup due to stale static data
+5 Segv in MythScreenStack::PopScreen due to null pointer
+
+All apart from 1 are reproducible on both Linux & Windows.  The exception
+is the seg fault when you select Save caused by a NULL m_XML in
+BackendSelection::Accept
+
+1. Start "mythfrontend -p", select language, tab to Manual and click. If
+ your setup conforms to defaults you'll go to the root menu.  If you have
+ anything unusual you'll get a dialog - Cannot login.
+2. Start "mythfrontend -p", select language, tab to cancel and click, same
+ result as 1.
+3. Win32 only: Start "mythfrontend -p", select language, tab to Save and
+ click - SEGV
+4. Start "mythfrontend -p", select language, tab to cancel and click -
+ Cannot login. Click cancel again - SEGV
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/mythcontext.cpp       |   25 +++++++++++++++---------
+ mythtv/libs/libmythui/mythdialogbox.cpp   |   30 +++++++++++++----------------
+ mythtv/libs/libmythui/mythmainwindow.cpp  |   10 +++++-----
+ mythtv/libs/libmythui/mythscreenstack.cpp |   10 +++++++---
+ 4 files changed, 41 insertions(+), 34 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/mythcontext.cpp b/mythtv/libs/libmyth/mythcontext.cpp
+index 258da34..12ba13e 100644
+--- a/mythtv/libs/libmyth/mythcontext.cpp
++++ b/mythtv/libs/libmyth/mythcontext.cpp
+@@ -290,9 +290,7 @@ bool MythContextPrivate::Init(const bool gui, UPnp *UPnPclient,
+     {
+         m_UPnP = UPnPclient;
+         m_ExternalUPnP = true;
+-#ifndef _WIN32
+         m_XML  = (XmlConfiguration *)UPnp::g_pConfig;
+-#endif
+     }
+ 
+     // Creates screen saver control if we will have a GUI
+@@ -409,6 +407,7 @@ bool MythContextPrivate::FindDatabase(const bool prompt, const bool noPrompt)
+         switch (ChooseBackend(QString::null))
+         {
+             case -1:    // User asked to configure database manually
++                manualSelect = false;
+                 if (PromptForDatabaseParams(""))
+                     break;
+                 else
+@@ -432,15 +431,23 @@ bool MythContextPrivate::FindDatabase(const bool prompt, const bool noPrompt)
+     while (!failure.isEmpty())
+     {
+         VERBOSE(VB_IMPORTANT, QString("%1").arg(failure));
+-        if (( manualSelect && ChooseBackend(failure)) ||
+-            (!manualSelect && PromptForDatabaseParams(failure)))
++        if (manualSelect) switch (ChooseBackend(failure))
+         {
+-            failure = TestDBconnection();
+-            if (failure.length())
+-                VERBOSE(VB_IMPORTANT, QString("%1").arg(failure));
+-        }
+-        else
++        case -1: // User asked to configure database manually
++            manualSelect = false;
++            continue;
++        case 1: // User selected a backend
++            break;
++        case 0:   // User cancelled. Exit application
++        default:
+             goto NoDBfound;
++        }
++        else if (!PromptForDatabaseParams(failure))
++            goto NoDBfound;   // User cancelled - changed their mind?
++
++        failure = TestDBconnection();
++        if (failure.length())
++            VERBOSE(VB_IMPORTANT, QString("%1").arg(failure));
+     }
+ 
+ DBfound:
+diff --git a/mythtv/libs/libmythui/mythdialogbox.cpp b/mythtv/libs/libmythui/mythdialogbox.cpp
+index 3b10033..151af08 100644
+--- a/mythtv/libs/libmythui/mythdialogbox.cpp
++++ b/mythtv/libs/libmythui/mythdialogbox.cpp
+@@ -371,27 +371,23 @@ MythConfirmationDialog  *ShowOkPopup(const QString &message, QObject *parent,
+ {
+     QString                  LOC = "ShowOkPopup('" + message + "') - ";
+     MythConfirmationDialog  *pop;
+-    static MythScreenStack  *stk = NULL;
++    MythScreenStack  *stk;
+ 
++    MythMainWindow *win = GetMythMainWindow();
+ 
+-    if (!stk)
++    if (win)
++        stk = win->GetStack("popup stack");
++    else
+     {
+-        MythMainWindow *win = GetMythMainWindow();
+-
+-        if (win)
+-            stk = win->GetStack("popup stack");
+-        else
+-        {
+-            VERBOSE(VB_IMPORTANT, LOC + "no main window?");
+-            return NULL;
+-        }
++        VERBOSE(VB_IMPORTANT, LOC + "no main window?");
++        return NULL;
++    }
+ 
+-        if (!stk)
+-        {
+-            VERBOSE(VB_IMPORTANT, LOC + "no popup stack?\n"
+-                                        "Is there a MythThemeBase?");
+-            return NULL;
+-        }
++    if (!stk)
++    {
++        VERBOSE(VB_IMPORTANT, LOC + "no popup stack?\n"
++                                    "Is there a MythThemeBase?");
++        return NULL;
+     }
+ 
+     pop = new MythConfirmationDialog(stk, message, showCancel);
+diff --git a/mythtv/libs/libmythui/mythmainwindow.cpp b/mythtv/libs/libmythui/mythmainwindow.cpp
+index 0bd4db9..952336b 100644
+--- a/mythtv/libs/libmythui/mythmainwindow.cpp
++++ b/mythtv/libs/libmythui/mythmainwindow.cpp
+@@ -479,10 +479,7 @@ MythMainWindow::~MythMainWindow()
+     d->drawTimer->stop();
+ 
+     while (!d->stackList.isEmpty())
+-    {
+-        delete d->stackList.back();
+-        d->stackList.pop_back();
+-    }
++        PopScreenStack();
+ 
+     delete d->m_themeBase;
+ 
+@@ -546,8 +543,11 @@ void MythMainWindow::AddScreenStack(MythScreenStack *stack, bool main)
+ 
+ void MythMainWindow::PopScreenStack()
+ {
+-    delete d->stackList.back();
++    MythScreenStack *stack = d->stackList.back();
+     d->stackList.pop_back();
++    if (stack == d->mainStack)
++        d->mainStack = NULL;
++    delete stack;
+ }
+ 
+ MythScreenStack *MythMainWindow::GetMainStack(void)
+diff --git a/mythtv/libs/libmythui/mythscreenstack.cpp b/mythtv/libs/libmythui/mythscreenstack.cpp
+index 99edcb2..8f81af8 100644
+--- a/mythtv/libs/libmythui/mythscreenstack.cpp
++++ b/mythtv/libs/libmythui/mythscreenstack.cpp
+@@ -157,9 +157,13 @@ void MythScreenStack::PopScreen(MythScreenType *screen, bool allowFade,
+     {
+         // Screen still needs to be redrawn if we have popped the last screen
+         // off the popup stack, or similar
+-        MythScreenType *mainscreen = mainwindow->GetMainStack()->GetTopScreen();
+-        if (mainscreen)
+-            mainscreen->SetRedraw();
++        MythScreenStack *mainstack = mainwindow->GetMainStack();
++        if (mainstack)
++        {
++            MythScreenType *mainscreen = mainstack->GetTopScreen();
++            if (mainscreen)
++                mainscreen->SetRedraw();
++        }
+     }
+ }
+ 
+-- 
+1.7.9.5
+

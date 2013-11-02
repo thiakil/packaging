@@ -1,0 +1,302 @@
+From 36e36e0ca8f97b09ad96281c4d400859089448c8 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 16 May 2013 12:37:05 +0100
+Subject: [PATCH 189/285] UPNP: Handle MediaRenderer event requests
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythupnp/upnpavt.cpp  |  108 +++++++++++++++-------------------
+ mythtv/libs/libmythupnp/upnprctl.cpp |   24 +++++---
+ 2 files changed, 65 insertions(+), 67 deletions(-)
+
+diff --git a/mythtv/libs/libmythupnp/upnpavt.cpp b/mythtv/libs/libmythupnp/upnpavt.cpp
+index 96a574a..9b5fa02 100644
+--- a/mythtv/libs/libmythupnp/upnpavt.cpp
++++ b/mythtv/libs/libmythupnp/upnpavt.cpp
+@@ -15,6 +15,8 @@
+ #include "mythmainwindow.h" // for GetMythMainWindow
+ #include "mythcorecontext.h" // gCoreContext
+ 
++typedef unsigned long ui4;
++
+ /////////////////////////////////////////////////////////////////////////////
+ //
+ /////////////////////////////////////////////////////////////////////////////
+@@ -22,58 +24,32 @@
+ UPnpAVTransport::UPnpAVTransport( UPnpDevice *pDevice , const QString sSharePath)
+   : Eventing( "UPnpAVTransport", "AVTransport_Event", sSharePath)
+ {
++    AddVariable( new StateVariable< QString >( "LastChange", true ) );
++    /* LastChange is an XML string. See RenderingControl:1 Service Template 2.2.1
++
++        <Event xmlns=”urn:schemas-upnp-org:metadata-1-0/AVT_RCS">
++        <InstanceID val=”0”><Brightness val=”48”/></InstanceID>
++        <InstanceID val=”1”><Brightness val=”11”/></InstanceID>
++        </Event>
++    */
++
+     // GetTransportInfo
+-    AddVariable( new StateVariable< QString >( "TransportState", true ) );
++    AddVariable( new StateVariable< QString >( "TransportState", QString("STOPPED")) );
+     // “STOPPED” R “PLAYING” R “TRANSITIONING” O ”PAUSED_PLAYBACK” O
+     // “PAUSED_RECORDING” O “RECORDING” O “NO_MEDIA_PRESENT” O
+-    SetValue< QString >( "TransportState", "STOPPED" );
+-    AddVariable( new StateVariable< QString >( "TransportStatus", true ) );
+-    SetValue< QString >( "TransportStatus", "OK" ); // or ERROR_OCCURRED
+-    AddVariable( new StateVariable< QString >( "TransportPlaySpeed", true ) );
+-    SetValue< QString >( "TransportPlaySpeed", "1" );
++    AddVariable( new StateVariable< QString >( "TransportStatus", QString("OK")) );
++    // or ERROR_OCCURRED
++    AddVariable( new StateVariable< QString >( "TransportPlaySpeed", QString("1")) );
+ 
+     // GetMediaInfo
+-    AddVariable( new StateVariable< QString >( "NumberOfTracks", true ) );
+-    SetValue< QString >( "NumberOfTracks", "0" );
+-    AddVariable( new StateVariable< QString >( "CurrentMediaDuration", true ) );
+-    SetValue< QString >( "CurrentMediaDuration", "00:00:00" );
+-    AddVariable( new StateVariable< QString >( "AVTransportURI", true ) );
+-    AddVariable( new StateVariable< QString >( "AVTransportURIMetaData", true ) );
+-    // PlaybackStorageMedium, RecordStorageMedium:
+-    // “UNKNOWN” ”DV”  “MINI-DV” “VHS” ”W-VHS” “S-VHS” “D-VHS” “VHSC”
+-    // “VIDEO8” “HI8” “CD-ROM” “CD-DA” “CD-R” “CD-RW” “VIDEO-CD” ”SACD”
+-    // “MD-AUDIO” “MD-PICTURE” “DVD-ROM” “DVD-VIDEO” “DVD-R” “DVD+RW”
+-    // “DVD-RW” “DVD-RAM” “DVD-AUDIO” “DAT” “LD” “HDD” “MICRO-MV” "NETWORK”
+-    // “NONE” “NOT_IMPLEMENTED” Vendor-defined
+-    AddVariable( new StateVariable< QString >( "PlaybackStorageMedium", true ) );
+-    SetValue< QString >( "PlaybackStorageMedium", "NETWORK" );
+-    AddVariable( new StateVariable< QString >( "RecordStorageMedium", true ) );
+-    SetValue< QString >( "RecordStorageMedium", "NOT_IMPLEMENTED" );
+-    AddVariable( new StateVariable< QString >( "RecordMediumWriteStatus", true ) );
+-    // “WRITABLE” ”PROTECTED” “NOT_WRITABLE” “UNKNOWN” “NOT_IMPLEMENTED”
+-    SetValue< QString >( "RecordMediumWriteStatus", "NOT_IMPLEMENTED" );
+-
+-    // GetTransportSettings
+-    AddVariable( new StateVariable< QString >( "CurrentPlayMode", true ) );
+-    // “NORMAL” “SHUFFLE” “REPEAT_ONE” “REPEAT_ALL” “RANDOM” “DIRECT_1” “INTRO” Vendor-defined
+-    SetValue< QString >( "CurrentPlayMode", "NORMAL" );
+-    AddVariable( new StateVariable< QString >( "CurrentRecordQualityMode", true ) );
+-    // “0:EP” “1:LP”. “2:SP” “0:BASIC” “1:MEDIUM” “2:HIGH” “NOT_IMPLEMENTED” Vendor-defined
+-    SetValue< QString >( "CurrentRecordQualityMode", "NOT_IMPLEMENTED" );
+-
+-    // GetDeviceCapabilities
+-    AddVariable( new StateVariable< QString >( "PossiblePlaybackStorageMedia", true ) );
+-    SetValue< QString >( "PossiblePlaybackStorageMedia", "NETWORK" );
+-    AddVariable( new StateVariable< QString >( "PossibleRecordStorageMedia", true ) );
+-    SetValue< QString >( "PossibleRecordStorageMedia", "NOT_IMPLEMENTED" );
+-    AddVariable( new StateVariable< QString >( "PossibleRecordQualityModes", true ) );
+-    SetValue< QString >( "PossibleRecordQualityModes", "NOT_IMPLEMENTED" );
++    AddVariable( new StateVariable< ui4 >( "NumberOfTracks", ui4(0)) );
++    AddVariable( new StateVariable< QString >( "CurrentMediaDuration", QString("00:00:00")) );
++    AddVariable( new StateVariable< QString >( "AVTransportURI") );
++    AddVariable( new StateVariable< QString >( "AVTransportURIMetaData") );
+ 
+     // GetPositionInfo
+-    AddVariable( new StateVariable< QString >( "CurrentTrack", true ) );
+-    SetValue< QString >( "CurrentTrack", "0" );
+-    AddVariable( new StateVariable< QString >( "AbsoluteTimePosition", true ) );
+-    SetValue< QString >( "AbsoluteTimePosition", "00:00:00" );
++    AddVariable( new StateVariable< ui4 >( "CurrentTrack", ui4(0)) );
++    AddVariable( new StateVariable< QString >( "AbsoluteTimePosition", QString("00:00:00")) );
+ 
+     QString sUPnpDescPath = UPnp::g_pConfig->GetValue( "UPnP/DescXmlPath", m_sSharePath );
+ 
+@@ -115,6 +91,9 @@ bool UPnpAVTransport::ProcessRequest( HttpWorkerThread *pThread, HTTPRequest *pR
+     {
+         if (pRequest)
+         {
++            if (Eventing::ProcessRequest( pThread, pRequest ))
++                return true;
++
+             if (pRequest->m_sBaseUrl != m_sControlUrl)
+                 return( false );
+ 
+@@ -191,7 +170,7 @@ void UPnpAVTransport::SetAVTransportURI( HTTPRequest *pRequest )
+     SetValue< QString >( "AVTransportURIMetaData", sMeta );
+ 
+     // For GetMediaInfo
+-    SetValue< QString >( "NumberOfTracks", "1" ); // NB no playlists
++    SetValue< ui4 >( "NumberOfTracks", 1 ); // NB no playlists
+     SetValue< QString >( "CurrentMediaDuration", "00:00:00" );
+ 
+     if ( GetValue<QString>("TransportState") == "PLAYING")
+@@ -225,7 +204,7 @@ void UPnpAVTransport::GetMediaInfo( HTTPRequest *pRequest )
+     NameValues list;
+ 
+     list.push_back(
+-        NameValue("NrTracks", GetValue<QString>("NumberOfTracks")));
++        NameValue("NrTracks", GetValue<ui4>("NumberOfTracks")));
+     list.push_back(
+         NameValue("MediaDuration", GetValue<QString>("CurrentMediaDuration")));
+     list.push_back(
+@@ -236,12 +215,19 @@ void UPnpAVTransport::GetMediaInfo( HTTPRequest *pRequest )
+         NameValue("NextURI", "NOT_IMPLEMENTED"));
+     list.push_back(
+         NameValue("NextURIMetaData", "NOT_IMPLEMENTED"));
++    // PlaybackStorageMedium, RecordStorageMedium:
++    // “UNKNOWN” ”DV”  “MINI-DV” “VHS” ”W-VHS” “S-VHS” “D-VHS” “VHSC”
++    // “VIDEO8” “HI8” “CD-ROM” “CD-DA” “CD-R” “CD-RW” “VIDEO-CD” ”SACD”
++    // “MD-AUDIO” “MD-PICTURE” “DVD-ROM” “DVD-VIDEO” “DVD-R” “DVD+RW”
++    // “DVD-RW” “DVD-RAM” “DVD-AUDIO” “DAT” “LD” “HDD” “MICRO-MV” "NETWORK”
++    // “NONE” “NOT_IMPLEMENTED” Vendor-defined
+     list.push_back(
+-        NameValue("PlayMedium", GetValue<QString>("PlaybackStorageMedium")));
++        NameValue("PlayMedium", "NETWORK")); //GetValue<QString>("PlaybackStorageMedium")));
+     list.push_back(
+-        NameValue("RecordMedium", GetValue<QString>("RecordStorageMedium")));
++        NameValue("RecordMedium", "NOT_IMPLEMENTED")); //GetValue<QString>("RecordStorageMedium")));
++    // “WRITABLE” ”PROTECTED” “NOT_WRITABLE” “UNKNOWN” “NOT_IMPLEMENTED”
+     list.push_back(
+-        NameValue("WriteStatus", GetValue<QString>("RecordMediumWriteStatus")));
++        NameValue("WriteStatus", "NOT_IMPLEMENTED")); //GetValue<QString>("RecordMediumWriteStatus")));
+ 
+     pRequest->FormatActionResponse(list);
+ }
+@@ -287,7 +273,7 @@ void UPnpAVTransport::GetPositionInfo( HTTPRequest *pRequest )
+     NameValues list;
+ 
+     list.push_back(
+-        NameValue("Track", GetValue<QString>("CurrentTrack")));
++        NameValue("Track", GetValue<ui4>("CurrentTrack")));
+     list.push_back(
+         NameValue("TrackDuration", GetValue<QString>("CurrentMediaDuration")));
+     list.push_back(
+@@ -324,11 +310,11 @@ void UPnpAVTransport::GetDeviceCapabilities( HTTPRequest *pRequest )
+     NameValues list;
+ 
+     list.push_back(
+-        NameValue("PlayMedia", GetValue<QString>("PossiblePlaybackStorageMedia")));
++        NameValue("PlayMedia", "NETWORK")); //GetValue<QString>("PossiblePlaybackStorageMedia")));
+     list.push_back(
+-        NameValue("RecMedia", GetValue<QString>("PossibleRecordStorageMedia")));
++        NameValue("RecMedia", "NOT_IMPLEMENTED")); //GetValue<QString>("PossibleRecordStorageMedia")));
+     list.push_back(
+-        NameValue("RecQualityModes", GetValue<QString>("PossibleRecordQualityModes")));
++        NameValue("RecQualityModes", "NOT_IMPLEMENTED")); //GetValue<QString>("PossibleRecordQualityModes")));
+ 
+     pRequest->FormatActionResponse(list);
+ }
+@@ -348,10 +334,12 @@ void UPnpAVTransport::GetTransportSettings( HTTPRequest *pRequest )
+ 
+     NameValues list;
+ 
++    // “NORMAL” “SHUFFLE” “REPEAT_ONE” “REPEAT_ALL” “RANDOM” “DIRECT_1” “INTRO” Vendor-defined
+     list.push_back(
+-        NameValue("PlayMode", GetValue<QString>("CurrentPlayMode")));
++        NameValue("PlayMode", "NORMAL")); //GetValue<QString>("CurrentPlayMode")));
++    // “0:EP” “1:LP”. “2:SP” “0:BASIC” “1:MEDIUM” “2:HIGH” “NOT_IMPLEMENTED” Vendor-defined
+     list.push_back(
+-        NameValue("RecQualityMode", GetValue<QString>("CurrentRecordQualityMode")));
++        NameValue("RecQualityMode", "NOT_IMPLEMENTED")); //GetValue<QString>("CurrentRecordQualityMode")));
+ 
+     pRequest->FormatActionResponse(list);
+ }
+@@ -512,7 +500,7 @@ UPnPResultCode UPnpAVTransport::StartPlay()
+     SetValue< QString >( "TransportState", "PLAYING" );
+ 
+     // For GetPositionInfo
+-    SetValue< QString >( "CurrentTrack", "1" );
++    SetValue< ui4 >( "CurrentTrack", 1 );
+     SetValue< QString >( "AbsoluteTimePosition", "00:00:00" );
+ 
+     return UPnPResult_Success;
+@@ -549,7 +537,7 @@ void UPnpAVTransport::Seek( HTTPRequest *pRequest )
+             return;
+         }
+ 
+-        SetValue< QString >( "CurrentTrack", target);
++        SetValue< ui4 >( "CurrentTrack", target.toUInt());
+     }
+     else if (units == "ABS_TIME" || units == "REL_TIME")
+     {
+@@ -589,7 +577,7 @@ void UPnpAVTransport::Next( HTTPRequest *pRequest )
+     VERBOSE(VB_UPNP, "UPnpAVTransport::Next");
+ 
+     SendEvent("NETWORK_CONTROL SEEK FORWARD");
+-    SetValue< QString >( "CurrentTrack", "0"); // End of file
++    SetValue< ui4 >( "CurrentTrack", 0); // End of file
+ 
+     pRequest->FormatActionResponse(NameValues());
+ }
+@@ -611,7 +599,7 @@ void UPnpAVTransport::Previous( HTTPRequest *pRequest )
+     VERBOSE(VB_UPNP, "UPnpAVTransport::Previous");
+ 
+     SendEvent("NETWORK_CONTROL SEEK BEGINNING");
+-    SetValue< QString >( "CurrentTrack", "1"); // Begin of file
++    SetValue< ui4 >( "CurrentTrack", 1); // Begin of file
+ 
+     pRequest->FormatActionResponse(NameValues());
+ }
+diff --git a/mythtv/libs/libmythupnp/upnprctl.cpp b/mythtv/libs/libmythupnp/upnprctl.cpp
+index 91864fe..e33a7b0 100644
+--- a/mythtv/libs/libmythupnp/upnprctl.cpp
++++ b/mythtv/libs/libmythupnp/upnprctl.cpp
+@@ -10,6 +10,8 @@
+ 
+ #include "mythcorecontext.h" // gCoreContext
+ 
++typedef unsigned short int ui2;
++
+ /////////////////////////////////////////////////////////////////////////////
+ //
+ /////////////////////////////////////////////////////////////////////////////
+@@ -17,11 +19,16 @@
+ UPnpRCTL::UPnpRCTL( UPnpDevice *pDevice , const QString sSharePath)
+   : Eventing( "UPnpRCTL", "RenderingControl_Event", sSharePath)
+ {
+-    AddVariable( new StateVariable< QString >( "PresetNameList", true ) );
+-    SetValue< QString >( "PresetNameList", "FactoryDefaults" );
++    AddVariable( new StateVariable< QString >( "LastChange", true ) );
++    /* LastChange is an XML string. See RenderingControl:1 Service Template 2.2.1
++
++        <Event xmlns=”urn:schemas-upnp-org:metadata-1-0/AVT_RCS">
++        <InstanceID val=”0”><Brightness val=”48”/></InstanceID>
++        <InstanceID val=”1”><Brightness val=”11”/></InstanceID>
++        </Event>
++    */
+ 
+-    AddVariable( new StateVariable< QString >( "Volume", true ) );
+-    SetValue< QString >( "Volume", "100" );
++    AddVariable( new StateVariable< ui2 >( "Volume", ui2(100)) );
+ 
+     QString sUPnpDescPath = UPnp::g_pConfig->GetValue( "UPnP/DescXmlPath", m_sSharePath );
+ 
+@@ -56,6 +63,9 @@ bool UPnpRCTL::ProcessRequest( HttpWorkerThread *pThread, HTTPRequest *pRequest
+     {
+         if (pRequest)
+         {
++            if (Eventing::ProcessRequest( pThread, pRequest ))
++                return true;
++
+             if (pRequest->m_sBaseUrl != m_sControlUrl)
+                 return false;
+ 
+@@ -118,7 +128,7 @@ void UPnpRCTL::ListPresets( HTTPRequest *pRequest )
+     NameValues list;
+ 
+     list.push_back(
+-        NameValue("CurrentPresetNameList", GetValue<QString>("PresetNameList")));
++        NameValue("CurrentPresetNameList", "FactoryDefaults"));
+ 
+     pRequest->FormatActionResponse(list);
+ }
+@@ -146,7 +156,7 @@ void UPnpRCTL::SelectPreset( HTTPRequest *pRequest )
+ 
+     // TODO get default and set actual volume
+     VERBOSE(VB_UPNP, QString("UPnpRCTL::SelectPreset %1").arg(preset));
+-    SetValue< QString >( "Volume", QString::number(100) );
++    SetValue< ui2 >( "Volume", 100);
+ 
+     pRequest->FormatActionResponse(NameValues());
+ }
+@@ -173,7 +183,7 @@ void UPnpRCTL::GetVolume( HTTPRequest *pRequest )
+     }
+ 
+     // TODO get actual volume
+-    QString vol = GetValue<QString>("Volume");
++    ui2 vol = GetValue<ui2>("Volume");
+     VERBOSE(VB_UPNP, QString("UPnpRCTL::GetVolume %1").arg(vol));
+ 
+     NameValues list;
+-- 
+1.7.9.5
+

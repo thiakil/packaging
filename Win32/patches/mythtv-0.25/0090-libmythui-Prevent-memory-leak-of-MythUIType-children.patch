@@ -1,0 +1,79 @@
+From f43bf98368f54002e5a20b95756c72c141d3ebf2 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 5 Jun 2012 20:01:01 +0200
+Subject: [PATCH 090/124] libmythui: Prevent memory leak of MythUIType
+ children
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythui/mythuibuttonlist.cpp |    4 +---
+ mythtv/libs/libmythui/mythuitype.cpp       |   14 +++++---------
+ mythtv/libs/libmythui/mythuitype.h         |    2 ++
+ 3 files changed, 8 insertions(+), 12 deletions(-)
+
+diff --git a/mythtv/libs/libmythui/mythuibuttonlist.cpp b/mythtv/libs/libmythui/mythuibuttonlist.cpp
+index 1d2685b..8746766 100644
+--- a/mythtv/libs/libmythui/mythuibuttonlist.cpp
++++ b/mythtv/libs/libmythui/mythuibuttonlist.cpp
+@@ -2717,10 +2717,8 @@ void MythUIButtonList::CopyFrom(MythUIType *base)
+ 
+     for (int i = 0; i < (int)m_itemsVisible; i++)
+     {
+-        MythUIType *deltype;
+         QString name = QString("buttonlist button %1").arg(i);
+-        deltype = GetChild(name);
+-        delete deltype;
++        DeleteChild(name);
+     }
+ 
+     m_ButtonList.clear();
+diff --git a/mythtv/libs/libmythui/mythuitype.cpp b/mythtv/libs/libmythui/mythuitype.cpp
+index 754af0d..b1af66e 100644
+--- a/mythtv/libs/libmythui/mythuitype.cpp
++++ b/mythtv/libs/libmythui/mythuitype.cpp
+@@ -50,15 +50,10 @@ MythUIType::MythUIType(QObject *parent, const QString &name)
+     m_IsDependDefault = false;
+     m_ReverseDepend = false;
+ 
+-    m_Parent = NULL;
+-
+-    if (parent)
+-    {
+-        m_Parent = dynamic_cast<MythUIType *>(parent);
+-
+-        if (m_Parent)
+-            m_Parent->AddChild(this);
+-    }
++    // NB C++ 0X 5.2.7.4: cast of null = null
++    m_Parent = dynamic_cast<MythUIType * >(parent);
++    if (m_Parent)
++        m_Parent->AddChild(this);
+ 
+     m_DirtyRegion = QRegion(QRect(0, 0, 0, 0));
+ 
+@@ -71,6 +66,7 @@ MythUIType::MythUIType(QObject *parent, const QString &name)
+ 
+ MythUIType::~MythUIType()
+ {
++    DeleteAllChildren();
+     delete m_Fonts;
+     qDeleteAll(m_animations);
+ }
+diff --git a/mythtv/libs/libmythui/mythuitype.h b/mythtv/libs/libmythui/mythuitype.h
+index c39630e..4c0deed 100644
+--- a/mythtv/libs/libmythui/mythuitype.h
++++ b/mythtv/libs/libmythui/mythuitype.h
+@@ -67,8 +67,10 @@ class MUI_PUBLIC MythUIType : public QObject, public XMLParseBase
+ 
+   public:
+     MythUIType(QObject *parent, const QString &name);
++  protected:
+     virtual ~MythUIType();
+ 
++  public:
+     virtual void Reset(void);
+ 
+     void AddChild(MythUIType *child);
+-- 
+1.7.9.5
+

@@ -1,0 +1,166 @@
+From 9d7932535a28b4d4727f36fc635cb0ba0da9c776 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 16 Mar 2011 12:17:45 +0100
+Subject: [PATCH 015/285] Fix mythplugins to cross compile and run on Windows
+
+- configure: add targetos
+- configure: remove $sysroot from $prefix
+- mythmusic: correct absolute paths to enable playback on win32
+- mythgallery: Load initial folder
+
+Ticket URL: <http://code.mythtv.org/trac/ticket/9258>
+---
+ mythplugins/configure                              |   17 +++++++++++------
+ mythplugins/mythgallery/mythgallery/iconview.cpp   |    8 ++++----
+ mythplugins/mythmusic/mythmusic/decoderhandler.cpp |   15 ++++++++++-----
+ 3 files changed, 25 insertions(+), 15 deletions(-)
+
+diff --git a/mythplugins/configure b/mythplugins/configure
+index 6373bbd..1f13007 100755
+--- a/mythplugins/configure
++++ b/mythplugins/configure
+@@ -237,6 +237,8 @@ echo "   $0$CONFIGURATION_OPTS" >> config.log
+ for opt do
+   optval="${opt#*=}"
+   case "$opt" in
++  --targetos=*) targetos=`echo $opt | cut -d '=' -f 2`
++  ;;
+   --prefix=*) prefix=`echo $opt | cut -d '=' -f 2`
+   ;;
+   --libdir-name=*) libdir_name=`echo $opt | cut -d '=' -f 2`;
+@@ -318,7 +320,7 @@ has_library()
+         done
+     fi
+ 
+-    LIBPATHS="`echo $LIBPATHS $sysroot$prefix/$libdir_name $sysroot/$libdir_name $sysroot/usr/$libdir_name $sysroot/usr/local/$libdir_name $sysroot/usr/X11R6/$libdir_name | sed s/'\/ '/' '/g` "
++    LIBPATHS="`echo $LIBPATHS $prefix/$libdir_name $sysroot/$libdir_name $sysroot/usr/$libdir_name $sysroot/usr/local/$libdir_name $sysroot/usr/X11R6/$libdir_name | sed s/'\/ '/' '/g` "
+ 
+     HAS_IT="no"
+     for LIBPATH in $LIBPATHS ; do
+@@ -331,7 +333,7 @@ has_library()
+ 
+ has_header()
+ {
+-    HPATHS="$sysroot$prefix/include $sysroot/usr/local/include $sysroot/usr/include $sysroot/usr/include/g++-v3 $sysroot/usr/X11R6/include $sysroot/"
++    HPATHS="$prefix/include $sysroot/usr/local/include $sysroot/usr/include $sysroot/usr/include/g++-v3 $sysroot/usr/X11R6/include $sysroot/"
+     INCL=`echo $DYLD_LIBRARY_PATH $LD_LIBRARY_PATH | sed s/':'/' '/g`
+     HPATHS="$HPATHS `echo $INCL | sed s/$libdir_name/include/g` "
+ 
+@@ -382,6 +384,9 @@ if test "$opengl" != "no" ; then
+     if test "`echo ${targetos} | cut -c1-5`" = "MINGW" ; then
+         opengl="yes"
+     fi
++    if test "`echo ${targetos} | cut -c1-5`" = "MINGW" ; then
++        opengl="yes"
++    fi
+ fi
+ 
+ if ! disabled libvisual; then
+@@ -598,13 +603,13 @@ rm -f $TMPC $TMPE
+ ###########################################################
+ 
+ # bring in mythtv config
+-if [ -e $sysroot$prefix/include/mythtv/mythconfig.mak ] ; then
++if [ -e $prefix/include/mythtv/mythconfig.mak ] ; then
+   rm mythconfig.mak 2> /dev/null
+-  ln -s $sysroot$prefix/include/mythtv/mythconfig.mak mythconfig.mak
++  ln -s $prefix/include/mythtv/mythconfig.mak mythconfig.mak
+ else
+-  echo "ERROR: mythconfig.mak not found at $sysroot$prefix/include/mythtv/mythconfig.mak"
++  echo "ERROR: mythconfig.mak not found at $prefix/include/mythtv/mythconfig.mak"
+   echo "Did you make AND install MythTV first?"
+-  echo "Are you using the correct prefix ($prefix) and sysroot ($sysroot)?"
++  echo "Are you using the correct prefix ($prefix)?"
+   echo "Bailing out!!"
+   exit
+ fi
+diff --git a/mythplugins/mythgallery/mythgallery/iconview.cpp b/mythplugins/mythgallery/mythgallery/iconview.cpp
+index ea8e766..f7b0339 100644
+--- a/mythplugins/mythgallery/mythgallery/iconview.cpp
++++ b/mythplugins/mythgallery/mythgallery/iconview.cpp
+@@ -204,6 +204,7 @@ bool IconView::Create(void)
+         m_thumbGen->setSize(thumbWidth, thumbHeight);
+ 
+     SetupMediaMonitor();
++    LoadDirectory(m_galleryDir);
+ 
+     return true;
+ }
+@@ -370,7 +371,6 @@ void IconView::SetupMediaMonitor(void)
+         }
+     }
+     m_currDevice = NULL;
+-    LoadDirectory(m_galleryDir);
+ #endif // _WIN32
+ }
+ 
+@@ -492,9 +492,9 @@ bool IconView::keyPressEvent(QKeyEvent *event)
+                 {
+                     QDir currentDir(m_currDir);
+                     QDir rootDir(m_galleryDir);
+-                    if (currentDir != rootDir) 
+-                        HandleSubDirEscape(m_galleryDir);
+-                    else 
++                    if (currentDir == rootDir)
++                        break;
++                    if ( !HandleSubDirEscape(m_galleryDir))
+                         break;
+                 }
+                 handled = HandleEscape();
+diff --git a/mythplugins/mythmusic/mythmusic/decoderhandler.cpp b/mythplugins/mythmusic/mythmusic/decoderhandler.cpp
+index 2fa98ff..332abac 100644
+--- a/mythplugins/mythmusic/mythmusic/decoderhandler.cpp
++++ b/mythplugins/mythmusic/mythmusic/decoderhandler.cpp
+@@ -267,7 +267,8 @@ void DecoderHandler::start(Metadata *mdata)
+     m_redirects = 0;
+ 
+     QUrl url;
+-    if (mdata->Filename().startsWith('/'))
++    // NB Win32 absolute paths start d:/...
++    if (QFileInfo(mdata->Filename()).isAbsolute())
+         url = QUrl::fromLocalFile(mdata->Filename());
+     else
+         url.setUrl(mdata->Filename());
+@@ -328,7 +329,8 @@ bool DecoderHandler::next(void)
+     PlayListFileEntry *entry = m_playlist.get(m_playlist_pos);
+ 
+     QUrl url;
+-    if (entry->File().startsWith('/'))
++    // NB Win32 absolute paths start d:/...
++    if (QFileInfo(entry->File()).isAbsolute())
+         url = QUrl::fromLocalFile(entry->File());
+     else
+         url.setUrl(entry->File());
+@@ -398,7 +400,8 @@ bool DecoderHandler::createPlaylist(const QUrl &url)
+ 
+     if (extension == ".pls" || extension == ".m3u")
+     {
+-        if (url.scheme() == "file" || url.toString().startsWith('/'))
++        // NB Win32 absolute paths start d:/...
++        if (url.scheme() == "file" || QFileInfo(url.toString()).isAbsolute())
+             return createPlaylistFromFile(url);
+         else
+             return createPlaylistFromRemoteUrl(url);
+@@ -411,7 +414,8 @@ bool DecoderHandler::createPlaylistForSingleFile(const QUrl &url)
+ {
+     PlayListFileEntry *entry = new PlayListFileEntry;
+ 
+-    if (url.scheme() == "file" || url.toString().startsWith('/'))
++    // NB Win32 absolute paths start d:/...
++    if (url.scheme() == "file" || QFileInfo(url.toString()).isAbsolute())
+         entry->setFile(url.toLocalFile());
+     else
+         entry->setFile(url.toString());
+@@ -513,7 +517,8 @@ void DecoderHandler::createIOFactory(const QUrl &url)
+     if (haveIOFactory()) 
+         deleteIOFactory();
+ 
+-    if (url.scheme() == "file" || url.toString().startsWith('/') || url.toString().endsWith(".cda"))
++    // NB Win32 absolute paths start d:/...
++    if (url.scheme() == "file" || QFileInfo(url.toString()).isAbsolute() || url.toString().endsWith(".cda"))
+         m_io_factory = new DecoderIOFactoryFile(this);
+     else if (m_meta && m_meta->Format() == "cast")
+         m_io_factory = new DecoderIOFactoryShoutCast(this);
+-- 
+1.7.9.5
+

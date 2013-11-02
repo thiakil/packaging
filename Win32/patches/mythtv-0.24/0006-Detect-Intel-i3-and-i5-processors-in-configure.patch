@@ -1,0 +1,29 @@
+From e9472def1f573eb82458f4ebb9a1f473e62c3a57 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 14 Mar 2011 13:58:57 +0100
+Subject: [PATCH 006/285] Detect Intel i3 and i5 processors in configure
+
+Detect Intel i3 and i5 CPUs in ./configure and  enables core2 optimisations
+when --cpu=host is specified
+
+Ticket URL: <http://code.mythtv.org/trac/ticket/9443>
+---
+ mythtv/configure |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/configure b/mythtv/configure
+index 44040e2..3980352 100755
+--- a/mythtv/configure
++++ b/mythtv/configure
+@@ -2587,7 +2587,7 @@ enable $arch
+ if enabled proc_opt_old; then
+ # first try to tune based on processor info
+ # Intel i7 processors (EMT64T capable)
+-   if expr "$processor" : ".*Intel(R).*Core(TM) i7 CPU.*" > /dev/null ; then
++   if expr "$processor" : ".*Intel(R).*Core(TM) i[357] CPU.*" > /dev/null ; then
+        cpu="core2"
+ # EM64T era Intel Xeon
+    elif expr "$processor" : ".*Intel(R) Xeon(R) CPU.*51[1-6][08]" > /dev/null ; then
+-- 
+1.7.9.5
+

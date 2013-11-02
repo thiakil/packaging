@@ -1,0 +1,148 @@
+From a6400b34cbd8f45c6f2beb24d489ac330d122021 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 1 Sep 2013 15:10:09 +0100
+Subject: [PATCH 280/285] Screensaver: Add DB settings for the detection and
+ deactivate commands
+
+The 'gnome-screensaver-command --poke' command is not available in
+Gnome3 (Ubuntu >= 11.10).  This means that MythTV can no longer
+disable the screensaver during playbak.
+
+This patch enables the user to setup an alternative command
+- Using the new TV setting provided in this patch.
+- or command line option to mythfrontend adding
+  -O GscreensaverDeactivateCmd="..."
+
+The system command to disable the Gnome3 screensaver is:
+dbus-send --session --dest=org.gnome.ScreenSaver --type=method_call\
+  /org/gnome/ScreenSaver org.gnome.ScreenSaver.SimulateUserActivity
+
+An alternative is to replace gnome-screensaver-command with a local
+version in /usr/local/bin e.g.
+/#!/bin/sh
+set -e
+
+Poke() {
+    dbus-send --session --dest=org.gnome.ScreenSaver --type=method_call\
+        /org/gnome/ScreenSaver org.gnome.ScreenSaver.SimulateUserActivity
+}
+
+case "${1:-}" in
+    --poke) Poke ;;
+    *) /usr/bin/gnome-screensaver-command "$@" ;;
+esac
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythui/screensaver-x11.cpp       |   37 +++++++++++++++++------
+ mythtv/programs/mythfrontend/globalsettings.cpp |   17 +++++++++++
+ 2 files changed, 44 insertions(+), 10 deletions(-)
+
+diff --git a/mythtv/libs/libmythui/screensaver-x11.cpp b/mythtv/libs/libmythui/screensaver-x11.cpp
+index 2812526..f4c0c8b 100644
+--- a/mythtv/libs/libmythui/screensaver-x11.cpp
++++ b/mythtv/libs/libmythui/screensaver-x11.cpp
+@@ -38,14 +38,30 @@ class ScreenSaverX11Private
+         m_timeoutInterval(-1),        m_resetTimer(NULL),
+         m_display(NULL)
+     {
++        m_xdeact = GetMythDB()->GetSetting("XscreensaverDeactivateCmd",
++            "xscreensaver-command -deactivate");
++        m_gdeact = GetMythDB()->GetSetting("GscreensaverDeactivateCmd", "");
++
++        QString xrun = GetMythDB()->GetSetting("XscreensaverRunningCmd",
++            "xscreensaver-command -version");
++        QString grun = GetMythDB()->GetSetting("GscreensaverRunningCmd",
++            "gnome-screensaver-command --help");
+         const uint flags = kMSDontBlockInputDevs | kMSDontDisableDrawing |
+                            kMSProcessEvents;
+-        m_xscreensaverRunning =
+-                myth_system("xscreensaver-command -version >&- 2>&-",
+-                            flags) == 0;
+-        m_gscreensaverRunning =
+-                myth_system("gnome-screensaver-command --help >&- 2>&-",
+-                            flags) == 0;
++        m_xscreensaverRunning = myth_system(xrun + " >&- 2>&-", flags) == 0;
++        m_gscreensaverRunning = myth_system(grun + " >&- 2>&-", flags) == 0;
++
++        if (m_gscreensaverRunning && m_gdeact.isEmpty())
++        {
++            // Gnome3 doesn't support the --poke option
++            m_gdeact="gnome-screensaver-command --poke";
++            if (myth_system(m_gdeact + " >&- 2>&-", flags))
++            {
++                m_gdeact="dbus-send --session --dest=org.gnome.ScreenSaver"
++                    " --type=method_call /org/gnome/ScreenSaver"
++                    " org.gnome.ScreenSaver.SimulateUserActivity";
++            }
++        }
+ 
+         if (IsScreenSaverRunning())
+         {
+@@ -203,16 +219,16 @@ class ScreenSaverX11Private
+         {
+             if (m_xscreensaverRunning)
+             {
+-                VERBOSE(VB_PLAYBACK, LOC + "Calling xscreensaver-command -deactivate");
+-                myth_system("xscreensaver-command -deactivate >&- 2>&- &",
++                VERBOSE(VB_PLAYBACK, LOC + "Calling " + m_xdeact);
++                myth_system(m_xdeact + " >&- 2>&- &",
+                             kMSDontBlockInputDevs |
+                             kMSDontDisableDrawing |
+                             kMSRunBackground);
+             }
+             if (m_gscreensaverRunning)
+             {
+-                VERBOSE(VB_PLAYBACK, LOC + "Calling gnome-screensaver-command --poke");
+-                myth_system("gnome-screensaver-command --poke >&- 2>&- &",
++                VERBOSE(VB_PLAYBACK, LOC + "Calling " + m_gdeact);
++                myth_system(m_gdeact + " >&- 2>&- &",
+                             kMSDontBlockInputDevs |
+                             kMSDontDisableDrawing |
+                             kMSRunBackground);
+@@ -249,6 +265,7 @@ class ScreenSaverX11Private
+ 
+     ScreenSaverState m_state;
+     MythXDisplay *m_display;
++    QString m_xdeact, m_gdeact;
+ };
+ 
+ ScreenSaverX11::ScreenSaverX11() :
+diff --git a/mythtv/programs/mythfrontend/globalsettings.cpp b/mythtv/programs/mythfrontend/globalsettings.cpp
+index eb44f99..679bcfb 100644
+--- a/mythtv/programs/mythfrontend/globalsettings.cpp
++++ b/mythtv/programs/mythfrontend/globalsettings.cpp
+@@ -2196,6 +2196,20 @@ static HostSpinBox *LiveTVIdleTimeout()
+     return gs;
+ }
+ 
++#if defined(USING_X11)
++static HostLineEdit *GScreenSaverDeactivateCmd()
++{
++    HostLineEdit *ge = new HostLineEdit("GscreensaverDeactivateCmd");
++    ge->setLabel(QObject::tr("Gnome screensaver deactivate command"));
++    ge->setValue("");
++    ge->setHelpText(QObject::tr(
++                        "The system command to simulate user activity "
++                        "and prevent the Gnome screen saver from starting.\n"
++                        "Leave blank to use the system default."));
++    return ge;
++}
++#endif
++
+ // static HostCheckBox *PlaybackPreview()
+ // {
+ //     HostCheckBox *gc = new HostCheckBox("PlaybackPreview");
+@@ -4039,6 +4053,9 @@ PlaybackSettings::PlaybackSettings()
+ 
+     general1->addChild(columns);
+     general1->addChild(LiveTVIdleTimeout());
++#if defined(USING_X11)
++    general1->addChild(GScreenSaverDeactivateCmd());
++#endif
+ #ifdef USING_OPENGL_VSYNC
+     //general1->addChild(UseOpenGLVSync());
+ #endif // USING_OPENGL_VSYNC
+-- 
+1.7.9.5
+

@@ -1,0 +1,46 @@
+From 4e501df057a92e3b5e3238cc01cd39a4140a0e27 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 27 Jun 2012 20:11:27 +0200
+Subject: [PATCH 143/227] greedyhdeint: Ensure filter context data is all set
+ to 0
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/filters/greedyhdeint/filter_greedyhdeint.c |    9 +--------
+ 1 file changed, 1 insertion(+), 8 deletions(-)
+
+diff --git a/mythtv/filters/greedyhdeint/filter_greedyhdeint.c b/mythtv/filters/greedyhdeint/filter_greedyhdeint.c
+index 399c857..8afe51a 100644
+--- a/mythtv/filters/greedyhdeint/filter_greedyhdeint.c
++++ b/mythtv/filters/greedyhdeint/filter_greedyhdeint.c
+@@ -240,26 +240,19 @@ static VideoFilter* GreedyHDeintFilter(VideoFrameType inpixfmt,
+     (void) options;
+     (void) threads;
+ 
+-    filter = (ThisFilter *) malloc (sizeof(ThisFilter));
++    filter = (ThisFilter *) calloc (1, sizeof(ThisFilter));
+     if (filter == NULL)
+     {
+         fprintf (stderr, "GreedyHDeint: failed to allocate memory for filter.\n");
+         return NULL;
+     }
+ 
+-    filter->width = 0;
+-    filter->height = 0;
+-    memset(filter->frames, 0, sizeof(filter->frames));
+-    filter->deint_frame = 0;
+-
+     AllocFilter(filter, *width, *height);
+ 
+     init_yuv_conversion();
+ #ifdef MMX
+     filter->mm_flags = av_get_cpu_flags();
+     TF_INIT(filter);
+-#else
+-    filter->mm_flags = 0;
+ #endif
+ 
+     filter->vf.filter = &GreedyHDeint;
+-- 
+1.7.9.5
+

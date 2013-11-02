@@ -1,0 +1,41 @@
+From 658ab69c6342d969dfbbd9cfcedf75c5d3477330 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 4 May 2012 13:15:24 +0200
+Subject: [PATCH 105/285] mythmusic: Improved mediamonitor handling when
+ AutoPlayCD enabled
+
+This patch ignores mediamotitor's handleMedia callback when a CD is
+inserted if AutoPlayCD is enabled and mythmusic is currently playing.
+In these circumstances PlaybackBoxMusic::occasionallyCheckCD polls
+for a CD and will handle the inserted CD.
+
+This change ensures that when playback stopped, mythmusic exits to the
+main Myth menu rather than to the old PlaybackBoxMusic instance.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/mythmusic/mythmusic/main.cpp |    7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/mythplugins/mythmusic/mythmusic/main.cpp b/mythplugins/mythmusic/mythmusic/main.cpp
+index 0d24ff0..f1359d2 100644
+--- a/mythplugins/mythmusic/mythmusic/main.cpp
++++ b/mythplugins/mythmusic/mythmusic/main.cpp
+@@ -474,10 +474,11 @@ static void handleMedia(MythMediaDevice *cd)
+         return;
+     }
+ 
+-    if (gCoreContext->GetNumSetting("AutoPlayCD", 0))
+-        runMusicPlayback();
+-    else
++    if (!gCoreContext->GetNumSetting("AutoPlayCD", 0))
+         mythplugin_run();
++    // If there's an existing client it will detect the CD so do nothing
++    else if (!gPlayer->hasClient())
++        runMusicPlayback();
+ }
+ 
+ static void setupKeys(void)
+-- 
+1.7.9.5
+

@@ -1,0 +1,57 @@
+From c3b600094af35334bef8aa7076a37a162ad58722 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 23 Jun 2012 22:04:34 +0200
+Subject: [PATCH 142/227] libmythtv: Initialise all fields of struct passed to
+ drmWaitVBlank
+
+In vsync.c the sequence field of rm_wait_vblank_t was not being initialised.
+Spotted by valgrind.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/vsync.cpp |    8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/vsync.cpp b/mythtv/libs/libmythtv/vsync.cpp
+index 8f5e364..25b3750 100644
+--- a/mythtv/libs/libmythtv/vsync.cpp
++++ b/mythtv/libs/libmythtv/vsync.cpp
+@@ -255,7 +255,7 @@ DRMVideoSync::~DRMVideoSync()
+ 
+ bool DRMVideoSync::TryInit(void)
+ {
+-    drm_wait_vblank_t blank;
++    drm_wait_vblank_t blank = {{0}};
+ 
+     m_dri_fd = open(sm_dri_dev, O_RDWR);
+     if (m_dri_fd < 0)
+@@ -282,7 +282,7 @@ bool DRMVideoSync::TryInit(void)
+ void DRMVideoSync::Start(void)
+ {
+     // Wait for a refresh so we start out synched
+-    drm_wait_vblank_t blank;
++    drm_wait_vblank_t blank = {{0}};
+     blank.request.type = DRM_VBLANK_RELATIVE;
+     blank.request.sequence = 1;
+     drmWaitVBlank(m_dri_fd, &blank);
+@@ -302,7 +302,7 @@ int DRMVideoSync::WaitForFrame(int sync_delay)
+     // Always sync to the next retrace execpt when we are very late.
+     if (m_delay > -(m_refresh_interval/2))
+     {
+-        drm_wait_vblank_t blank;
++        drm_wait_vblank_t blank = {{0}};
+         blank.request.type = DRM_VBLANK_RELATIVE;
+         blank.request.sequence = 1;
+         drmWaitVBlank(m_dri_fd, &blank);
+@@ -317,7 +317,7 @@ int DRMVideoSync::WaitForFrame(int sync_delay)
+         // Wait for any remaining retrace intervals in one pass.
+         int n = (m_delay + m_refresh_interval - 1) / m_refresh_interval;
+ 
+-        drm_wait_vblank_t blank;
++        drm_wait_vblank_t blank = {{0}};
+         blank.request.type = DRM_VBLANK_RELATIVE;
+         blank.request.sequence = n;
+         drmWaitVBlank(m_dri_fd, &blank);
+-- 
+1.7.9.5
+

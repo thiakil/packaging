@@ -1,0 +1,33 @@
+From 99ba8b951fdfdc3dd693a17ba4e34426e952e2d2 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 19 Mar 2013 15:17:37 +0000
+Subject: [PATCH 4/5] WebKit: Remove hybridPixmap from tests
+
+hybridPixmap fails to xcompile on Linux using mingw32 so exclude it.
+
+In file included from widget.cpp:24:
+.uic/release-shared/ui_widget.h:23:20: error: widget.h: No such file or directory
+
+Appears that uic adds  #include "widget.h" but widget.h is two directories
+above.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../webkit/Source/WebKit/qt/tests/tests.pro        |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/src/3rdparty/webkit/Source/WebKit/qt/tests/tests.pro b/src/3rdparty/webkit/Source/WebKit/qt/tests/tests.pro
+index a1a7ae8..cec4af7 100644
+--- a/src/3rdparty/webkit/Source/WebKit/qt/tests/tests.pro
++++ b/src/3rdparty/webkit/Source/WebKit/qt/tests/tests.pro
+@@ -1,6 +1,6 @@
+ 
+ TEMPLATE = subdirs
+-SUBDIRS = qwebframe qwebpage qwebelement qgraphicswebview qwebhistoryinterface qwebview qwebhistory qwebinspector hybridPixmap
++SUBDIRS = qwebframe qwebpage qwebelement qgraphicswebview qwebhistoryinterface qwebview qwebhistory qwebinspector
+ 
+ linux-* {
+     # This test bypasses the library and links the tested code's object itself.
+-- 
+1.7.4.1
+

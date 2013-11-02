@@ -1,0 +1,47 @@
+From aa07bae8eeced95fe1c3fc61eb5e5a12a40ded2b Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 25 May 2012 18:55:34 +0200
+Subject: [PATCH 082/124] Mytharchive: Catch StopIteration exception in
+ mythburn.py
+
+If a DVD is created from a single mpeg video then mythburn.py attempts
+to transcode the file to eliminate any errors.  However, runMythtranscode
+calls DB.searchRecorded, to obtain any cutlist, with an invalid chanid
+and starttime which results in a StopIteration exception.
+
+This patch catches the exception and returns an empty cutlist.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../mytharchive/mythburn/scripts/mythburn.py       |    8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/mythplugins/mytharchive/mythburn/scripts/mythburn.py b/mythplugins/mytharchive/mythburn/scripts/mythburn.py
+index fdde4e2..b8e1db3 100755
+--- a/mythplugins/mytharchive/mythburn/scripts/mythburn.py
++++ b/mythplugins/mytharchive/mythburn/scripts/mythburn.py
+@@ -190,6 +190,7 @@ cpuCount = 1
+ 
+ DB = MythTV.MythDB()
+ MVID = MythTV.MythVideo(db=DB)
++Video = MythTV.Video()
+ 
+ configHostname = DB.gethostname()
+ 
+@@ -1695,8 +1696,11 @@ def getVideoSize(xmlFilename):
+ def runMythtranscode(chanid, starttime, destination, usecutlist, localfile):
+     """Use mythtranscode to cut commercials and/or clean up an mpeg2 file"""
+ 
+-    rec = DB.searchRecorded(chanid=chanid, starttime=starttime).next()
+-    cutlist = rec.markup.getcutlist()
++    try:
++        rec = DB.searchRecorded(chanid=chanid, starttime=starttime).next()
++        cutlist = rec.markup.getcutlist()
++    except StopIteration:
++        cutlist = []
+ 
+     cutlist_s = ""
+     if usecutlist and len(cutlist):
+-- 
+1.7.9.5
+

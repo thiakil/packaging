@@ -1,0 +1,51 @@
+From c8df2a1fbadd0d302f5e7a7216643f74640652ad Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 21 Mar 2013 14:40:10 +0000
+Subject: [PATCH 041/207] libmythtv: Prevent a SEGV in videooutputbase due to
+ race condition
+
+Both the UI thread and the interactive TV systems access MythPlayer's
+videoOutput instance.  This can cause problems if the UI is updating
+the OSD and interactive TV calls MythPlayer::SetVideoResize.  In
+this case VideoOutput::vsz_tmp_buf can be deleted and set to NULL
+while VideoOutput::ResizeVideo is executing.
+
+In MythPlayer::SetVideoResize acquire osdLock before calling
+videoOutput->SetVideoResize.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/interactivescreen.cpp |    4 ++--
+ mythtv/libs/libmythtv/mythplayer.cpp        |    1 +
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/interactivescreen.cpp b/mythtv/libs/libmythtv/interactivescreen.cpp
+index 7e37bd1..c74d4f2 100644
+--- a/mythtv/libs/libmythtv/interactivescreen.cpp
++++ b/mythtv/libs/libmythtv/interactivescreen.cpp
+@@ -14,8 +14,8 @@ InteractiveScreen::~InteractiveScreen(void)
+ 
+ void InteractiveScreen::Close(void)
+ {
+-    if (m_player && m_player->GetVideoOutput())
+-        m_player->GetVideoOutput()->SetVideoResize(QRect());
++    if (m_player)
++        m_player->SetVideoResize(QRect());
+ }
+ 
+ void InteractiveScreen::UpdateArea(void)
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index da393d6..c8bba6f 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -5066,6 +5066,7 @@ void MythPlayer::ITVRestart(uint chanid, uint cardid, bool isLiveTV)
+ 
+ void MythPlayer::SetVideoResize(const QRect &videoRect)
+ {
++    QMutexLocker locker(&osdLock);
+     if (videoOutput)
+         videoOutput->SetVideoResize(videoRect);
+ }
+-- 
+1.7.9.5
+

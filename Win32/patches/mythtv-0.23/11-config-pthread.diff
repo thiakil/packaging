@@ -1,0 +1,101 @@
+diff --git a/mythtv/filters/kerneldeint/kerneldeint.pro b/mythtv/filters/kerneldeint/kerneldeint.pro
+index 91514a2..b0dc012 100644
+--- mythtv/filters/kerneldeint/kerneldeint.pro
++++ mythtv/filters/kerneldeint/kerneldeint.pro
+@@ -5,7 +5,7 @@ LIBS += -lmyth-$${LIBVERSION} -L../../libs/libmyth
+ LIBS += -lmythdb-$${LIBVERSION} -L../../libs/libmythdb
+ macx:LIBS += -lmythui-$${LIBVERSION} -L../../libs/libmythui
+ macx:LIBS += -lmythupnp-$${LIBVERSION} -L../../libs/libmythupnp
+-mingw:LIBS += -lpthread
++mingw:LIBS += $$EXTRA_LIBS
+ 
+ # Input
+ SOURCES += filter_kerneldeint.c
+diff --git a/mythtv/filters/yadif/yadif.pro b/mythtv/filters/yadif/yadif.pro
+index ec45a0a..8d679a8 100644
+--- mythtv/filters/yadif/yadif.pro
++++ mythtv/filters/yadif/yadif.pro
+@@ -2,7 +2,7 @@ include ( ../filter-common.pro )
+ include ( ../filter-avcodec.pro )
+ 
+ INCLUDEPATH += ../../libs/libmythtv ../../libs/libavcodec ../..
+-mingw:LIBS += -lpthread
++mingw:LIBS += $$EXTRA_LIBS
+ 
+ # Input
+ SOURCES += filter_yadif.c
+diff --git a/mythtv/libs/libmyth/libmyth.pro b/mythtv/libs/libmyth/libmyth.pro
+index fb4f5e6..9ac8a3a 100644
+--- mythtv/libs/libmyth/libmyth.pro
++++ mythtv/libs/libmyth/libmyth.pro
+@@ -153,7 +153,7 @@ mingw {
+     DEFINES += USING_MINGW
+     SOURCES += mediamonitor-windows.cpp audiooutputwin.cpp audiooutputdx.cpp
+     HEADERS += mediamonitor-windows.h   audiooutputwin.h   audiooutputdx.h
+-    LIBS += -lpthread -lwinmm -lws2_32
++    LIBS += -lwinmm -lws2_32
+ }
+ 
+ macx {
+diff --git a/mythtv/libs/libmythdb/libmythdb.pro b/mythtv/libs/libmythdb/libmythdb.pro
+index 70b2fc3..e060a50 100644
+--- mythtv/libs/libmythdb/libmythdb.pro
++++ mythtv/libs/libmythdb/libmythdb.pro
+@@ -70,7 +70,7 @@ use_hidesyms {
+     QMAKE_CXXFLAGS += -fvisibility=hidden
+ }
+ 
+-mingw:LIBS += -lpthread -lws2_32
++mingw:LIBS += -lws2_32
+ 
+ QT += sql network
+ 
+diff --git a/mythtv/libs/libmythhdhomerun/libmythhdhomerun.pro b/mythtv/libs/libmythhdhomerun/libmythhdhomerun.pro
+index 23d6d19..0c82e39 100644
+--- mythtv/libs/libmythhdhomerun/libmythhdhomerun.pro
++++ mythtv/libs/libmythhdhomerun/libmythhdhomerun.pro
+@@ -24,7 +24,9 @@ SOURCES += hdhomerun_device_selector.c
+ 
+ mingw {
+     HEADERS += hdhomerun_os_windows.h
+-    LIBS += -lws2_32 -liphlpapi -lpthread
++    LIBS += -lws2_32 -liphlpapi
+ }
+ 
++LIBS += $$EXTRALIBS 
++
+ include ( ../libs-targetfix.pro )
+diff --git a/mythtv/libs/libmythtv/libmythtv.pro b/mythtv/libs/libmythtv/libmythtv.pro
+index 59c4593..6336b24 100644
+--- mythtv/libs/libmythtv/libmythtv.pro
++++ mythtv/libs/libmythtv/libmythtv.pro
+@@ -575,7 +575,6 @@ mingw {
+     SOURCES -= NuppelVideoRecorder.cpp
+     SOURCES += videoout_d3d.cpp
+ 
+-    LIBS += -lpthread
+     LIBS += -lws2_32
+ }
+ 
+diff --git a/mythtv/programs/mythtvosd/mythtvosd.pro b/mythtv/programs/mythtvosd/mythtvosd.pro
+index 859cede..36a4ceb 100644
+--- mythtv/programs/mythtvosd/mythtvosd.pro
++++ mythtv/programs/mythtvosd/mythtvosd.pro
+@@ -17,4 +17,4 @@ QMAKE_CLEAN += $(TARGET)
+ # Input
+ SOURCES += main.cpp
+ 
+-mingw: LIBS += -lpthread -lwinmm -lws2_32
++mingw: LIBS += -lwinmm -lws2_32
+diff --git a/mythtv/programs/programs-libs.pro b/mythtv/programs/programs-libs.pro
+index 9abc052..967993d 100644
+--- mythtv/programs/programs-libs.pro
++++ mythtv/programs/programs-libs.pro
+@@ -32,7 +32,6 @@ using_mheg:LIBS += -L../../libs/libmythfreemheg -lmythfreemheg-$$LIBVERSION
+ using_hdhomerun:LIBS += -L../../libs/libmythhdhomerun -lmythhdhomerun-$$LIBVERSION
+ 
+ mingw {
+-    LIBS += -lpthread
+     CONFIG += console
+ }
+ 

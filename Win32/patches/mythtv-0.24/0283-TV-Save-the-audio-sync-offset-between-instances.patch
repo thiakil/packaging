@@ -1,0 +1,111 @@
+From efb3ae58cdc7c19f554b5c332bc1b3012b06e4a0 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 11 Sep 2013 17:52:00 +0100
+Subject: [PATCH 283/285] TV: Save the audio sync offset between instances
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp    |   27 ++++++++++++++++++++-------
+ mythtv/libs/libmythtv/playercontext.cpp |    9 +++++++++
+ 2 files changed, 29 insertions(+), 7 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 53335dd..0db1225 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -3312,7 +3312,8 @@ void MythPlayer::ChangeSpeed(void)
+ bool MythPlayer::DoRewind(uint64_t frames, bool override_seeks,
+                           bool seeks_wanted)
+ {
+-    SaveAudioTimecodeOffset(GetAudioTimecodeOffset());
++    if (!deleteMap.IsEditing())
++        SaveAudioTimecodeOffset(GetAudioTimecodeOffset());
+ 
+     uint64_t number = frames + 1;
+     uint64_t desiredFrame = (framesPlayed > number) ? framesPlayed - number : 0;
+@@ -3462,7 +3463,8 @@ bool MythPlayer::IsNearEnd(int64_t margin)
+ bool MythPlayer::DoFastForward(uint64_t frames, bool override_seeks,
+                                bool seeks_wanted)
+ {
+-    SaveAudioTimecodeOffset(GetAudioTimecodeOffset());
++    if (!deleteMap.IsEditing())
++        SaveAudioTimecodeOffset(GetAudioTimecodeOffset());
+ 
+     uint64_t number = frames - 1;
+     uint64_t desiredFrame = framesPlayed + number;
+@@ -3562,14 +3564,19 @@ void MythPlayer::ClearAfterSeek(bool clearvideobuffers)
+     if (clearvideobuffers && videoOutput)
+         videoOutput->ClearAfterSeek();
+ 
+-    for (int j = 0; j < TCTYPESMAX; j++)
+-        tc_wrap[j] = tc_lastval[j] = 0;
+-
+-    if (savedAudioTimecodeOffset)
++    int64_t tc;
++    if (savedAudioTimecodeOffset && !deleteMap.IsEditing())
+     {
+-        tc_wrap[TC_AUDIO] = savedAudioTimecodeOffset;
++        tc = savedAudioTimecodeOffset;
+         savedAudioTimecodeOffset = 0;
+     }
++    else
++        tc = tc_wrap[TC_AUDIO];
++
++    for (int j = 0; j < TCTYPESMAX; j++)
++        tc_wrap[j] = tc_lastval[j] = 0;
++
++    tc_wrap[TC_AUDIO] = tc;
+ 
+     audio.Reset();
+     ResetCaptions();
+@@ -3613,6 +3620,9 @@ bool MythPlayer::EnableEdit(void)
+     m_audiograph.SetSampleCount((unsigned)(sample_rate / video_frame_rate));
+     GetAudio()->addVisual(&m_audiograph);
+ 
++    savedAudioTimecodeOffset = tc_wrap[TC_AUDIO];
++    tc_wrap[TC_AUDIO] = 0;
++
+     speedBeforeEdit = play_speed;
+     pausedBeforeEdit = Pause();
+     deleteMap.SetEditing(true);
+@@ -3651,6 +3661,9 @@ void MythPlayer::DisableEdit(bool save)
+     player_ctx->UnlockPlayingInfo(__FILE__, __LINE__);
+     GetAudio()->removeVisual(&m_audiograph);
+     m_audiograph.Reset();
++    tc_wrap[TC_AUDIO] = savedAudioTimecodeOffset;
++    savedAudioTimecodeOffset = 0;
++
+     if (!pausedBeforeEdit)
+         Play(speedBeforeEdit);
+     else
+diff --git a/mythtv/libs/libmythtv/playercontext.cpp b/mythtv/libs/libmythtv/playercontext.cpp
+index f1de0fb..9e80af8 100644
+--- a/mythtv/libs/libmythtv/playercontext.cpp
++++ b/mythtv/libs/libmythtv/playercontext.cpp
+@@ -472,6 +472,9 @@ bool PlayerContext::StartPlaying(int maxWait)
+     if (!player)
+         return false;
+ 
++    player->ResetAudioTimecodeOffset();
++    player->AdjustAudioTimecodeOffset(gCoreContext->GetNumSetting("AudioSync", 0));
++
+     if (!player->StartPlaying())
+         return false;
+ 
+@@ -503,7 +506,13 @@ bool PlayerContext::StartPlaying(int maxWait)
+ void PlayerContext::StopPlaying(void)
+ {
+     if (player)
++    {
+         player->StopPlaying();
++
++        int64_t aoff = player->GetAudioTimecodeOffset();
++        if (aoff > INT64_MIN)
++            gCoreContext->SaveSetting("AudioSync", QString::number(aoff));
++    }
+ }
+ 
+ /** \fn PlayerContext::StartOSD(TV *tv)
+-- 
+1.7.9.5
+

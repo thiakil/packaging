@@ -1,0 +1,68 @@
+From 6a0155331a1c568f629ec66642c27b4820e30166 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 17 Apr 2011 12:27:27 +0200
+Subject: [PATCH 025/285] Fix mythhdd to permit eject of USB key disks
+
+---
+ mythtv/libs/libmyth/mythhdd.cpp |   15 +++++++++++----
+ mythtv/libs/libmyth/mythhdd.h   |    1 +
+ 2 files changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/mythhdd.cpp b/mythtv/libs/libmyth/mythhdd.cpp
+index 01fa645..3fe63c7 100644
+--- a/mythtv/libs/libmyth/mythhdd.cpp
++++ b/mythtv/libs/libmyth/mythhdd.cpp
+@@ -24,7 +24,7 @@ MythHDD::MythHDD(QObject *par, const char *DevicePath,
+     : MythMediaDevice(par, DevicePath, SuperMount, AllowEject)
+ {
+     VERBOSE(VB_MEDIA, "MythHDD::MythHDD " + m_DevicePath);
+-    m_Status = MEDIASTAT_UNPLUGGED;
++    m_Status = MEDIASTAT_NOTMOUNTED;
+     m_MediaType = MEDIATYPE_DATA;       // default type is data
+ }
+ 
+@@ -48,15 +48,15 @@ MediaStatus MythHDD::checkMedia(void)
+     // device is not mounted
+     switch (m_Status)
+     {
+-    case MEDIASTAT_UNPLUGGED:
++    case MEDIASTAT_NOTMOUNTED:
+         // a removable device was just plugged in try to mount it.
+-        VERBOSE(VB_MEDIA, "MythHDD::checkMedia try mounting " + m_DevicePath);
++        VERBOSE(VB_MEDIA, "MythHDD::checkMedia mounting " + m_DevicePath);
+         if (mount())
+         {
+             m_Status = MEDIASTAT_NOTMOUNTED;
+             return setStatus(MEDIASTAT_MOUNTED);
+         }
+-        return setStatus(MEDIASTAT_NOTMOUNTED);
++        return m_Status;
+     case MEDIASTAT_MOUNTED:
+         // device was mounted and someone unmounted it.
+         return setStatus(MEDIASTAT_NOTMOUNTED);
+@@ -65,3 +65,10 @@ MediaStatus MythHDD::checkMedia(void)
+         return m_Status;
+     }
+ }
++
++//virtual
++MediaError MythHDD::eject(bool)
++{
++    setStatus(MEDIASTAT_UNPLUGGED);
++    return MEDIAERR_UNSUPPORTED;
++}
+diff --git a/mythtv/libs/libmyth/mythhdd.h b/mythtv/libs/libmyth/mythhdd.h
+index 94ddae4..d57634a 100644
+--- a/mythtv/libs/libmyth/mythhdd.h
++++ b/mythtv/libs/libmyth/mythhdd.h
+@@ -10,6 +10,7 @@ class MPUBLIC MythHDD : public MythMediaDevice
+             bool SuperMount, bool AllowEject);
+ 
+     virtual MediaStatus checkMedia(void);
++    virtual MediaError eject(bool);
+ 
+     static MythHDD* Get(QObject* par, const char* devicePath,
+                         bool SuperMount, bool AllowEject);
+-- 
+1.7.9.5
+

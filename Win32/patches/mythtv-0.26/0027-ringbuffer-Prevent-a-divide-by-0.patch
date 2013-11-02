@@ -1,0 +1,29 @@
+From d5664f7ca9ba15df4c45d2a29b5cc8c960efb254 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 6 Aug 2012 15:43:14 +0200
+Subject: [PATCH 027/227] ringbuffer: Prevent a divide by 0
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/ringbuffer.cpp |    4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/ringbuffer.cpp b/mythtv/libs/libmythtv/ringbuffer.cpp
+index bd6f734..07e18f8 100644
+--- a/mythtv/libs/libmythtv/ringbuffer.cpp
++++ b/mythtv/libs/libmythtv/ringbuffer.cpp
+@@ -419,7 +419,11 @@ bool RingBuffer::IsNearEnd(double fps, uint vvf) const
+     // WARNING: readahead_frames can greatly overestimate or underestimate
+     //          the number of frames available in the read ahead buffer
+     //          when rh_frames is less than the keyframe distance.
++    if (fps == 0.)
++        return false;
+     double bytes_per_frame = kbits_per_sec * (1000.0/8.0) / fps;
++    if (bytes_per_frame == 0.)
++        return false;
+     double readahead_frames = sz / bytes_per_frame;
+ 
+     bool near_end = ((vvf + readahead_frames) < 20.0) || (sz < rbs*1.5);
+-- 
+1.7.9.5
+

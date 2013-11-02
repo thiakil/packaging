@@ -1,0 +1,54 @@
+From a3f5a34d7eee93e8e1a430760cf1a94efe47ed53 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 25 Feb 2013 19:05:47 +0000
+Subject: [PATCH 057/202] mythtranscode: Skip start of stream until 1st a/v
+ packet seen
+
+If the first progrnm of the evening is recorded from BBC3
+then the first few minutes can contain no audio or video just data.
+This causes transcoding to fail because no valid starting streams
+are seen.
+
+This fix skips packets until the first a/v packet is seen.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythtranscode/mpeg2fix.cpp |   22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/mythtv/programs/mythtranscode/mpeg2fix.cpp b/mythtv/programs/mythtranscode/mpeg2fix.cpp
+index 3bb7331..34c929d 100644
+--- a/mythtv/programs/mythtranscode/mpeg2fix.cpp
++++ b/mythtv/programs/mythtranscode/mpeg2fix.cpp
+@@ -763,6 +763,28 @@ bool MPEG2fixup::InitAV(QString inputfile, const char *type, int64_t offset)
+         return false;
+     }
+ 
++    // Read from beginning to ensure that the starting streams are correct.
++    AVPacket pkt = {0};
++    for (bool valid = false; !valid; )
++    {
++        int ret = av_read_packet(inputFC, &pkt);
++        av_free_packet(&pkt);
++        if (ret)
++            break;
++
++        // Repeat until audio or video found
++        for (uint u = 0; u < inputFC->nb_streams; ++u)
++        {
++            AVCodecContext *enc = inputFC->streams[u]->codec;
++            if (enc->codec_type == AVMEDIA_TYPE_VIDEO ||
++                enc->codec_type == AVMEDIA_TYPE_AUDIO)
++            {
++                valid = true;
++                break;
++            }
++        }
++    }
++
+     // Dump stream information
+     if (VERBOSE_LEVEL_CHECK(VB_GENERAL, LOG_INFO))
+         av_dump_format(inputFC, 0, ifname, 0);
+-- 
+1.7.9.5
+

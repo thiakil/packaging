@@ -1,0 +1,27 @@
+From e6350b4224be2edf059817df7badbf21764f708b Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 7 Oct 2013 20:02:07 +0100
+Subject: [PATCH 203/207] MythMusic: Goom visualiser uses correct RGB32 image
+ format
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/mythmusic/mythmusic/goom/mythgoom.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythplugins/mythmusic/mythmusic/goom/mythgoom.cpp b/mythplugins/mythmusic/mythmusic/goom/mythgoom.cpp
+index 2d70699..61694d3 100644
+--- a/mythplugins/mythmusic/mythmusic/goom/mythgoom.cpp
++++ b/mythplugins/mythmusic/mythmusic/goom/mythgoom.cpp
+@@ -94,7 +94,7 @@ bool Goom::draw(QPainter *p, const QColor &back)
+     if (!m_buffer)
+         return true;
+ 
+-    QImage *image = new QImage((uchar*) m_buffer,  m_size.width(), m_size.height(), m_size.width() * 4, QImage::Format_ARGB32);
++    QImage *image = new QImage((uchar*) m_buffer,  m_size.width(), m_size.height(), m_size.width() * 4, QImage::Format_RGB32);
+ 
+     p->drawImage(0, 0, *image);
+ 
+-- 
+1.7.9.5
+

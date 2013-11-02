@@ -1,0 +1,54 @@
+From a24a0b14dd21a1d58e410917215948c097b77c14 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 14 Jun 2013 09:29:39 +0100
+Subject: [PATCH 195/285] RingBuffer: Only re-calc readahead when playspeed or
+ bitrate changed
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/RingBuffer.cpp |   22 ++++++++++++++--------
+ 1 file changed, 14 insertions(+), 8 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/RingBuffer.cpp b/mythtv/libs/libmythtv/RingBuffer.cpp
+index 5608741..3e7268b 100644
+--- a/mythtv/libs/libmythtv/RingBuffer.cpp
++++ b/mythtv/libs/libmythtv/RingBuffer.cpp
+@@ -872,10 +872,13 @@ void RingBuffer::UpdateRawBitrate(uint raw_bitrate)
+         raw_bitrate = 64000;
+     }
+ 
+-    rwlock.lockForWrite();
+-    rawbitrate = raw_bitrate;
+-    CalcReadAheadThresh();
+-    rwlock.unlock();
++    if (rawbitrate != raw_bitrate)
++    {
++        rwlock.lockForWrite();
++        rawbitrate = raw_bitrate;
++        CalcReadAheadThresh();
++        rwlock.unlock();
++    }
+ }
+ 
+ /** \fn RingBuffer::UpdatePlaySpeed(float)
+@@ -892,10 +895,13 @@ void RingBuffer::UpdatePlaySpeed(float play_speed)
+         return;
+     }
+ 
+-    rwlock.lockForWrite();
+-    playspeed = play_speed;
+-    CalcReadAheadThresh();
+-    rwlock.unlock();
++    if (playspeed != play_speed)
++    {
++        rwlock.lockForWrite();
++        playspeed = play_speed;
++        CalcReadAheadThresh();
++        rwlock.unlock();
++    }
+ }
+ 
+ static inline uint EstBitRate(uint rawbitrate, float playspeed)
+-- 
+1.7.9.5
+

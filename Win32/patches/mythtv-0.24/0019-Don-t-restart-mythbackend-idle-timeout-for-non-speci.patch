@@ -1,0 +1,58 @@
+From d125e5f741014348a652f636d10cda34225243a0 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 10 Apr 2011 17:25:48 +0200
+Subject: [PATCH 019/285] Don't restart mythbackend idle timeout for
+ non-specific reschedules
+
+This enables mythbackend to shutdown when using the EIT scanner.
+
+The EIT scanner calls EITScanner::RescheduleRecordings() when a program change
+is detected.  If the previous call to this function was more than 150 seconds
+ago it in turn calls ScheduledRecording::signalChange with a recordid of -1
+(all recordids).  When the scheduler runs and sees a reschedule request it
+restarts the idle timeout.
+
+Therefore, if the mythbackend idle timeout is set to more than 150 seconds, a
+common situation, then the scheduler will never become idle.
+
+This fix prevents the scheduler from interupting an idle timeout if the
+recordid is -1 (all records).
+---
+ mythtv/programs/mythbackend/scheduler.cpp |    7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/mythtv/programs/mythbackend/scheduler.cpp b/mythtv/programs/mythbackend/scheduler.cpp
+index 11ed776..9a77f70 100644
+--- a/mythtv/programs/mythbackend/scheduler.cpp
++++ b/mythtv/programs/mythbackend/scheduler.cpp
+@@ -1728,7 +1728,7 @@ void Scheduler::RunScheduler(void)
+     while (1)
+     {
+         curtime = QDateTime::currentDateTime();
+-        bool statuschanged = false;
++        bool statuschanged = false, isIdle = false;
+ 
+         if ((startIter != reclist.end() &&
+              curtime.secsTo((*startIter)->GetRecordingStartTime()) < 30))
+@@ -1762,7 +1762,7 @@ void Scheduler::RunScheduler(void)
+                     if (recordid != 0)
+                     {
+                         if (recordid == -1)
+-                            reschedQueue.clear();
++                            reschedQueue.clear(), isIdle = true;
+ 
+                         schedLock.unlock();
+                         recordmatchLock.lock();
+@@ -2184,7 +2184,8 @@ void Scheduler::RunScheduler(void)
+         {
+             MythEvent me("SCHEDULE_CHANGE");
+             gCoreContext->dispatch(me);
+-            idleSince = QDateTime();
++            if (!isIdle)
++                idleSince = QDateTime();
+         }
+ 
+         // if idletimeout is 0, the user disabled the auto-shutdown feature
+-- 
+1.7.9.5
+

@@ -1,0 +1,10 @@
+--- qt-everywhere-opensource-src-4.7.0.orig/src/3rdparty/webkit/WebCore/platform/text/PlatformString.h	2010-09-10 11:05:21.000000000 +0200
++++ qt-everywhere-opensource-src-4.7.0/src/3rdparty/webkit/WebCore/platform/text/PlatformString.h	2011-03-05 16:03:15.000000000 +0100
+@@ -29,6 +29,7 @@
+ 
+ #ifdef __OBJC__
+ #include <objc/objc.h>
++#import <Foundation/NSString.h>
+ #endif
+ 
+ #if PLATFORM(CF)

@@ -1,0 +1,29 @@
+From e9649e2097e00235be0286095565a317d5865c8a Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 3 Jun 2013 11:25:33 +0100
+Subject: [PATCH 156/227] TV: Fix memory leak of recorder obtained from
+ RemoteRequestFreeRecorder
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/tv_play.cpp |    3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/tv_play.cpp b/mythtv/libs/libmythtv/tv_play.cpp
+index d6543b4..f0c8f8b 100644
+--- a/mythtv/libs/libmythtv/tv_play.cpp
++++ b/mythtv/libs/libmythtv/tv_play.cpp
+@@ -2267,7 +2267,10 @@ void TV::HandleStateChange(PlayerContext *mctx, PlayerContext *ctx)
+                     ctx->recorder->Setup();
+                 }
+                 else
++                {
++                    delete testrec;
+                     chanid = 0;
++                }
+             }
+         }
+ 
+-- 
+1.7.9.5
+

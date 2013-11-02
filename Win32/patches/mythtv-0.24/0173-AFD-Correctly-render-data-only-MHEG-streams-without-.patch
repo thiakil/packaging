@@ -1,0 +1,37 @@
+From 58671e3bc9279d9c5cd613d3edaa54e8504ed40b Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 6 Mar 2013 20:23:19 +0000
+Subject: [PATCH 173/285] AFD: Correctly render data only (MHEG) streams
+ without audio or video
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |    4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index c88a6e4..153220a 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -4293,8 +4293,8 @@ bool AvFormatDecoder::GetFrame(DecodeType decodetype)
+             {
+                 // no need to buffer audio or video if we
+                 // only care about building a keyframe map.
++                // NB but allow for data only (MHEG) streams
+                 allowedquit = true;
+-                continue;
+             }
+             else if (lowbuffers && ((decodetype & kDecodeAV) == kDecodeAV) &&
+                      storedPackets.count() < max_video_queue_size &&
+@@ -4779,7 +4779,7 @@ bool AvFormatDecoder::SetupAudioStream(void)
+ 
+     if (!ctx)
+     {
+-        VERBOSE(VB_PLAYBACK, LOC + "No codec context. Returning false");
++        VERBOSE(VB_PLAYBACK+VB_EXTRA, LOC + "No codec context. Returning false");
+         return false;
+     }
+ 
+-- 
+1.7.9.5
+

@@ -1,0 +1,45 @@
+From 0d78da48a5d24ff6d9746ff856f81afe78c98a9b Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 7 Oct 2013 15:15:44 +0100
+Subject: [PATCH 200/207] Visualiser: Avoid a floating point domain error in
+ the spectrum visualiser
+
+- Avoid taking the log of 0
+
+This change avoids the 'sticky bars' sometimes seen with the spectrum
+and squares visualisers.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../visualisations/videovisualspectrum.cpp         |   11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/visualisations/videovisualspectrum.cpp b/mythtv/libs/libmythtv/visualisations/videovisualspectrum.cpp
+index 57f6d95..a1812ab 100644
+--- a/mythtv/libs/libmythtv/visualisations/videovisualspectrum.cpp
++++ b/mythtv/libs/libmythtv/visualisations/videovisualspectrum.cpp
+@@ -1,3 +1,4 @@
++#include <math.h>
+ #include <QPen>
+ 
+ #include "videovisualspectrum.h"
+@@ -84,10 +85,12 @@ void VideoVisualSpectrum::Draw(const QRect &area, MythPainter *painter,
+     for (int l = 0, r = m_scale.range(); l < m_scale.range(); l++, r++)
+     {
+         int index = m_scale[l];
+-        magL = (log(sq(real(lout[index])) + sq(real(lout[FFTW_N - index]))) - 22.0) *
+-               m_scaleFactor;
+-        magR = (log(sq(real(rout[index])) + sq(real(rout[FFTW_N - index]))) - 22.0) *
+-               m_scaleFactor;
++
++        tmp = sq(real(lout[index])) + sq(real(lout[FFTW_N - index]));
++        magL = (tmp > 1.) ? (log(tmp) - 22.0) * m_scaleFactor : 0.;
++
++        tmp = sq(real(rout[index])) + sq(real(rout[FFTW_N - index]));
++        magR = (tmp > 1.) ? (log(tmp) - 22.0) * m_scaleFactor : 0.;
+ 
+         if (magL > m_range)
+             magL = 1.0;
+-- 
+1.7.9.5
+

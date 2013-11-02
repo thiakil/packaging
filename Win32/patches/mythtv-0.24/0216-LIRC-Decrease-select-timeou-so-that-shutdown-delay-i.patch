@@ -1,0 +1,31 @@
+From 7af1ad89217f39678e64669e24c3da9122f6e914 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 10 Jun 2013 13:14:59 +0100
+Subject: [PATCH 216/285] LIRC: Decrease select timeou so that shutdown delay
+ is reduced
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythui/lirc.cpp |    5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythui/lirc.cpp b/mythtv/libs/libmythui/lirc.cpp
+index 7e251b9..30a5157 100644
+--- a/mythtv/libs/libmythui/lirc.cpp
++++ b/mythtv/libs/libmythui/lirc.cpp
+@@ -451,9 +451,10 @@ void LIRC::run(void)
+         FD_SET(d->lircState->lirc_lircd, &readfds);
+ 
+         // the maximum time select() should wait
++        // Not too long, need to check IsDoRunSet when shutting down
+         struct timeval timeout;
+-        timeout.tv_sec = 1; // 1 second
+-        timeout.tv_usec = 100 * 1000; // 100 ms
++        timeout.tv_sec = 0;
++        timeout.tv_usec = 300 * 1000;
+ 
+         int ret = select(d->lircState->lirc_lircd + 1, &readfds, NULL, NULL, &timeout);
+ 
+-- 
+1.7.9.5
+

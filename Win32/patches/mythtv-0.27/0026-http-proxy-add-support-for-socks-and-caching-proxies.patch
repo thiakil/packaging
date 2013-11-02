@@ -1,0 +1,50 @@
+From 7556c029dccf9c7bb523b539b7866cc3d6e411de Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 30 Jul 2011 20:19:08 +0200
+Subject: [PATCH 026/207] http proxy add support for socks and caching proxies
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythbase/mythmiscutil.cpp |   19 ++++++++++++++-----
+ 1 file changed, 14 insertions(+), 5 deletions(-)
+
+diff --git a/mythtv/libs/libmythbase/mythmiscutil.cpp b/mythtv/libs/libmythbase/mythmiscutil.cpp
+index a46b5aa..e884fff 100644
+--- a/mythtv/libs/libmythbase/mythmiscutil.cpp
++++ b/mythtv/libs/libmythbase/mythmiscutil.cpp
+@@ -840,9 +840,6 @@ void setHttpProxy(void)
+         var = getenv("HTTP_PROXY");  // Sadly, some OS envs are case sensitive
+     if (var.length())
+     {
+-        if (!var.startsWith("http://"))   // i.e. just a host name
+-            var.prepend("http://");
+-
+         QUrl    url  = QUrl(var, QUrl::TolerantMode);
+         QString host = url.host();
+         int     port = url.port();
+@@ -876,8 +873,20 @@ void setHttpProxy(void)
+                 .arg(url.userName()).arg(url.password())
+                 .arg(host).arg(port));
+ #endif
+-        p = QNetworkProxy(QNetworkProxy::HttpCachingProxy,
+-                          host, port, url.userName(), url.password());
++        const QNetworkProxy::ProxyType type =
++            url.scheme().isEmpty() ? QNetworkProxy::HttpCachingProxy :
++            url.scheme() == "socks" ? QNetworkProxy::Socks5Proxy :
++            url.scheme() == "http" ? QNetworkProxy::HttpProxy :
++            url.scheme() == "cache" ? QNetworkProxy::HttpCachingProxy :
++            url.scheme() == "ftp" ? QNetworkProxy::FtpCachingProxy :
++            QNetworkProxy::NoProxy;
++        if (QNetworkProxy::NoProxy == type)
++        {
++            LOG(VB_GENERAL, LOG_ERR, LOC + QString("Unknown proxy type %1").arg(var) );
++            return;
++        }
++
++        p = QNetworkProxy(type, host, port, url.userName(), url.password());
+         QNetworkProxy::setApplicationProxy(p);
+         return;
+     }
+-- 
+1.7.9.5
+

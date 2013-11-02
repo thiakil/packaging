@@ -1,0 +1,42 @@
+From fdd1eec81bc82f3f72705ff9c49ae0cc00db6705 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 8 Aug 2012 14:56:33 +0200
+Subject: [PATCH 110/124] Fix hardwareProfile to work with MYTHCONFDIR environ
+
+When submitting a hardware profile, the UUID filenames are hardcoded
+under ~/.mythtv.  This fix honours the MYTHCONFDIR setting and
+allows the profile to be created in the correct directory.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/scripts/hardwareprofile/config.py |   14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/mythtv/programs/scripts/hardwareprofile/config.py b/mythtv/programs/scripts/hardwareprofile/config.py
+index 89d468f..918256e 100644
+--- a/mythtv/programs/scripts/hardwareprofile/config.py
++++ b/mythtv/programs/scripts/hardwareprofile/config.py
+@@ -7,10 +7,16 @@ import os_detect
+ SMOON_URL = "http://smolt.mythtv.org/"
+ SECURE = 0
+ from user import home
+-HW_UUID = home + "/.mythtv/HardwareProfile/hw-uuid"
+-PUB_UUID= home +  "/.mythtv/HardwareProfile/pub-uuid"
+-UUID_DB = home + '/.mythtv/HardwareProfile/uuiddb.cfg'
+-ADMIN_TOKEN = home +  "/.mythtv/HardwareProfile/smolt_token"
++
++try:
++    mythconfdir = os.environ['MYTHCONFDIR']
++except KeyError:
++    mythconfdir = home + "/.mythtv"
++
++HW_UUID = mythconfdir + "/HardwareProfile/hw-uuid"
++PUB_UUID= mythconfdir +  "/HardwareProfile/pub-uuid"
++UUID_DB = mythconfdir + '/HardwareProfile/uuiddb.cfg'
++ADMIN_TOKEN = mythconfdir +  "/HardwareProfile/smolt_token"
+ 
+ 
+ #These are the defaults taken from the source code.
+-- 
+1.7.9.5
+

@@ -1,0 +1,35 @@
+From e9f4efa5b488f844ad50969f97bcd63e64c9111a Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 29 Sep 2012 14:53:58 +0200
+Subject: [PATCH 122/124] libmythtv: Kill a bogus warning about frequency
+ range
+
+If a frontend supports DiSEqC and is also a slave to a DVD-S master then
+DVBChannel::CheckOptions incorrectly calls CheckFrequency which then
+emits a bogus warning:
+DVBChan(...) Warning: Your frequency setting (10773250) is out of range...
+
+This patch fixes DVBChannel::CheckOptions to only call CheckFrequency if
+the frontend doesn't have DiSEqC and isn't a slave.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/dvbchannel.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/dvbchannel.cpp b/mythtv/libs/libmythtv/dvbchannel.cpp
+index 6e7b2de..1bf06d9 100644
+--- a/mythtv/libs/libmythtv/dvbchannel.cpp
++++ b/mythtv/libs/libmythtv/dvbchannel.cpp
+@@ -360,7 +360,7 @@ void DVBChannel::CheckOptions(DTVMultiplex &tuning) const
+     }
+ 
+     // DVB-S needs a fully initialized diseqc tree and is checked later in Tune
+-    if (!diseqc_tree)
++    if (!diseqc_tree && !(master && master->diseqc_tree))
+         CheckFrequency(tuning.frequency);
+ 
+     if (tunerType.IsFECVariable() &&
+-- 
+1.7.9.5
+

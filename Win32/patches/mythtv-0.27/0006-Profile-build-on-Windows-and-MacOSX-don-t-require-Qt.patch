@@ -1,0 +1,46 @@
+From aa43dbe78c8469fbd72005842965e393465a2daf Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 13 Mar 2012 17:47:34 +0100
+Subject: [PATCH 006/207] Profile build on Windows and MacOSX don't require Qt
+ debug libs
+
+At present profile builds pull in debug builds of Qt.  This
+causes link errors on Windows and MacOSX unless the debug libs
+are available.  This patch removes debug from CONFIG on these
+platforms.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/settings.pro |    2 +-
+ mythtv/settings.pro      |    2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/mythplugins/settings.pro b/mythplugins/settings.pro
+index d110f9d..f29720e 100644
+--- a/mythplugins/settings.pro
++++ b/mythplugins/settings.pro
+@@ -30,7 +30,7 @@ QMAKE_CXXFLAGS += $$CONFIG_DIRECTFB_CXXFLAGS
+ QMAKE_CXXFLAGS_SHLIB = -DPIC -fPIC
+ QMAKE_CXXFLAGS += $$ECXXFLAGS
+ 
+-profile:CONFIG += debug
++profile:!win32:!macx:CONFIG += debug
+ 
+ QMAKE_CXXFLAGS_RELEASE = $$OPTFLAGS -fomit-frame-pointer
+ release:contains( TARGET_ARCH_POWERPC, yes ) {
+diff --git a/mythtv/settings.pro b/mythtv/settings.pro
+index ae47ca6..e84101c 100644
+--- a/mythtv/settings.pro
++++ b/mythtv/settings.pro
+@@ -118,7 +118,7 @@ QMAKE_CFLAGS   *= $$CPPFLAGS   $$CFLAGS
+ QMAKE_CXXFLAGS *= $$CXXPPFLAGS $$ECXXFLAGS
+ }
+ 
+-profile:CONFIG += debug
++profile:!win32:!macx:CONFIG += debug
+ 
+ # Allow compilation with Qt Embedded, if Qt is compiled without "-fno-rtti"
+ QMAKE_CXXFLAGS -= -fno-exceptions -fno-rtti
+-- 
+1.7.9.5
+

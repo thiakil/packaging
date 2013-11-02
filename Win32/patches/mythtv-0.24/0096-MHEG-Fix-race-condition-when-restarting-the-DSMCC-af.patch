@@ -1,0 +1,58 @@
+From cb85f1ae045492326be25006d1e6a3da4eddb76f Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 28 Feb 2012 10:26:28 +0100
+Subject: [PATCH 096/285] MHEG: Fix race condition when restarting the DSMCC
+ after a channel change
+
+When a channel change occurs, the DSMCC file cache must be emptied
+so that a consistent filesystem is rebuilt from the new carousel.
+MHIContext::Restart, which flushes the cache, is called from TV::ITVRestartv
+when the channel or card is changed,  However, the ringbuffer continues
+to deliver packets from the old stream for a short period after the
+change.  This can produce an invalid file structure which can result
+in missing text pages or a failure to start the MHEG app.
+
+This change clears the filesystem cache when a NetBootInfo descriptor
+is presented in the PMT, which only occurs after the new stream has started.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/dsmcc.cpp |    3 ++-
+ mythtv/libs/libmythtv/mhi.cpp   |    3 +++
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/dsmcc.cpp b/mythtv/libs/libmythtv/dsmcc.cpp
+index a55e9c7..e8e15a7 100644
+--- a/mythtv/libs/libmythtv/dsmcc.cpp
++++ b/mythtv/libs/libmythtv/dsmcc.cpp
+@@ -556,11 +556,12 @@ void Dsmcc::ProcessSection(const unsigned char *data, int length,
+ // Reset the object carousel and clear the caches.
+ void Dsmcc::Reset()
+ {
+-    VERBOSE(VB_DSMCC, "Resetting carousel");
++    VERBOSE(VB_DSMCC, "[dsmcc] Resetting carousel");
+     QLinkedList<ObjCarousel*>::iterator it = carousels.begin();
+     for (; it != carousels.end(); ++it)
+         delete *it;
+     carousels.clear();
++    m_startTag = 0;
+ }
+ 
+ int Dsmcc::GetDSMCCObject(QStringList &objectPath, QByteArray &result)
+diff --git a/mythtv/libs/libmythtv/mhi.cpp b/mythtv/libs/libmythtv/mhi.cpp
+index ee3beb5..38be2a8 100644
+--- a/mythtv/libs/libmythtv/mhi.cpp
++++ b/mythtv/libs/libmythtv/mhi.cpp
+@@ -322,6 +322,9 @@ void MHIContext::SetNetBootInfo(const unsigned char *data, uint length)
+     VERBOSE(VB_MHEG, QString("[mhi] SetNetBootInfo version %1 mode %2 len %3")
+         .arg(data[0]).arg(data[1]).arg(length));
+     QMutexLocker locker(&m_dsmccLock);
++    // The carousel should be reset now as the stream has changed
++    m_dsmcc->Reset();
++    ClearQueue();
+     // Save the data from the descriptor.
+     m_nbiData.resize(0);
+     m_nbiData.reserve(length);
+-- 
+1.7.9.5
+

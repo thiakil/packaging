@@ -1,0 +1,395 @@
+From f1c786ff3118a14bc54f0e22aac6512f3fd1705f Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 2 Jun 2011 12:55:13 +0200
+Subject: [PATCH 039/285] MythPlayer: Improvements to DVB-S radio playback
+
+This fixes a number of issues to do with changing program to DVB-S radio and
+the lack of video stream causing garbage video display.
+
+Wait longer to stop the decoder thread (in case it's audio/data only)
+to prevent the decoder thread calling a NULL virtual function.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/RingBuffer.cpp      |    3 +-
+ mythtv/libs/libmythtv/avformatdecoder.cpp |   13 ++++
+ mythtv/libs/libmythtv/mythplayer.cpp      |  119 ++++++++++++++++++-----------
+ mythtv/libs/libmythtv/mythplayer.h        |    2 +-
+ mythtv/libs/libmythtv/tv_play.cpp         |    4 +-
+ 5 files changed, 95 insertions(+), 46 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/RingBuffer.cpp b/mythtv/libs/libmythtv/RingBuffer.cpp
+index 04c4057..42f99cb 100644
+--- a/mythtv/libs/libmythtv/RingBuffer.cpp
++++ b/mythtv/libs/libmythtv/RingBuffer.cpp
+@@ -762,7 +762,8 @@ int RingBuffer::safe_read(RemoteFile *rf, void *data, uint sz)
+ void RingBuffer::UpdateRawBitrate(uint raw_bitrate)
+ {
+     VERBOSE(VB_FILE, LOC + QString("UpdateRawBitrate(%1Kb)").arg(raw_bitrate));
+-    if (raw_bitrate < 2500)
++    // NB DVB-S radio can be 64kbps
++    if (raw_bitrate < 64)
+     {
+         VERBOSE(VB_FILE, LOC +
+                 QString("UpdateRawBitrate(%1Kb) - ignoring bitrate,")
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index ff19d00..969e212 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -4291,6 +4291,9 @@ bool AvFormatDecoder::GetFrame(DecodeType decodetype)
+                 av_init_packet(pkt);
+             }
+ 
++            // NB av_read_frame will block until
++            // either a frame is read or an error occurs
++            // so MythPlayer::DecoderLoop will be unable to pause or stop
+             int retval;
+             if (!ic || ((retval = av_read_frame(ic, pkt)) < 0))
+             {
+@@ -4440,7 +4443,17 @@ bool AvFormatDecoder::GetFrame(DecodeType decodetype)
+             case CODEC_TYPE_AUDIO:
+             {
+                 if (!ProcessAudioPacket(curstream, pkt, decodetype))
++                {
+                     have_err = true;
++                    if (!has_video)
++                    {
++                        VERBOSE(VB_PLAYBACK, LOC +
++                            "GetFrame: exiting due to audio decode error");
++                        av_free_packet(pkt);
++                        delete pkt;
++                        return false;
++                    }
++                }
+                 break;
+             }
+ 
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 0e3c6ec..651c1b7 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -353,7 +353,7 @@ bool MythPlayer::Pause(void)
+ 
+ bool MythPlayer::Play(float speed, bool normal, bool unpauseaudio)
+ {
+-    pauseLock.lock();
++    QMutexLocker locker(&pauseLock);
+     VERBOSE(VB_PLAYBACK, LOC +
+             QString("Play(%1, normal %2, unpause audio %3)")
+             .arg(speed,5,'f',1).arg(normal).arg(unpauseaudio));
+@@ -361,7 +361,6 @@ bool MythPlayer::Play(float speed, bool normal, bool unpauseaudio)
+     if (deleteMap.IsEditing())
+     {
+         VERBOSE(VB_IMPORTANT, LOC + "Ignoring Play(), in edit mode.");
+-        pauseLock.unlock();
+         return false;
+     }
+ 
+@@ -373,7 +372,6 @@ bool MythPlayer::Play(float speed, bool normal, bool unpauseaudio)
+     allpaused = false;
+     next_play_speed   = speed;
+     next_normal_speed = normal;
+-    pauseLock.unlock();
+     return true;
+ }
+ 
+@@ -548,7 +546,7 @@ void MythPlayer::ReinitOSD(void)
+     if (videoOutput && !using_null_videoout)
+     {
+         osdLock.lock();
+-        if (QThread::currentThread() != (QThread*)playerThread)
++        if (QThread::currentThread() != playerThread)
+         {
+             reinit_osd = true;
+             osdLock.unlock();
+@@ -1940,13 +1938,19 @@ void MythPlayer::DisplayNormalFrame(bool check_prebuffer)
+     // clear the buffering state
+     SetBuffering(false);
+ 
+-    videoOutput->StartDisplayingFrame();
++    bool const bDisplayFrame = videoOutput->ValidVideoFrames() > 0;
++    if (bDisplayFrame)
++        videoOutput->StartDisplayingFrame();
++
+     VideoFrame *frame = videoOutput->GetLastShownFrame();
+     PreProcessNormalFrame();
+ 
+-    // handle scan type changes
+-    AutoDeint(frame);
+-    detect_letter_box->SwitchTo(frame);
++    if (!noVideoTracks)
++    {
++        // handle scan type changes
++        AutoDeint(frame);
++        detect_letter_box->SwitchTo(frame);
++    }
+ 
+     FrameScanType ps = m_scan;
+     if (kScan_Detect == m_scan || kScan_Ignore == m_scan)
+@@ -1959,7 +1963,8 @@ void MythPlayer::DisplayNormalFrame(bool check_prebuffer)
+     osdLock.unlock();
+ 
+     AVSync(frame, 0);
+-    videoOutput->DoneDisplayingFrame(frame);
++    if (bDisplayFrame)
++        videoOutput->DoneDisplayingFrame(frame);
+ }
+ 
+ void MythPlayer::PreProcessNormalFrame(void)
+@@ -1968,10 +1973,12 @@ void MythPlayer::PreProcessNormalFrame(void)
+     // handle Interactive TV
+     if (GetInteractiveTV())
+     {
+-        osdLock.lock();
+-        itvLock.lock();
++        QMutexLocker lk1(&osdLock);
++
+         if (osd && videoOutput->GetOSDPainter())
+         {
++            QMutexLocker lk2(&itvLock);
++
+             InteractiveScreen *window =
+                 (InteractiveScreen*)osd->GetWindow(OSD_WIN_INTERACT);
+             if ((interactiveTV->ImageHasChanged() || !itvVisible) && window)
+@@ -1980,8 +1987,6 @@ void MythPlayer::PreProcessNormalFrame(void)
+                 itvVisible = true;
+             }
+         }
+-        itvLock.unlock();
+-        osdLock.unlock();
+     }
+ #endif // USING_MHEG
+ }
+@@ -2096,7 +2101,7 @@ bool MythPlayer::VideoLoop(void)
+         DisplayPauseFrame();
+     }
+     else
+-        DisplayNormalFrame();
++        DisplayNormalFrame(!noVideoTracks);
+ 
+     if (using_null_videoout && decoder)
+         decoder->UpdateFramesPlayed();
+@@ -2197,7 +2202,10 @@ void MythPlayer::SwitchToProgram(void)
+     QSharedPointer<ProgramInfo> pginfo(player_ctx->tvchain->GetSwitchProgram(
+         discontinuity, newtype, newid));
+     if (!pginfo)
++    {
++        VERBOSE(VB_IMPORTANT, LOC_ERR + "SwitchToProgram - No ProgramInfo");
+         return;
++    }
+ 
+     bool newIsDummy = player_ctx->tvchain->GetCardType(newid) == "DUMMY";
+ 
+@@ -2312,13 +2320,15 @@ void MythPlayer::JumpToProgram(void)
+     QSharedPointer<ProgramInfo> pginfo(player_ctx->tvchain->GetSwitchProgram(
+         discontinuity, newtype, newid));
+     if (!pginfo)
++    {
++        VERBOSE(VB_IMPORTANT, LOC_ERR + "JumpToProgram - No ProgramInfo");
+         return;
++    }
+ 
+     bool newIsDummy = player_ctx->tvchain->GetCardType(newid) == "DUMMY";
+     SetPlayingInfo(*pginfo);
+ 
+     Pause();
+-    ChangeSpeed();
+     ResetCaptions();
+     player_ctx->tvchain->SetProgram(*pginfo);
+     player_ctx->buffer->Reset(true);
+@@ -2507,12 +2517,12 @@ void MythPlayer::EventLoop(void)
+         player_ctx->tvchain->JumpToNext(true, 1);
+         JumpToProgram();
+     }
+-    else if ((!allpaused || GetEof()) && player_ctx->tvchain &&
+-             (decoder && !decoder->GetWaitForChange()))
++    else if ((!allpaused || GetEof()) &&
++             decoder && !decoder->GetWaitForChange() &&
++             player_ctx->tvchain && player_ctx->tvchain->NeedsToSwitch())
+     {
+         // Switch to the next program in livetv
+-        if (player_ctx->tvchain->NeedsToSwitch())
+-            SwitchToProgram();
++        SwitchToProgram();
+     }
+ 
+     // Jump to the next program in livetv
+@@ -2670,48 +2680,51 @@ void MythPlayer::AudioEnd(void)
+ 
+ bool MythPlayer::PauseDecoder(void)
+ {
+-    decoderPauseLock.lock();
+-    if (QThread::currentThread() == (QThread*)decoderThread)
++    VERBOSE(VB_PLAYBACK+VB_EXTRA, LOC + "Pause decoder.");
++
++    QMutexLocker locker(&decoderPauseLock);
++
++    if (QThread::currentThread() == static_cast<QThread*>(decoderThread))
+     {
++        pauseDecoder = false;
+         decoderPaused = true;
+         decoderThreadPause.wakeAll();
+-        decoderPauseLock.unlock();
+-        return decoderPaused;
++        return true;
+     }
+ 
+-    int tries = 0;
+     pauseDecoder = true;
+-    while (decoderThread && !killdecoder && (tries++ < 100) &&
+-          !decoderThreadPause.wait(&decoderPauseLock, 100))
++    int tries = 0;
++    while (!decoderPaused && decoderThread && !killdecoder && (tries++ < 12) &&
++          !decoderThreadPause.wait(locker.mutex(), 100))
+     {
+         VERBOSE(VB_IMPORTANT, LOC_WARN + "Waited 100ms for decoder to pause");
+     }
+     pauseDecoder = false;
+-    decoderPauseLock.unlock();
+     return decoderPaused;
+-}
++ }
+ 
+ void MythPlayer::UnpauseDecoder(void)
+ {
+-    decoderPauseLock.lock();
++    VERBOSE(VB_PLAYBACK+VB_EXTRA, LOC + "Unpause decoder.");
++
++    QMutexLocker locker(&decoderPauseLock);
+ 
+-    if (QThread::currentThread() == (QThread*)decoderThread)
++    if (QThread::currentThread() == static_cast<QThread*>(decoderThread))
+     {
++        unpauseDecoder = false;
+         decoderPaused = false;
+         decoderThreadUnpause.wakeAll();
+-        decoderPauseLock.unlock();
+         return;
+     }
+ 
+-    int tries = 0;
+     unpauseDecoder = true;
+-    while (decoderThread && !killdecoder && (tries++ < 100) &&
+-          !decoderThreadUnpause.wait(&decoderPauseLock, 100))
++    int tries = 0;
++    while (decoderPaused && decoderThread && !killdecoder && (tries++ < 1) &&
++          !decoderThreadUnpause.wait(locker.mutex(), 100))
+     {
+         VERBOSE(VB_IMPORTANT, LOC_WARN + "Waited 100ms for decoder to unpause");
+     }
+     unpauseDecoder = false;
+-    decoderPauseLock.unlock();
+ }
+ 
+ void MythPlayer::DecoderStart(bool start_paused)
+@@ -2737,7 +2750,7 @@ void MythPlayer::DecoderEnd(void)
+     SetPlaying(false);
+     killdecoder = true;
+     int tries = 0;
+-    while (decoderThread && !decoderThread->wait(100) && (tries++ < 50))
++    while (decoderThread && !decoderThread->wait(100) && (tries++ < 12))
+         VERBOSE(VB_PLAYBACK, LOC + "Waited 100ms for decoder loop to stop");
+ 
+     if (decoderThread && decoderThread->isRunning())
+@@ -2748,21 +2761,38 @@ void MythPlayer::DecoderEnd(void)
+ 
+ void MythPlayer::DecoderPauseCheck(void)
+ {
+-    if (QThread::currentThread() != (QThread*)decoderThread)
++    if (QThread::currentThread() != static_cast<QThread*>(decoderThread))
+         return;
++
++    QMutexLocker locker(&decoderPauseLock);
++
+     if (pauseDecoder)
+-        PauseDecoder();
++    {
++        pauseDecoder = false;
++        decoderPaused = true;
++        VERBOSE(VB_PLAYBACK+VB_EXTRA, LOC + "Decoder paused.");
++        decoderThreadPause.wakeAll();
++    }
++
+     if (unpauseDecoder)
+-        UnpauseDecoder();
++    {
++        unpauseDecoder = false;
++        decoderPaused = false;
++        VERBOSE(VB_PLAYBACK+VB_EXTRA, LOC + "Decoder unpaused.");
++        decoderThreadUnpause.wakeAll();
++    }
+ }
+ 
+ //// FIXME - move the eof ownership back into MythPlayer
+ bool MythPlayer::GetEof(void)
+ {
+-    if (QThread::currentThread() == (QThread*)playerThread)
++    if (QThread::currentThread() == playerThread)
+         return decoder ? decoder->GetEof() : true;
+ 
+-    decoder_change_lock.lock();
++    // This must be a tryLock for the case of an audio only stream
++    // when the decoder thread never exits decoder->GetFrame
++    if (!decoder_change_lock.tryLock(10))
++        return false;
+     bool eof = decoder ? decoder->GetEof() : true;
+     decoder_change_lock.unlock();
+     return eof;
+@@ -2770,14 +2800,17 @@ bool MythPlayer::GetEof(void)
+ 
+ void MythPlayer::SetEof(bool eof)
+ {
+-    if (QThread::currentThread() == (QThread*)playerThread)
++    if (QThread::currentThread() == playerThread)
+     {
+         if (decoder)
+             decoder->SetEof(eof);
+         return;
+     }
+ 
+-    decoder_change_lock.lock();
++    // This must be a tryLock for the case of an audio only stream
++    // when the decoder thread never exits decoder->GetFrame
++    if (!decoder_change_lock.tryLock(10))
++        return;
+     if (decoder)
+         decoder->SetEof(eof);
+     decoder_change_lock.unlock();
+diff --git a/mythtv/libs/libmythtv/mythplayer.h b/mythtv/libs/libmythtv/mythplayer.h
+index 68dd7eb..338e569 100644
+--- a/mythtv/libs/libmythtv/mythplayer.h
++++ b/mythtv/libs/libmythtv/mythplayer.h
+@@ -541,7 +541,7 @@ class MPUBLIC MythPlayer
+     bool           decoderPaused;
+     bool           pauseDecoder;
+     bool           unpauseDecoder;
+-    bool           killdecoder;
++    bool volatile  killdecoder;
+     int64_t        decoderSeek;
+     bool           decodeOneFrame;
+     bool           needNewPauseFrame;
+diff --git a/mythtv/libs/libmythtv/tv_play.cpp b/mythtv/libs/libmythtv/tv_play.cpp
+index e8d0c2d..004db3e 100644
+--- a/mythtv/libs/libmythtv/tv_play.cpp
++++ b/mythtv/libs/libmythtv/tv_play.cpp
+@@ -6894,7 +6894,8 @@ void TV::ChangeChannel(PlayerContext *ctx, uint chanid, const QString &chan)
+     if (ctx->prevChan.empty())
+         ctx->PushPreviousChannel();
+ 
+-    PauseAudioUntilBuffered(ctx);
++    if (ctx->player)
++        ctx->player->GetAudio()->Pause(true);
+     PauseLiveTV(ctx);
+ 
+     ctx->LockDeletePlayer(__FILE__, __LINE__);
+@@ -6911,6 +6912,7 @@ void TV::ChangeChannel(PlayerContext *ctx, uint chanid, const QString &chan)
+         ctx->player->GetAudio()->Reset();
+ 
+     UnpauseLiveTV(ctx);
++    PauseAudioUntilBuffered(ctx);
+ 
+     if (oldinputname != ctx->recorder->GetInput())
+         UpdateOSDInput(ctx);
+-- 
+1.7.9.5
+

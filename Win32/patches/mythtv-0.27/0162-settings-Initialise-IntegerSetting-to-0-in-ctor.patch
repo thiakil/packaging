@@ -1,0 +1,41 @@
+From 0209f1bfde7540a8fc6f68a58fde8b8ff3a3d86b Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 8 Aug 2013 17:09:16 +0100
+Subject: [PATCH 162/207] settings: Initialise IntegerSetting to 0 in ctor
+
+By default a setting is initialised to a null string which, if the user
+does nothing else, results in an empty string written to the database.
+This can cause some routines that test for a numeric value to fail e.g.
+MythArchive's DVD creator fails if MythArchiveDriveSpeed is an empty string:
+
+    Traceback (most recent call last):
+      File "/home/lvr/Projects/myth/mythinstall/share/mythtv/mytharchive/scripts/mythburn.py", line 5247, in <module>
+        main()
+      File "/home/lvr/Projects/myth/mythinstall/share/mythtv/mytharchive/scripts/mythburn.py", line 5143, in main
+        drivespeed = int(defaultsettings.get("MythArchiveDriveSpeed", "0"))
+      ValueError: invalid literal for int() with base 10: ''
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/settings.h |    5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmyth/settings.h b/mythtv/libs/libmyth/settings.h
+index 04bf691..b15b4c7 100644
+--- a/mythtv/libs/libmyth/settings.h
++++ b/mythtv/libs/libmyth/settings.h
+@@ -174,7 +174,10 @@ class MPUBLIC IntegerSetting : public Setting
+     Q_OBJECT
+ 
+   protected:
+-    IntegerSetting(Storage *_storage) : Setting(_storage) { }
++    IntegerSetting(Storage *_storage) : Setting(_storage)
++    {
++        settingValue = QString::number(0);
++    }
+ 
+   public:
+     int intValue(void) const { return settingValue.toInt(); }
+-- 
+1.7.9.5
+

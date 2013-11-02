@@ -1,0 +1,393 @@
+From 535457990aaf87d39b76f8c7193cb735dbf341c7 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 24 Jun 2013 16:52:20 +0100
+Subject: [PATCH 043/227] MHEG: Support BBC iPLayer on Freeview
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythfreemheg/BaseClasses.cpp |   13 +++
+ mythtv/libs/libmythfreemheg/BaseClasses.h   |    1 +
+ mythtv/libs/libmythfreemheg/Engine.cpp      |   23 +++-
+ mythtv/libs/libmythfreemheg/Programs.cpp    |  160 +++++++++++++++++++++------
+ mythtv/libs/libmythtv/mhegic.cpp            |    9 +-
+ mythtv/libs/libmythtv/mhi.cpp               |    6 +-
+ 6 files changed, 173 insertions(+), 39 deletions(-)
+
+diff --git a/mythtv/libs/libmythfreemheg/BaseClasses.cpp b/mythtv/libs/libmythfreemheg/BaseClasses.cpp
+index af7245b..d57a461 100644
+--- a/mythtv/libs/libmythfreemheg/BaseClasses.cpp
++++ b/mythtv/libs/libmythfreemheg/BaseClasses.cpp
+@@ -707,6 +707,19 @@ void MHUnion::CheckType(enum UnionTypes t) const
+     }
+ }
+ 
++QString MHUnion::Printable() const
++{
++    switch (m_Type)
++    {
++    case U_Int: return QString::number(m_nIntVal);
++    case U_Bool: return m_fBoolVal ? "true" : "false";
++    case U_String: return m_StrVal.Printable();
++    case U_ObjRef: return m_ObjRefVal.Printable();
++    case U_ContentRef: return m_ContentRefVal.Printable();
++    case U_None: break;
++    }
++    return "";
++}
+ 
+ // A parameter is a generic whose argument is either the value itself or an indirect reference.
+ void MHParameter::Initialise(MHParseNode *p, MHEngine *engine)
+diff --git a/mythtv/libs/libmythfreemheg/BaseClasses.h b/mythtv/libs/libmythfreemheg/BaseClasses.h
+index 7f7670f..7fa4288 100644
+--- a/mythtv/libs/libmythfreemheg/BaseClasses.h
++++ b/mythtv/libs/libmythfreemheg/BaseClasses.h
+@@ -274,6 +274,7 @@ class MHUnion
+     MHUnion(const MHContentRef &cnVal) { m_Type = U_ContentRef; m_ContentRefVal.Copy(cnVal); }
+ 
+     void GetValueFrom(const MHParameter &value, MHEngine *engine); // Copies the argument, getting the value of an indirect args.
++    QString Printable() const;
+ 
+     enum UnionTypes { U_Int, U_Bool, U_String, U_ObjRef, U_ContentRef, U_None } m_Type;
+     void CheckType (enum UnionTypes) const; // Check a type and fail if it doesn't match. 
+diff --git a/mythtv/libs/libmythfreemheg/Engine.cpp b/mythtv/libs/libmythfreemheg/Engine.cpp
+index f7af37b..321670e 100644
+--- a/mythtv/libs/libmythfreemheg/Engine.cpp
++++ b/mythtv/libs/libmythfreemheg/Engine.cpp
+@@ -50,6 +50,14 @@ MHEngine::MHEngine(MHContext *context): m_Context(context)
+     m_fInTransition = false;
+     m_fBooting = true;
+     m_Interacting = 0;
++
++    // Required for BBC Freeview iPlayer
++    MHPSEntry *pEntry = new MHPSEntry;
++    pEntry->m_FileName.Copy("ram://bbcipstr");
++    pEntry->m_Data.Append(new MHUnion(true)); // Default true
++    // The next value must be true to enable Freeview interaction channel
++    pEntry->m_Data.Append(new MHUnion(true)); // Default false
++    m_PersistentStore.Append(pEntry);
+ }
+ 
+ MHEngine::~MHEngine()
+@@ -1114,6 +1122,9 @@ void MHEngine::CheckContentRequests()
+ 
+ bool MHEngine::LoadStorePersistent(bool fIsLoad, const MHOctetString &fileName, const MHSequence<MHObjectRef *> &variables)
+ {
++    QString const csFile = QString::fromUtf8(
++            (const char *)fileName.Bytes(), fileName.Size() );
++
+     // See if there is an entry there already.
+     MHPSEntry *pEntry = NULL;
+     int i;
+@@ -1133,6 +1144,9 @@ bool MHEngine::LoadStorePersistent(bool fIsLoad, const MHOctetString &fileName,
+         // If we're loading then we've failed.
+         if (fIsLoad)
+         {
++            MHLOG(MHLogNotifications, QString(
++                "Load Persistent(%1) #%2: no such file")
++                .arg(csFile).arg(variables.Size()) );
+             return false;
+         }
+ 
+@@ -1147,12 +1161,17 @@ bool MHEngine::LoadStorePersistent(bool fIsLoad, const MHOctetString &fileName,
+         // Check that we have sufficient data before we continue?
+         if (pEntry->m_Data.Size() < variables.Size())
+         {
++            MHLOG(MHLogWarning, QString(
++                "Load Persistent(%1): size mismatch").arg(csFile));
+             return false;
+         }
+ 
+         for (i = 0; i < variables.Size(); i++)
+         {
+-            FindObject(*(variables.GetAt(i)))->SetVariableValue(*(pEntry->m_Data.GetAt(i)));
++            MHUnion *pValue = pEntry->m_Data.GetAt(i);
++            MHLOG(MHLogNotifications, QString("Load Persistent(%1) #%2=%3")
++                .arg(csFile).arg(i).arg(pValue->Printable()) );
++            FindObject(*(variables.GetAt(i)))->SetVariableValue(*pValue);
+         }
+     }
+ 
+@@ -1170,6 +1189,8 @@ bool MHEngine::LoadStorePersistent(bool fIsLoad, const MHOctetString &fileName,
+             MHUnion *pValue = new MHUnion;
+             pEntry->m_Data.Append(pValue);
+             FindObject(*(variables.GetAt(i)))->GetVariableValue(*pValue, this);
++            MHLOG(MHLogNotifications, QString("Store Persistent(%1) %2=>#%3")
++                .arg(csFile).arg(pValue->Printable()).arg(i) );
+         }
+     }
+ 
+diff --git a/mythtv/libs/libmythfreemheg/Programs.cpp b/mythtv/libs/libmythfreemheg/Programs.cpp
+index 0bea727..a38d350 100644
+--- a/mythtv/libs/libmythfreemheg/Programs.cpp
++++ b/mythtv/libs/libmythfreemheg/Programs.cpp
+@@ -30,6 +30,7 @@
+ #include "freemheg.h"
+ 
+ #include <QStringList>
++#include <QUrl>
+ #include <sys/timeb.h>
+ #ifdef __FreeBSD__
+ #include <sys/time.h>
+@@ -770,6 +771,7 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
+                 result.Append(engine->GetContext()->GetReceiverId());
+                 result.Append(" ");
+                 result.Append(engine->GetContext()->GetDSMCCId());
++                MHLOG(MHLogNotifications, "NOTE WhoAmI -> " + QString::fromUtf8((const char *)result.Bytes(), result.Size()) );
+                 engine->FindObject(*(args.GetAt(0)->GetReference()))->SetVariableValue(result);
+                 SetSuccessFlag(success, true, engine);
+             }
+@@ -779,6 +781,7 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
+             }
+         }
+ 
++        // Optional resident programs
+         else if (m_Name.Equal("DBG"))   // Debug - optional
+         {
+             QString message = "DEBUG: ";
+@@ -813,6 +816,7 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
+             MHLOG(MHLogNotifications, message);
+         }
+ 
++        // NativeApplicationExtension
+         else if (m_Name.Equal("SBI"))   // SetBroadcastInterrupt
+         {
+             // Required for NativeApplicationExtension
+@@ -845,51 +849,36 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
+             {
+                 MHOctetString string;
+                 GetString(args.GetAt(0), string, engine);
+-                QString url = QString::fromUtf8((const char *)string.Bytes(), string.Size());
++                QUrl url = QString::fromUtf8((const char *)string.Bytes(), string.Size());
+ 
+                 // Variable name/value pairs
+-                QStringList params;
+                 int i = 1;
+                 for (; i + 2 < args.Size(); i += 2)
+                 {
+                     GetString(args.GetAt(i), string, engine);
+                     QString name = QString::fromUtf8((const char *)string.Bytes(), string.Size());
+-                    QString val;
+                     MHUnion un;
+                     un.GetValueFrom(*(args.GetAt(i+1)), engine);
+-                    switch (un.m_Type) {
+-                    case MHUnion::U_Int:
+-                        val = QString::number(un.m_nIntVal);
+-                        break;
+-                    case MHParameter::P_Bool:
+-                        val = un.m_fBoolVal ? "true" : "false";
+-                        break;
+-                    case MHParameter::P_String:
+-                        val = QString::fromUtf8((const char*)un.m_StrVal.Bytes(), un.m_StrVal.Size());
+-                        break;
+-                    case MHParameter::P_ObjRef:
+-                        val = un.m_ObjRefVal.Printable();
+-                        break;
+-                    case MHParameter::P_ContentRef:
+-                        val = un.m_ContentRefVal.Printable();
+-                        break;
+-                    case MHParameter::P_Null:
+-                        val = "<NULL>";
+-                        break;
+-                    default:
+-                        val = QString("<type %1>").arg(un.m_Type);
+-                        break;
+-                    }
+-                    params += name + "=" + val;
++                    url.addQueryItem(name, un.Printable());
+                 }
+-                // TODO
+-                MHLOG(MHLogNotifications, "NOTE ReturnData '" + url + "' { " + params.join(" ") + " }");
++
++                MHLOG(MHLogNotifications, QString("NOTE ReturnData %1")
++                    .arg(url.toEncoded().constData()) );
++                // NB MHEG-5 says this should be 'post' but 'get; seems to work ok
++                QByteArray text;
++                bool ok = engine->GetContext()->GetCarouselData(url.toEncoded(), text);
++
++                MHLOG(MHLogNotifications, QString("NOTE ReturnData got %1 bytes")
++                    .arg(text.size()) );
++
+                 // HTTP response code, 0= none
+-                engine->FindObject(*(args.GetAt(i)->GetReference()))->SetVariableValue(0);
++                engine->FindObject(*(args.GetAt(i)->GetReference()))->SetVariableValue(ok ? 200 : 0);
+                 // HTTP response data
+-                string = "";
+-                engine->FindObject(*(args.GetAt(i+1)->GetReference()))->SetVariableValue(string);
+-                SetSuccessFlag(success, false, engine);
++                MHOctetString result;
++                result.Append(text.constData());
++                engine->FindObject(*(args.GetAt(i+1)->GetReference()))->SetVariableValue(result);
++
++                SetSuccessFlag(success, true, engine);
+             }
+             else SetSuccessFlag(success, false, engine);
+         }
+@@ -908,6 +897,102 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
+             }
+             else SetSuccessFlag(success, false, engine);
+         }
++        else if (m_Name.Equal("PST")) { // PersistentStorageInfo
++            if (args.Size() == 1)
++            {
++                engine->FindObject(*(args.GetAt(0)->GetReference()))->SetVariableValue(true);
++                SetSuccessFlag(success, true, engine);
++            }
++            else SetSuccessFlag(success, false, engine);
++        }
++        else if (m_Name.Equal("SCk")) { // SetCookie
++            if (args.Size() == 4)
++            {
++                MHOctetString string;
++                GetString(args.GetAt(0), string, engine);
++                QString id = QString::fromUtf8((const char *)string.Bytes(), string.Size());
++                int iExpiry = GetInt(args.GetAt(1), engine);
++                GetString(args.GetAt(2), string, engine);
++                QString val = QString::fromUtf8((const char *)string.Bytes(), string.Size());
++                bool bSecure = GetBool(args.GetAt(3), engine);
++                // TODO
++                MHLOG(MHLogNotifications, QString("NOTE SetCookie id=%1 MJD=%2 value=%3 secure=%4")
++                    .arg(id).arg(iExpiry).arg(val).arg(bSecure) );
++            }
++            else SetSuccessFlag(success, false, engine);
++        }
++        else if (m_Name.Equal("GCk")) { // GetCookie
++            MHERROR("GetCookie ResidentProgram is not implemented");
++        }
++
++        // ICStreamingExtension
++        else if (m_Name.Equal("MSP")) // MeasureStreamPerformance
++        {
++            if (args.Size() == 2)
++            {
++                MHOctetString string;
++                GetString(args.GetAt(0), string, engine);
++                QString url = QString::fromUtf8((const char *)string.Bytes(), string.Size());
++                // TODO
++                MHLOG(MHLogNotifications, QString("NOTE MeasureStreamPerformance '%1' %2 bytes")
++                    .arg(url).arg(GetInt(args.GetAt(1), engine)) );
++
++                engine->FindObject(*(args.GetAt(1)->GetReference()))->SetVariableValue(-1);
++                SetSuccessFlag(success, true, engine);
++            }
++            else SetSuccessFlag(success, false, engine);
++        }
++        else if (m_Name.Equal("PFG")) { // PromptForGuidance
++            if (args.Size() == 2)
++            {
++                MHOctetString string;
++                GetString(args.GetAt(0), string, engine);
++                QString info = QString::fromUtf8((const char *)string.Bytes(), string.Size());
++                MHLOG(MHLogNotifications, QString("NOTE PromptForGuidance '%1'").arg(info) );
++
++                engine->FindObject(*(args.GetAt(1)->GetReference()))->SetVariableValue(true);
++                SetSuccessFlag(success, true, engine);
++            }
++            else SetSuccessFlag(success, false, engine);
++
++        }
++        else if (m_Name.Equal("GAP")) { // GetAudioDescPref
++            if (args.Size() == 1)
++            {
++                engine->FindObject(*(args.GetAt(1)->GetReference()))->SetVariableValue(false);
++                SetSuccessFlag(success, true, engine);
++            }
++            else SetSuccessFlag(success, false, engine);
++        }
++        else if (m_Name.Equal("GSP")) { // GetSubtitlePref
++            if (args.Size() == 1)
++            {
++                engine->FindObject(*(args.GetAt(1)->GetReference()))->SetVariableValue(false);
++                SetSuccessFlag(success, true, engine);
++            }
++            else SetSuccessFlag(success, false, engine);
++        }
++        else if (m_Name.Equal("GPS")) { // GetPINSupport
++            if (args.Size() == 1)
++            {
++                // -1= PIN is not supported
++                //  0= PIN is supported and disabled
++                //  1= PIN is supported and enabled
++                engine->FindObject(*(args.GetAt(1)->GetReference()))->SetVariableValue(0);
++                SetSuccessFlag(success, true, engine);
++            }
++            else SetSuccessFlag(success, false, engine);
++        }
++
++        // Undocumented functions
++        else if (m_Name.Equal("XBM")) {
++            // BBC Freeview passes 1 boolean arg
++            // Required for BBC Freeview iPlayer
++            MHLOG(MHLogNotifications, "NOTE Undocumented ResidentProgram XBM" );
++            if (args.Size() == 1)
++                engine->FindObject(*(args.GetAt(0)->GetReference()))->SetVariableValue(true);
++            SetSuccessFlag(success, true, engine);
++        }
+ 
+         else
+         {
+@@ -916,6 +1001,15 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
+     }
+     catch (char const *)
+     {
++        QStringList params;
++        for (int i = 0; i < args.Size(); ++i)
++        {
++            MHUnion un;
++            un.GetValueFrom(*(args.GetAt(i)), engine);
++            params += QString(MHUnion::GetAsString(un.m_Type)) + "=" + un.Printable();
++        }
++        MHLOG(MHLogWarning, QString("Arguments (%1)").arg(params.join(",")) );
++
+         // If something went wrong set the succeeded flag to false
+         SetSuccessFlag(success, false, engine);
+         // And continue on.  In particular we need to deactivate.
+diff --git a/mythtv/libs/libmythtv/mhegic.cpp b/mythtv/libs/libmythtv/mhegic.cpp
+index 592dbe9..9748fec 100644
+--- a/mythtv/libs/libmythtv/mhegic.cpp
++++ b/mythtv/libs/libmythtv/mhegic.cpp
+@@ -165,11 +165,11 @@ void MHInteractionChannel::slotFinished(QObject *obj)
+     if (!p)
+         return;
+ 
+-    QString url = p->Url().toString();
++    QByteArray url = p->Url().toEncoded();
+ 
+     if (p->GetError() == QNetworkReply::NoError)
+     {
+-        LOG(VB_MHEG, LOG_DEBUG, LOC + QString("Finished %1").arg(url) );
++        LOG(VB_MHEG, LOG_DEBUG, LOC + QString("Finished %1").arg(url.constData()) );
+     }
+     else
+     {
+@@ -180,8 +180,9 @@ void MHInteractionChannel::slotFinished(QObject *obj)
+ 
+     QMutexLocker locker(&m_mutex);
+ 
+-    m_pending.remove(url);
+-    m_finished.insert(url, p);
++    if (m_pending.remove(url.constData()) < 1)
++        LOG(VB_GENERAL, LOG_WARNING, LOC + QString("Finished %1 wasn't pending").arg(url.constData()) );
++    m_finished.insert(url.constData(), p);
+ }
+ 
+ /* End of file */
+diff --git a/mythtv/libs/libmythtv/mhi.cpp b/mythtv/libs/libmythtv/mhi.cpp
+index 28a3db9..73c4eb7 100644
+--- a/mythtv/libs/libmythtv/mhi.cpp
++++ b/mythtv/libs/libmythtv/mhi.cpp
+@@ -467,7 +467,11 @@ bool MHIContext::GetCarouselData(QString objectPath, QByteArray &result)
+         }
+ 
+         if (t.elapsed() > 60000) // TODO get this from carousel info
+-             return false; // Not there.
++        {
++            if (bReported)
++                LOG(VB_MHEG, LOG_INFO, QString("[mhi] timed out %1").arg(objectPath));
++            return false; // Not there.
++        }
+         // Otherwise we block.
+         if (!bReported)
+         {
+-- 
+1.7.9.5
+

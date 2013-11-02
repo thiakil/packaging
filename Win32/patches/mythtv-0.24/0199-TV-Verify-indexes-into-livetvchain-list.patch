@@ -1,0 +1,81 @@
+From 405d06cf5bb76cea7b6d26417972afa9cb007489 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 22 May 2013 17:34:28 +0100
+Subject: [PATCH 199/285] TV: Verify indexes into livetvchain list
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/livetvchain.cpp |   23 +++++++++++++----------
+ 1 file changed, 13 insertions(+), 10 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/livetvchain.cpp b/mythtv/libs/libmythtv/livetvchain.cpp
+index 51921db..6b5ea6e 100644
+--- a/mythtv/libs/libmythtv/livetvchain.cpp
++++ b/mythtv/libs/libmythtv/livetvchain.cpp
+@@ -13,7 +13,7 @@
+  */
+ LiveTVChain::LiveTVChain() :
+     m_id(""), m_maxpos(0), m_lock(QMutex::Recursive),
+-    m_curpos(0), m_cur_chanid(0),
++    m_curpos(-1), m_cur_chanid(0),
+     m_switchid(-1), m_jumppos(0)
+ {
+ }
+@@ -207,11 +207,12 @@ void LiveTVChain::ReloadAll(void)
+                   "WHERE chainid = :CHAINID ORDER BY chainpos;");
+     query.bindValue(":CHAINID", m_id);
+ 
+-    if (query.exec() && query.isActive() && query.size() > 0)
++    if (!query.exec() || !query.isActive())
++        MythDB::DBError("Chain: ReloadAll", query);
++    else if (query.size() > 0)
+     {
+         while (query.next())
+         {
+-
+             LiveTVChainEntry entry;
+             entry.chanid = query.value(0).toUInt();
+             entry.starttime = query.value(1).toDateTime();
+@@ -333,10 +334,12 @@ int LiveTVChain::ProgramIsAt(const ProgramInfo &pginfo) const
+ int LiveTVChain::GetLengthAtCurPos(void)
+ {
+     QMutexLocker lock(&m_lock);
+-    LiveTVChainEntry entry;
+ 
+-    entry = m_chain[m_curpos];
+-    if (m_curpos == ((int)m_chain.count() - 1))
++    if (m_curpos < 0 || m_curpos >= m_chain.count())
++        return 0;
++
++    LiveTVChainEntry entry = m_chain[m_curpos];
++    if (m_curpos + 1 == m_chain.count())
+         return entry.starttime.secsTo(QDateTime::currentDateTime());
+     else
+         return entry.starttime.secsTo(entry.endtime);
+@@ -360,7 +363,7 @@ void LiveTVChain::SetProgram(const ProgramInfo &pginfo)
+ 
+ bool LiveTVChain::HasNext(void) const
+ {
+-    return ((int)m_chain.count() - 1 > m_curpos);
++    return m_chain.count() > m_curpos + 1;
+ }
+ 
+ void LiveTVChain::ClearSwitch(void)
+@@ -581,11 +584,11 @@ static QString toString(const LiveTVChainEntry &v)
+ QString LiveTVChain::toString() const
+ {
+     QMutexLocker lock(&m_lock);
+-    QString ret = QString("LiveTVChain has %1 entries\n").arg(m_chain.size());
++    QString ret = QString("LiveTVChain has %1 entries").arg(m_chain.size());
+     for (uint i = 0; i < (uint)m_chain.size(); i++)
+     {
+-        ret += (QString((i==(uint)m_curpos) ? "* " : "  ") +
+-                ::toString(m_chain[i]) + "\n");
++        ret += ("\n\t" + QString((i==(uint)m_curpos) ? "* " : "  ") +
++                ::toString(m_chain[i]));
+     }
+     return ret;
+ }
+-- 
+1.7.9.5
+

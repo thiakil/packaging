@@ -1,0 +1,131 @@
+From 33848cfdbdb3fb9c1d240c8a8f2c8301c31f19e4 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 14 Mar 2011 14:11:07 +0100
+Subject: [PATCH 007/285] Fix win32 playback of dvd's and iso images
+
+This series of patches fix win32 specific issues with mythvideo
+
+- Allows the VideoStartupDir to be a semicolon (instead of colon) separated
+ list of dirs.  This permits win32 absolute paths such as d:\...
+
+- Use a 64-bit off_t type as expected by libdvdnav.  This fixes the playback
+ of iso images.
+
+Ticket URL: <http://svn.mythtv.org/trac/ticket/9268>
+---
+ mythtv/libs/libmythmetadata/videoutils.cpp |    5 +++++
+ mythtv/libs/libmythtv/RingBuffer.cpp       |    2 ++
+ mythtv/libs/libmythtv/mythiowrapper.cpp    |   20 +++++++++++---------
+ mythtv/libs/libmythtv/mythiowrapper.h      |    5 +++++
+ 4 files changed, 23 insertions(+), 9 deletions(-)
+
+diff --git a/mythtv/libs/libmythmetadata/videoutils.cpp b/mythtv/libs/libmythmetadata/videoutils.cpp
+index 067cac9..2525b53 100644
+--- a/mythtv/libs/libmythmetadata/videoutils.cpp
++++ b/mythtv/libs/libmythmetadata/videoutils.cpp
+@@ -74,8 +74,13 @@ QStringList GetVideoDirsByHost(QString host)
+ 
+     if (host.isEmpty())
+     {
++#ifdef WIN32
++        QStringList tmp3 = gCoreContext->GetSetting("VideoStartupDir",
++                    DEFAULT_VIDEOSTARTUP_DIR).split(";", QString::SkipEmptyParts);
++#else
+         QStringList tmp3 = gCoreContext->GetSetting("VideoStartupDir",
+                     DEFAULT_VIDEOSTARTUP_DIR).split(":", QString::SkipEmptyParts);
++#endif
+         for (QStringList::iterator p = tmp3.begin(); p != tmp3.end(); ++p)
+         {
+             bool matches = false;
+diff --git a/mythtv/libs/libmythtv/RingBuffer.cpp b/mythtv/libs/libmythtv/RingBuffer.cpp
+index 0f9fc62..04c4057 100644
+--- a/mythtv/libs/libmythtv/RingBuffer.cpp
++++ b/mythtv/libs/libmythtv/RingBuffer.cpp
+@@ -352,6 +352,8 @@ void RingBuffer::OpenFile(const QString &lfilename, uint retry_ms)
+             filename.remove(0,5);           //             e.g. "dvd://dev/sda"
+         else if (lower.left(5) == "dvd:/")  // Less correct URI "dvd:" + path
+             filename.remove(0,4);           //             e.g. "dvd:/videos/ET"
++        else if (lower.left(4) == "dvd:")   // Win32 URI "dvd:" + abs path
++            filename.remove(0,4);           //             e.g. "dvd:D:\"
+ 
+         if (QFile::exists(filename) || lower.startsWith("myth://"))
+             VERBOSE(VB_PLAYBACK, "OpenFile() trying DVD at " + filename);
+diff --git a/mythtv/libs/libmythtv/mythiowrapper.cpp b/mythtv/libs/libmythtv/mythiowrapper.cpp
+index 13cf118..719a890 100644
+--- a/mythtv/libs/libmythtv/mythiowrapper.cpp
++++ b/mythtv/libs/libmythtv/mythiowrapper.cpp
+@@ -96,7 +96,7 @@ int mythfile_open(const char *pathname, int flags)
+         return -1;
+ 
+     if (S_ISDIR( fileinfo.st_mode )) // libmythdvdnav tries to open() a dir
+-        return -1;
++        return errno = EISDIR, -1;
+ 
+     int fileID = -1;
+     if (strncmp(pathname, "myth://", 7))
+@@ -191,6 +191,12 @@ int mythfile_close(int fileID)
+     return result;
+ }
+ 
++#ifdef USING_MINGW
++#   undef  lseek
++#   define lseek  _lseeki64
++#   undef  off_t
++#   define off_t off64_t
++#endif
+ off_t mythfile_seek(int fileID, off_t offset, int whence)
+ {
+     off_t result = -1;
+@@ -204,11 +210,7 @@ off_t mythfile_seek(int fileID, off_t offset, int whence)
+     else if (m_remotefiles.contains(fileID))
+         result = m_remotefiles[fileID]->Seek(offset, whence);
+     else if (m_localfiles.contains(fileID))
+-#ifdef USING_MINGW
+-        result = lseek64(m_localfiles[fileID], offset, whence);
+-#else
+         result = lseek(m_localfiles[fileID], offset, whence);
+-#endif
+     m_fileWrapperLock.unlock();
+ 
+     return result;
+@@ -226,15 +228,15 @@ off_t mythfile_tell(int fileID)
+     else if (m_remotefiles.contains(fileID))
+         result = m_remotefiles[fileID]->Seek(0, SEEK_CUR);
+     else if (m_localfiles.contains(fileID))
+-#ifdef USING_MINGW
+-        result = lseek64(m_localfiles[fileID], 0, SEEK_CUR);
+-#else
+         result = lseek(m_localfiles[fileID], 0, SEEK_CUR);
+-#endif
+     m_fileWrapperLock.unlock();
+ 
+     return result;
+ }
++#ifdef USING_MINGW
++#   undef  lseek
++#   undef  off_t
++#endif
+ 
+ ssize_t mythfile_read(int fileID, void *buf, size_t count)
+ {
+diff --git a/mythtv/libs/libmythtv/mythiowrapper.h b/mythtv/libs/libmythtv/mythiowrapper.h
+index ed58cbc..42fe09b 100644
+--- a/mythtv/libs/libmythtv/mythiowrapper.h
++++ b/mythtv/libs/libmythtv/mythiowrapper.h
+@@ -11,8 +11,13 @@ extern "C" {
+ int     mythfile_check(int fileID);
+ int     mythfile_open(const char *pathname, int flags);
+ int     mythfile_close(int fileID);
++#ifdef USING_MINGW
++off64_t mythfile_seek(int fileID, off64_t offset, int whence);
++off64_t mythfile_tell(int fileID);
++#else
+ off_t   mythfile_seek(int fileID, off_t offset, int whence);
+ off_t   mythfile_tell(int fileID);
++#endif
+ ssize_t mythfile_read(int fileID, void *buf, size_t count);
+ ssize_t mythfile_write(int fileID, void *buf, size_t count);
+ int     mythfile_stat(const char *path, struct stat *buf);
+-- 
+1.7.9.5
+

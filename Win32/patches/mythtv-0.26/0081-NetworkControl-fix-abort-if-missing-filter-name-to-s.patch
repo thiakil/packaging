@@ -1,0 +1,28 @@
+From 720de15f22383834d95229744dbed4c7a6721559 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 6 Feb 2013 15:45:09 +0000
+Subject: [PATCH 081/227] NetworkControl: fix abort if missing filter name to
+ 'set verbose ...'
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythfrontend/networkcontrol.cpp |    3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/mythtv/programs/mythfrontend/networkcontrol.cpp b/mythtv/programs/mythfrontend/networkcontrol.cpp
+index bfcf7be..ccc3de3 100644
+--- a/mythtv/programs/mythfrontend/networkcontrol.cpp
++++ b/mythtv/programs/mythfrontend/networkcontrol.cpp
+@@ -1003,6 +1003,9 @@ QString NetworkControl::processSet(NetworkCommand *nc)
+ 
+     if (nc->getArg(1) == "verbose")
+     {
++        if (nc->getArgCount() < 3)
++            return QString("ERROR: Missing filter name.");
++
+         if (nc->getArgCount() > 3)
+             return QString("ERROR: Separate filters with commas with no "
+                            "space: playback,audio\r\n See 'help %1' for usage "
+-- 
+1.7.9.5
+

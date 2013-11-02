@@ -1,0 +1,133 @@
+From 4b9cde00e56702bfa481175d82e5f3f21f87a4a6 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 7 Dec 2011 17:07:02 +0100
+Subject: [PATCH 066/227] mythbackend: Missing SID triggers a channel re-scan
+ when backend idle
+
+When MPEGStreamData::ProcessPAT detects a missing serviceID it sends a
+mythevent.  The event is received by the mainserver which in turn calls
+Scheduler::EnableScanWhenIdle.  Presently, EnableScanWhenIdle just writes
+a 1 to the AutoChannelScan setting to signal to an external program that a
+scan is required.  However, it is anticipated to add further code to enable
+the scan to be performed by the scheduler itself.
+
+The scan is performed when the system is idle and about to be shutdown by
+specifying an alternative ServerHaltCommand script in Shutdow/Wake settings.
+The script reads the value of AutoChannelScan and if non-zero performs the
+scan (using the mythtv-setup command line scanner) before shutting down.
+
+To maintain channel numbering it is recommended to use the earlier patch
+which provides for a myth_channel_helper script to be invoked after a
+scan is completed.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mpeg/mpegstreamdata.cpp |    5 +++++
+ mythtv/programs/mythbackend/mainserver.cpp    |    9 +++++++++
+ mythtv/programs/mythbackend/scheduler.cpp     |   12 ++++++++++++
+ mythtv/programs/mythbackend/scheduler.h       |    2 ++
+ 4 files changed, 28 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/mpeg/mpegstreamdata.cpp b/mythtv/libs/libmythtv/mpeg/mpegstreamdata.cpp
+index 0191064..9fb6212 100644
+--- a/mythtv/libs/libmythtv/mpeg/mpegstreamdata.cpp
++++ b/mythtv/libs/libmythtv/mpeg/mpegstreamdata.cpp
+@@ -15,6 +15,7 @@ using namespace std;
+ #include "mpegtables.h"
+ #include "ringbuffer.h"
+ #include "mpegtables.h"
++#include "mythcorecontext.h"
+ 
+ #include "atscstreamdata.h"
+ #include "atsctables.h"
+@@ -817,6 +818,10 @@ void MPEGStreamData::ProcessPAT(const ProgramAssociationTable *pat)
+             "Rescan your transports.");
+ 
+         send_single_program = CreatePATSingleProgram(*pat);
++
++        // Tell the scheduler so that a re-scan can be done when next idle
++        MythEvent me("PID_NOTFOUND");
++        gCoreContext->dispatch(me);
+     }
+     else if (foundProgram)
+     {
+diff --git a/mythtv/programs/mythbackend/mainserver.cpp b/mythtv/programs/mythbackend/mainserver.cpp
+index ba1fbc5..3a4316e 100644
+--- a/mythtv/programs/mythbackend/mainserver.cpp
++++ b/mythtv/programs/mythbackend/mainserver.cpp
+@@ -1100,6 +1100,15 @@ void MainServer::customEvent(QEvent *e)
+             return;
+         }
+ 
++        if (me->Message() == "PID_NOTFOUND")
++        {
++            // A pid has been requested that is no longer being broadcast
++            // Ask the scheduler to perform a channel scan when idle
++            if (m_sched)
++                m_sched->EnableScanWhenIdle();
++            return;
++        }
++
+         if (me->Message() == "CLEAR_SETTINGS_CACHE")
+             gCoreContext->ClearSettingsCache();
+ 
+diff --git a/mythtv/programs/mythbackend/scheduler.cpp b/mythtv/programs/mythbackend/scheduler.cpp
+index 940e292..4b247ec 100644
+--- a/mythtv/programs/mythbackend/scheduler.cpp
++++ b/mythtv/programs/mythbackend/scheduler.cpp
+@@ -70,6 +70,7 @@ Scheduler::Scheduler(bool runthread, QMap<int, EncoderLink *> *tvList,
+     resetIdleTime(false),
+     m_isShuttingDown(false),
+     error(0),
++    m_scanWhenIdle(false),
+     livetvTime(QDateTime()),
+     livetvpriority(0),
+     prefinputpri(0)
+@@ -95,6 +96,7 @@ Scheduler::Scheduler(bool runthread, QMap<int, EncoderLink *> *tvList,
+         return;
+     }
+ 
++    m_scanWhenIdle = 0 != gCoreContext->GetNumSetting("AutoChannelScan", 0);
+     fsInfoCacheFillTime = MythDate::current().addSecs(-1000);
+ 
+     if (doRun)
+@@ -157,6 +159,16 @@ void Scheduler::ResetIdleTime(void)
+     resetIdleTime_lock.unlock();
+ }
+ 
++void Scheduler::EnableScanWhenIdle(void)
++{
++    m_scanWhenIdle = true;
++
++    // For now just save dbase setting so the shutdown
++    // script can do the scan before really shutting down
++    // Eventually the scheduler will run the scan and reset m_scanWhenIdle
++    gCoreContext->SaveSetting("AutoChannelScan", 1);
++}
++
+ bool Scheduler::VerifyCards(void)
+ {
+     MSqlQuery query(MSqlQuery::InitCon());
+diff --git a/mythtv/programs/mythbackend/scheduler.h b/mythtv/programs/mythbackend/scheduler.h
+index c40295b..6e0ae8c 100644
+--- a/mythtv/programs/mythbackend/scheduler.h
++++ b/mythtv/programs/mythbackend/scheduler.h
+@@ -86,6 +86,7 @@ class Scheduler : public MThread, public MythScheduler
+     void EnableScheduling(void) { schedulingEnabled = true; }
+     void GetNextLiveTVDir(uint cardid);
+     void ResetIdleTime(void);
++    void EnableScanWhenIdle();
+ 
+     bool WasStartedAutomatically();
+ 
+@@ -237,6 +238,7 @@ class Scheduler : public MThread, public MythScheduler
+     QMap<QString, FileSystemInfo> fsInfoCache;
+ 
+     int error;
++    bool m_scanWhenIdle;
+ 
+     QSet<QString> sysEvents[4];
+ 
+-- 
+1.7.9.5
+

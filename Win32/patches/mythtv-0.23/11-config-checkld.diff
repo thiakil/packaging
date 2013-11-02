@@ -1,0 +1,13 @@
+diff --git mythtv/configure mythtv/configure
+index bb8f681..b263ddd 100755
+--- mythtv/configure
++++ mythtv/configure
+@@ -761,7 +761,7 @@ check_ld(){
+         test "${f}" = "${f#-l}" && flags="$flags $f" || libs="$libs $f"
+     done
+     check_cc $($filter_cflags $flags) || return
+-    check_cmd $ld $LDFLAGS $flags -o $TMPE $TMPO $extralibs $libs
++    check_cmd $ld $LDFLAGS $flags -o $TMPE $TMPO $libs $extralibs
+ }
+ 
+ check_cppflags(){

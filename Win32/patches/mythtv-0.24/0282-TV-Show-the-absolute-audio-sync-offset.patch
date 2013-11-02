@@ -1,0 +1,61 @@
+From 5e5ae52a3d23ba3c71435d6d3d4a1ca5f85f4308 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 11 Sep 2013 17:53:25 +0100
+Subject: [PATCH 282/285] TV: Show the absolute audio sync offset
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/tv_play.cpp |   17 ++++++-----------
+ 1 file changed, 6 insertions(+), 11 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/tv_play.cpp b/mythtv/libs/libmythtv/tv_play.cpp
+index efc77fc..6de1094 100644
+--- a/mythtv/libs/libmythtv/tv_play.cpp
++++ b/mythtv/libs/libmythtv/tv_play.cpp
+@@ -8005,37 +8005,32 @@ void TV::ChangeAudioSync(PlayerContext *ctx, int dir, bool allowEdit)
+ 
+     if (dir == 1000000)
+     {
+-        newval = ctx->player->ResyncAudioTimecodeOffset() -
+-                 audiosyncBaseline;
++        newval = ctx->player->ResyncAudioTimecodeOffset();
+         audiosyncBaseline = ctx->player->GetAudioTimecodeOffset();
+     }
+     else if (dir == -1000000)
+     {
+-        newval = ctx->player->ResetAudioTimecodeOffset() -
+-                 audiosyncBaseline;
++        newval = ctx->player->ResetAudioTimecodeOffset();
+         audiosyncBaseline = ctx->player->GetAudioTimecodeOffset();
+     }
+     else
+     {
+-        newval = ctx->player->AdjustAudioTimecodeOffset(dir*10) -
+-                 audiosyncBaseline;
++        newval = ctx->player->AdjustAudioTimecodeOffset(dir*10);
+     }
++
++    int val = (int)(newval - audiosyncBaseline);
+     ctx->UnlockDeletePlayer(__FILE__, __LINE__);
+ 
+     if (!browsehelper->IsBrowsing())
+     {
+         QString text;
+-        int val = (int)newval;
+         if (dir == 1000000 || dir == -1000000)
+-        {
+             text = tr("Audio Resync");
+-            val = 0;
+-        }
+         else
+             text = tr("Audio Sync");
+ 
+         UpdateOSDStatus(ctx, tr("Adjust Audio Sync"), text,
+-                        QString::number(val),
++                        QString::number(newval),
+                         kOSDFunctionalType_AudioSyncAdjust,
+                         "ms", (val/2) + 500, kOSDTimeout_Med);
+         SetUpdateOSDPosition(false);
+-- 
+1.7.9.5
+

@@ -1,0 +1,258 @@
+From 21962259fd00ebfe47a899f959b606e381c3bf98 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 27 Feb 2012 15:27:26 +0100
+Subject: [PATCH 095/285] MHEG: Serialise accesses to the MHEG engine
+
+Fix race conditions in the MHEG engine that can occur when delivering
+asynchronous engine events during restart and stream start/stop.
+
+Fix race conditions in the DSM carousel which can result in page loading
+timeouts.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mhi.cpp |   74 ++++++++++++++++++++---------------------
+ 1 file changed, 37 insertions(+), 37 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mhi.cpp b/mythtv/libs/libmythtv/mhi.cpp
+index 032796d..ee3beb5 100644
+--- a/mythtv/libs/libmythtv/mhi.cpp
++++ b/mythtv/libs/libmythtv/mhi.cpp
+@@ -53,13 +53,15 @@ class MHIImageData
+ // Special value for the NetworkBootInfo version.  Real values are a byte.
+ #define NBI_VERSION_UNSET       257
+ 
++static pthread_t kNullThread;
+ MHIContext::MHIContext(InteractiveTV *parent)
+-    : m_parent(parent),     m_dsmcc(NULL),
++    : m_parent(parent),     m_dsmcc(new Dsmcc()),
+       m_keyProfile(0),
+-      m_engine(NULL),       m_stop(false),
+-      m_stopped(false),     m_updated(false),
++      m_engine(MHCreateEngine(this)), m_stop(false),
++      m_stopped(true),      m_updated(false),
+       m_displayWidth(StdDisplayWidth), m_displayHeight(StdDisplayHeight),
+-      m_face_loaded(false), m_currentChannel(-1), m_currentStream(-1),
++      m_face_loaded(false), m_engineThread(kNullThread),
++      m_currentChannel(-1), m_currentStream(-1),
+       m_isLive(false),      m_currentCard(0),
+       m_audioTag(-1),       m_videoTag(-1),
+       m_lastNbiVersion(NBI_VERSION_UNSET),
+@@ -126,6 +128,7 @@ MHIContext::~MHIContext()
+     ClearQueue();
+ }
+ 
++// NB caller must hold m_display_lock
+ void MHIContext::ClearDisplay(void)
+ {
+     list<MHIImageData*>::iterator it = m_display.begin();
+@@ -135,6 +138,7 @@ void MHIContext::ClearDisplay(void)
+     m_videoDisplayRect = QRect();
+ }
+ 
++// NB caller must hold m_dsmccLock
+ void MHIContext::ClearQueue(void)
+ {
+     MythDeque<DSMCCPacket*>::iterator it = m_dsmccQueue.begin();
+@@ -146,17 +150,18 @@ void MHIContext::ClearQueue(void)
+ // Ask the engine to stop and block until it has.
+ void MHIContext::StopEngine()
+ {
+-    if (m_engine)
++    // m_stop must be set outside of m_engineLock because the MHEG engine
++    // can run forever and calls CheckStop without releasing m_engineLock
++    m_stop = true;
++    QMutexLocker locker(&m_engineLock);
++    while (!m_stopped)
+     {
+-        while (!m_stopped)
+-        {
+-            m_stop = true;
+-            {QMutexLocker locker(&m_engineLock);
+-            m_engine_wait.wakeAll();}
+-            usleep(1000);
+-        }
+-        pthread_join(m_engineThread, NULL);
++        m_engine_wait.wakeAll();
++        locker.unlock();
++        usleep(1000);
++        locker.relock();
+     }
++    pthread_join(m_engineThread, NULL);
+ }
+ 
+ 
+@@ -181,8 +186,6 @@ void MHIContext::Restart(uint chanid, uint cardid, bool isLive)
+         // Leave the MHEG engine running but restart the DSMCC carousel.
+         // This is a bit of a mess but it's the only way to be able to
+         // select streams from a different channel.
+-        if (!m_dsmcc)
+-            m_dsmcc = new Dsmcc();
+         {
+             QMutexLocker locker(&m_dsmccLock);
+             if (tuneinfo & kTuneCarReset)
+@@ -191,7 +194,10 @@ void MHIContext::Restart(uint chanid, uint cardid, bool isLive)
+         }
+ 
+         if (tuneinfo & (kTuneCarReset|kTuneCarId))
++        {
++            QMutexLocker locker(&m_engineLock);
+             m_engine->EngineEvent(10); // NonDestructiveTuneOK
++        }
+     }
+     else
+     {
+@@ -200,9 +206,6 @@ void MHIContext::Restart(uint chanid, uint cardid, bool isLive)
+         m_audioTag = -1;
+         m_videoTag = -1;
+ 
+-        if (!m_dsmcc)
+-            m_dsmcc = new Dsmcc();
+-
+         {
+             QMutexLocker locker(&m_dsmccLock);
+             m_dsmcc->Reset();
+@@ -214,9 +217,6 @@ void MHIContext::Restart(uint chanid, uint cardid, bool isLive)
+             m_keyQueue.clear();
+         }
+ 
+-        if (!m_engine)
+-            m_engine = MHCreateEngine(this);
+-
+         m_engine->SetBooting();
+         ClearDisplay();
+         m_updated = true;
+@@ -242,6 +242,7 @@ void *MHIContext::StartMHEGEngine(void *param)
+ 
+ void MHIContext::RunMHEGEngine(void)
+ {
++    QMutexLocker locker(&m_engineLock);
+     while (!m_stop)
+     {
+         int toWait;
+@@ -268,7 +269,6 @@ void MHIContext::RunMHEGEngine(void)
+         if (toWait > 1000 || toWait <= 0)
+             toWait = 1000;
+ 
+-        QMutexLocker locker(&m_engineLock);
+         m_engine_wait.wait(&m_engineLock, toWait);
+     }
+ }
+@@ -279,11 +279,8 @@ void MHIContext::ProcessDSMCCQueue(void)
+     DSMCCPacket *packet = NULL;
+     do
+     {
+-        {
+-            QMutexLocker locker(&m_dsmccLock);
+-            packet = m_dsmccQueue.dequeue();
+-        }
+-
++        QMutexLocker locker(&m_dsmccLock);
++        packet = m_dsmccQueue.dequeue();
+         if (packet)
+         {
+             m_dsmcc->ProcessSection(
+@@ -310,11 +307,10 @@ void MHIContext::QueueDSMCCPacket(
+         return;
+ 
+     memcpy(dataCopy, data, length*sizeof(unsigned char));
+-    {QMutexLocker locker(&m_dsmccLock);
++    QMutexLocker locker(&m_dsmccLock);
+     m_dsmccQueue.enqueue(new DSMCCPacket(dataCopy,     length,
+                                          componentTag, carouselId,
+-                                         dataBroadcastId));}
+-    QMutexLocker locker(&m_engineLock);
++                                         dataBroadcastId));
+     m_engine_wait.wakeAll();
+ }
+ 
+@@ -335,12 +331,10 @@ void MHIContext::SetNetBootInfo(const unsigned char *data, uint length)
+     if (m_lastNbiVersion == NBI_VERSION_UNSET)
+         m_lastNbiVersion = data[0];
+     else
+-    {
+-        QMutexLocker locker(&m_engineLock);
+         m_engine_wait.wakeAll();
+-    }
+ }
+ 
++// Called only by m_engineThread
+ void MHIContext::NetworkBootRequested(void)
+ {
+     QMutexLocker locker(&m_dsmccLock);
+@@ -352,8 +346,10 @@ void MHIContext::NetworkBootRequested(void)
+         case 1:
+             m_dsmcc->Reset();
+             m_engine->SetBooting();
++            locker.unlock();
++            {QMutexLocker locker2(&m_display_lock);
+             ClearDisplay();
+-            m_updated = true;
++            m_updated = true;}
+             break;
+         case 2:
+             m_engine->EngineEvent(9); // NetworkBootInfo EngineEvent
+@@ -378,11 +374,13 @@ bool MHIContext::CheckCarouselObject(QString objectPath)
+ 
+     QStringList path = objectPath.split(QChar('/'), QString::SkipEmptyParts);
+     QByteArray result; // Unused
++    QMutexLocker locker(&m_dsmccLock);
+     int res = m_dsmcc->GetDSMCCObject(path, result);
+     return res == 0; // It's available now.
+ }
+ 
+ // Called by the engine to request data from the carousel.
++// Caller must hold m_engineLock
+ bool MHIContext::GetCarouselData(QString objectPath, QByteArray &result)
+ {
+     bool const isIC = objectPath.startsWith("http:") || objectPath.startsWith("https:");
+@@ -418,6 +416,7 @@ bool MHIContext::GetCarouselData(QString objectPath, QByteArray &result)
+         }
+         else
+         {
++            QMutexLocker locker(&m_dsmccLock);
+             int res = m_dsmcc->GetDSMCCObject(path, result);
+             if (res == 0)
+             {
+@@ -441,7 +440,6 @@ bool MHIContext::GetCarouselData(QString objectPath, QByteArray &result)
+         // some more packets.  We should eventually find out if this item is
+         // present.
+         ProcessDSMCCQueue();
+-        QMutexLocker locker(&m_engineLock);
+         m_engine_wait.wait(&m_engineLock, 300);
+     }
+     return false; // Stop has been set.  Say the object isn't present.
+@@ -552,13 +550,14 @@ bool MHIContext::OfferKey(QString key)
+             <<":"<<m_keyQueue.size());
+     { QMutexLocker locker(&m_keyLock);
+     m_keyQueue.enqueue(action);}
+-    QMutexLocker locker2(&m_engineLock);
+     m_engine_wait.wakeAll();
+     return true;
+ }
+ 
++// Called from MythPlayer::VideoStart and MythPlayer::ReinitOSD
+ void MHIContext::Reinit(const QRect &display)
+ {
++    QMutexLocker locker(&m_display_lock);
+     m_displayWidth = display.width();
+     m_displayHeight = display.height();
+     m_xScale = (float)m_displayWidth / (float)MHIContext::StdDisplayWidth;
+@@ -936,12 +935,13 @@ void MHIContext::EndStream()
+ // Callback from MythPlayer when a stream starts or stops
+ bool MHIContext::StreamStarted(bool bStarted)
+ {
+-    if (!m_engine || !m_notify)
++    if (!m_notify)
+         return false;
+ 
+     VERBOSE(VB_MHEG, QString("[mhi] Stream 0x%1 %2")
+         .arg((quintptr)m_notify,0,16).arg(bStarted ? "started" : "stopped"));
+ 
++    QMutexLocker locker(&m_engineLock);
+     m_engine->StreamStarted(m_notify, bStarted);
+     if (!bStarted)
+         m_notify = 0;
+-- 
+1.7.9.5
+

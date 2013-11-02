@@ -1,0 +1,291 @@
+From 367ae955857554792e268801a4399748e031d556 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 10 Jun 2012 21:11:37 +0200
+Subject: [PATCH 125/285] themes: Add a menu to play selected internet radio
+ streams
+
+A hack to enable playing selected UK radio streams with mplayer.
+The stream is played in the background and is suspended when music
+or TV is started.  Use the 'Stop Playing' button to kill mplayer.
+
+Add your preferences to mythtv/themes/defaultmenu/inetradio.xml
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/scripts/mythradio          |   10 ++
+ mythtv/programs/scripts/scripts.pro        |    2 +
+ mythtv/themes/classic/mainmenu.xml         |   16 ++-
+ mythtv/themes/defaultmenu/inetradio.xml    |  157 ++++++++++++++++++++++++++++
+ mythtv/themes/defaultmenu/library.xml      |    8 ++
+ mythtv/themes/mediacentermenu/mainmenu.xml |    8 ++
+ 6 files changed, 197 insertions(+), 4 deletions(-)
+ create mode 100755 mythtv/programs/scripts/mythradio
+ create mode 100644 mythtv/themes/defaultmenu/inetradio.xml
+
+diff --git a/mythtv/programs/scripts/mythradio b/mythtv/programs/scripts/mythradio
+new file mode 100755
+index 0000000..e5700d5
+--- /dev/null
++++ b/mythtv/programs/scripts/mythradio
+@@ -0,0 +1,10 @@
++#!/bin/sh
++set -e
++[ -n "$DEBUG" ] && set -x
++readonly name=$0
++
++Log() { echo >&2 "`date '+%H:%M:%S.%N'` $name: $*" ; }
++
++Log "$*"
++pkill mplayer || true
++[ -n "$1" ] && mplayer -nolirc -quiet -msglevel all=1 -nostop-xscreensaver "$*" &
+diff --git a/mythtv/programs/scripts/scripts.pro b/mythtv/programs/scripts/scripts.pro
+index de39cc4..0b18b35 100644
+--- a/mythtv/programs/scripts/scripts.pro
++++ b/mythtv/programs/scripts/scripts.pro
+@@ -10,6 +10,8 @@ win32:QMAKE_COPY_DIR = sh ./cpsimple
+ 
+ installscripts.path = $${PREFIX}/share/mythtv
+ installscripts.files = database/*
++installscripts.files += mythradio
++QMAKE_INSTALL_FILE = $${QMAKE_INSTALL_PROGRAM}
+ 
+ installinternetscripts.path = $${PREFIX}/share/mythtv
+ installinternetscripts.files = internetcontent metadata
+diff --git a/mythtv/themes/classic/mainmenu.xml b/mythtv/themes/classic/mainmenu.xml
+index 5bae281..ed62389 100644
+--- a/mythtv/themes/classic/mainmenu.xml
++++ b/mythtv/themes/classic/mainmenu.xml
+@@ -8,10 +8,11 @@
+     </button>
+ 
+     <button>
+-        <type>NET_VIDEO</type>
+-        <text>Internet Video</text>
+-        <action>MENU netvisionmenu.xml</action>
+-        <depends>mythnetvision</depends>
++        <type>MUSIC_RADIO</type>
++        <text>Internet Radio</text>
++        <description>Internet Radio</description>
++        <action>MENU inetradio.xml</action>
++        <depends>mythmusic</depends>
+     </button>
+ 
+     <button>
+@@ -78,6 +79,13 @@
+     </button>
+ 
+     <button>
++        <type>NET_VIDEO</type>
++        <text>Internet Video</text>
++        <action>MENU netvisionmenu.xml</action>
++        <depends>mythnetvision</depends>
++    </button>
++
++    <button>
+         <type>RECIPE</type>
+         <text>Recipes</text>
+         <action>PLUGIN mythRecipe</action>
+diff --git a/mythtv/themes/defaultmenu/inetradio.xml b/mythtv/themes/defaultmenu/inetradio.xml
+new file mode 100644
+index 0000000..6aeb0ec
+--- /dev/null
++++ b/mythtv/themes/defaultmenu/inetradio.xml
+@@ -0,0 +1,157 @@
++<mythmenu name="INETRADIO">
++    <button>
++        <type>SHUTDOWN</type>
++        <text>Stop Playing</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio</action>
++    </button>
++
++
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>Absolute Radio</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://network.absoluteradio.co.uk/core/audio/ogg/live.pls?service=vrbb"</action>
++    </button>
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>Absolute Classic Rock</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://network.absoluteradio.co.uk/core/audio/ogg/live.pls?service=vcbb"</action>
++    </button>
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>Absolute Radio 60's</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://mp3-a6-192.as34763.net/listen.pls"</action>
++    </button>
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>Absolute Radio 70's</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://mp3-a7-192.as34763.net/listen.pls"</action>
++    </button>
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>Absolute Radio 80's</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://network.absoluteradio.co.uk/core/audio/ogg/live.pls?service=a8bb"</action>
++    </button>
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>Absolute Radio 90's</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://mp3-a9-128.as34763.net/listen.pls"</action>
++    </button>
++
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>The Arrow</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://mediasrv-the.musicradio.com/Arrow"</action>
++    </button>
++
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>Capital FM</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://media-ice.musicradio.com:80/Capital"</action>
++    </button>
++
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>Collines FM</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://www.tv-radio.com/station/collines/collines.m3u"</action>
++    </button>
++
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>Gold</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://media-ice.musicradio.com:80/GoldMP3"</action>
++    </button>
++
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>Planet Rock</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://tx.sharp-stream.com/tune.php?c=planetrock"</action>
++    </button>
++
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>Radio Caroline</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://sc6.radiocaroline.net:8040/listen.pls"</action>
++    </button>
++
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>Soma Sonic Universe</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://somafm.com/sonicuniverse.pls"</action>
++    </button>
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>Soma Groove Salad</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://somafm.com/groovesalad.pls"</action>
++    </button>
++
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>Southend Radio</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://madison.wm-live.abacast.com/southend-southend-64"</action>
++    </button>
++
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>Total Rock</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://icecast.playlouder.com:8000/totalrock"</action>
++    </button>
++
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>BBC Radio 1</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://www.bbc.co.uk/radio/listen/live/r1_aaclca.pls"</action>
++    </button>
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>BBC Radio 2</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://www.bbc.co.uk/radio/listen/live/r2_aaclca.pls"</action>
++    </button>
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>BBC Radio 3</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://www.bbc.co.uk/radio/listen/live/r3_aaclca.pls"</action>
++    </button>
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>BBC Radio 4</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://www.bbc.co.uk/radio/listen/live/r4_aaclca.pls"</action>
++    </button>
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>BBC Radio 4 Extra</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://www.bbc.co.uk/radio/listen/live/r4x_aaclca.pls"</action>
++    </button>
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>BBC Radio 5 Live</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://www.bbc.co.uk/radio/listen/live/r5l_aaclca.pls"</action>
++    </button>
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>BBC Radio 6 Music</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://www.bbc.co.uk/radio/listen/live/r6_aaclca.pls"</action>
++    </button>
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>BBC London</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://wmlive.bbc.co.uk/wms/england/lrlondon"</action>
++    </button>
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>BBC Cambridgeshire</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://wmlive.bbc.co.uk/wms/england/lrcambridgeshire"</action>
++    </button>
++    <button>
++        <type>MUSIC_PLAY</type>
++        <text>BBC Essex</text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio "http://wmlive.bbc.co.uk/wms/england/lressex"</action>
++    </button>
++
++
++    <!--button>
++        <type>MUSIC_PLAY</type>
++        <text></text>
++        <action>EXEC ${MYTHTVDIR:-/usr}/share/mythtv/mythradio ""</action>
++    </button-->
++
++</mythmenu>
+diff --git a/mythtv/themes/defaultmenu/library.xml b/mythtv/themes/defaultmenu/library.xml
+index e4b9f1e..5e129cc 100644
+--- a/mythtv/themes/defaultmenu/library.xml
++++ b/mythtv/themes/defaultmenu/library.xml
+@@ -41,6 +41,14 @@
+     </button>
+ 
+     <button>
++        <type>MUSIC_RADIO</type>
++        <text>Internet Radio</text>
++        <description>Internet Radio</description>
++        <action>MENU inetradio.xml</action>
++        <depends>mythmusic</depends>
++    </button>
++
++    <button>
+         <type>STREAM</type>
+         <text>Play Online Streams</text>
+         <description></description>
+diff --git a/mythtv/themes/mediacentermenu/mainmenu.xml b/mythtv/themes/mediacentermenu/mainmenu.xml
+index e0a6288..f94e257 100644
+--- a/mythtv/themes/mediacentermenu/mainmenu.xml
++++ b/mythtv/themes/mediacentermenu/mainmenu.xml
+@@ -48,6 +48,14 @@
+     </button>
+ 
+     <button>
++        <type>MUSIC_RADIO</type>
++        <text>Internet Radio</text>
++        <description>Internet Radio</description>
++        <action>MENU inetradio.xml</action>
++        <depends>mythmusic</depends>
++    </button>
++
++    <button>
+         <type>STREAM</type>
+         <text>Watch Online Streams</text>
+         <description></description>
+-- 
+1.7.9.5
+

@@ -1,0 +1,32 @@
+From d798010fc5e56412138ad00d589d46a901ed1d11 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 19 Sep 2013 19:38:30 +0100
+Subject: [PATCH 183/202] FE: Fix another set but not used warning
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythfrontend/titledialog.cpp |    2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/mythtv/programs/mythfrontend/titledialog.cpp b/mythtv/programs/mythfrontend/titledialog.cpp
+index a872bcf..2a12386 100644
+--- a/mythtv/programs/mythfrontend/titledialog.cpp
++++ b/mythtv/programs/mythfrontend/titledialog.cpp
+@@ -32,14 +32,12 @@ TitleDialog::TitleDialog(MythScreenStack *lparent, QString lname,
+     //  Find the longest title and set some defaults
+     //
+ 
+-    uint longest = 0;
+     uint longest_time = 0;
+ 
+     for(int i = 0; i < m_dvdTitles->size(); i++)
+     {
+         if(m_dvdTitles->at(i)->getPlayLength() >= longest_time)
+         {
+-            longest = i;
+             longest_time = m_dvdTitles->at(i)->getPlayLength();
+             m_currentTitle = m_dvdTitles->at(i);
+         }
+-- 
+1.7.9.5
+

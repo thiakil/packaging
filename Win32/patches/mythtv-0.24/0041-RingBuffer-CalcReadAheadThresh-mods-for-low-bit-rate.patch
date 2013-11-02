@@ -1,0 +1,109 @@
+From fc97c53415521f6e2f418839b378c62227c11050 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 3 Jun 2011 15:08:57 +0200
+Subject: [PATCH 041/285] RingBuffer: CalcReadAheadThresh mods for low bit
+ rate (radio) streams
+
+The existing readahead block size is too large for 64/128 kBps audio streams
+and can cause audio underruns.
+
+Make WaitFailAvail return the bytes available if less than that requested
+for low bit rate streams (where fill_min is < 32kB).
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/RingBuffer.cpp |   53 ++++++++++++++++++++++------------
+ 1 file changed, 35 insertions(+), 18 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/RingBuffer.cpp b/mythtv/libs/libmythtv/RingBuffer.cpp
+index 42f99cb..731dc09 100644
+--- a/mythtv/libs/libmythtv/RingBuffer.cpp
++++ b/mythtv/libs/libmythtv/RingBuffer.cpp
+@@ -807,33 +807,47 @@ void RingBuffer::CalcReadAheadThresh(void)
+     // loop without sleeping if the buffered data is less than this
+     fill_threshold = kBufferSize / 8;
+ 
+-    const uint KB32  =  32*1024;
+-    const uint KB64  =  64*1024;
+-    const uint KB128 = 128*1024;
+-    const uint KB256 = 256*1024;
+-    const uint KB512 = 512*1024;
++    const int KB1   =   1*1024;
++    const int KB2   =   2*KB1;
++    const int KB4   =   4*KB1;
++    const int KB8   =   8*KB1;
++    const int KB16  =  16*KB1;
++    const int KB32  =  32*KB1;
++    const int KB64  =  64*KB1;
++    const int KB128 = 128*KB1;
++    const int KB256 = 256*KB1;
++    const int KB512 = 512*KB1;
+ 
+     estbitrate     = (uint) max(abs(rawbitrate * playspeed),
+                                 0.5f * rawbitrate);
+     estbitrate     = min(rawbitrate * 3, estbitrate);
+-    int rbs        = (estbitrate > 2500)  ? KB64  : KB32;
+-    rbs            = (estbitrate > 5000)  ? KB128 : rbs;
+-    rbs            = (estbitrate > 9000)  ? KB256 : rbs;
+-    rbs            = (estbitrate > 18000) ? KB512 : rbs;
+-    readblocksize  = max(rbs,readblocksize);
++
++    int const rbs = estbitrate > 18000 ? KB512 :
++                    estbitrate > 9000  ? KB256 :
++                    estbitrate > 5000  ? KB128 :
++                    estbitrate > 2500  ? KB64 :
++                    estbitrate > 1000  ? KB32 :
++                    estbitrate > 500   ? KB16 :
++                    estbitrate > 250   ? KB8 :
++                    estbitrate > 125   ? KB4 :
++                                         KB2;
++    if (rbs < CHUNK)
++        readblocksize = rbs;
++    else
++        readblocksize = max(rbs,readblocksize);
+ 
+     // minumum seconds of buffering before allowing read
+-    float secs_min = 0.25;
++    float const secs_min = 0.25f;
+     // set the minimum buffering before allowing ffmpeg read
+-    fill_min        = (uint) ((estbitrate * secs_min) * 0.125f);
+-    // make this a multiple of ffmpeg block size..
+-    fill_min        = ((fill_min / KB32) + 1) * KB32;
++    fill_min = (uint) (estbitrate * ((KB1 / 8) * secs_min));
++    if (fill_min > CHUNK)
++        fill_min = CHUNK;
+ 
+     VERBOSE(VB_FILE, LOC +
+             QString("CalcReadAheadThresh(%1 Kb)\n\t\t\t -> "
+                     "threshhold(%2 KB) min read(%3 KB) blk size(%4 KB)")
+-            .arg(estbitrate).arg(fill_threshold/1024)
+-            .arg(fill_min/1024).arg(readblocksize/1024));
++            .arg(estbitrate).arg(fill_threshold/KB1)
++            .arg(fill_min/KB1).arg(readblocksize/KB1));
+ }
+ 
+ bool RingBuffer::IsNearEnd(double fps, uint vvf) const
+@@ -1187,7 +1201,7 @@ void RingBuffer::run(void)
+                     (now.tv_usec - lastread.tv_usec) / 1000;
+                 readtimeavg = (readtimeavg * 9 + readinterval) / 10;
+ 
+-                if (readtimeavg < 150 && (uint)readblocksize < (kBufferSize>>2))
++                if (readtimeavg < 150 && (uint)readblocksize < (kBufferSize>>2) && readblocksize >= CHUNK)
+                 {
+                     int old_block_size = readblocksize;
+                     readblocksize = 3 * readblocksize / 2;
+@@ -1446,7 +1460,10 @@ bool RingBuffer::WaitForAvail(int count)
+         if (avail < count)
+         {
+             int elapsed = t.elapsed();
+-            if  (((elapsed > 250)  && (elapsed < 500))  ||
++            // Return avail for low bitrate audio streams to avoid underrun
++            if (elapsed >= 500 && fill_min < CHUNK && avail >= fill_min)
++                count = avail;
++            else if  (((elapsed > 250)  && (elapsed < 500))  ||
+                  ((elapsed > 500)  && (elapsed < 750))  ||
+                  ((elapsed > 1000) && (elapsed < 1250)) ||
+                  ((elapsed > 2000) && (elapsed < 2250)) ||
+-- 
+1.7.9.5
+

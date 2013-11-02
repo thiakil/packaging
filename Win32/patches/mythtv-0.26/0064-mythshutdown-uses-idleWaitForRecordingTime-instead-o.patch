@@ -1,0 +1,32 @@
+From 169c59166faae53a3893f7ca5f9eedae59c1ea0a Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 12 Apr 2011 19:40:38 +0200
+Subject: [PATCH 064/227] mythshutdown uses idleWaitForRecordingTime instead
+ of 15 mins for min shutdown
+
+This permits systems to powerdown to ACPI state S3 (Suspend to RAM) more
+frequently and save power and make less noise.
+---
+ mythtv/programs/mythshutdown/main.cpp |    6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/programs/mythshutdown/main.cpp b/mythtv/programs/mythshutdown/main.cpp
+index 3988580..fb5a1a1 100644
+--- a/mythtv/programs/mythshutdown/main.cpp
++++ b/mythtv/programs/mythshutdown/main.cpp
+@@ -600,8 +600,10 @@ static int shutdown()
+ 
+     if (dtWakeupTime.isValid())
+     {
+-        // dont't shutdown if we are within 15 mins of the next wakeup time
+-        if (dtCurrent.secsTo(dtWakeupTime) > 15 * 60)
++        // dont't shutdown if we are within idleWait mins of the next wakeup time
++        int idleWaitForRecordingTime =
++                    gCoreContext->GetNumSetting("idleWaitForRecordingTime", 15);
++        if (dtCurrent.secsTo(dtWakeupTime) > idleWaitForRecordingTime * 60)
+         {
+             QString nvramCommand =
+                 gCoreContext->GetSetting("MythShutdownNvramCmd",
+-- 
+1.7.9.5
+

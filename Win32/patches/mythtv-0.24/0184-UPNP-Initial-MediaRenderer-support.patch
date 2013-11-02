@@ -1,0 +1,2803 @@
+From 15e0041b7ab8ad232193db51423cc627b2422f5a Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 8 May 2013 19:01:10 +0100
+Subject: [PATCH 184/285] UPNP: Initial MediaRenderer support
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythupnp/AVTCTL_scpd.xml        |  774 +++++++++++++++++++
+ mythtv/libs/libmythupnp/RCTL_scpd.xml          |  952 ++++++++++++++++++++++++
+ mythtv/libs/libmythupnp/httprequest.cpp        |    1 +
+ mythtv/libs/libmythupnp/libmythupnp.pro        |    6 +
+ mythtv/libs/libmythupnp/upnpavt.cpp            |  550 ++++++++++++++
+ mythtv/libs/libmythupnp/upnpavt.h              |   40 +
+ mythtv/libs/libmythupnp/upnprctl.cpp           |  226 ++++++
+ mythtv/libs/libmythupnp/upnprctl.h             |   37 +
+ mythtv/libs/libs.pro                           |    2 +-
+ mythtv/programs/mythbackend/mediaserver.cpp    |    4 +
+ mythtv/programs/mythfrontend/main.cpp          |   15 +
+ mythtv/programs/mythfrontend/mediarenderer.cpp |   16 +-
+ 12 files changed, 2618 insertions(+), 5 deletions(-)
+ create mode 100644 mythtv/libs/libmythupnp/AVTCTL_scpd.xml
+ create mode 100644 mythtv/libs/libmythupnp/RCTL_scpd.xml
+ create mode 100644 mythtv/libs/libmythupnp/upnpavt.cpp
+ create mode 100644 mythtv/libs/libmythupnp/upnpavt.h
+ create mode 100644 mythtv/libs/libmythupnp/upnprctl.cpp
+ create mode 100644 mythtv/libs/libmythupnp/upnprctl.h
+
+diff --git a/mythtv/libs/libmythupnp/AVTCTL_scpd.xml b/mythtv/libs/libmythupnp/AVTCTL_scpd.xml
+new file mode 100644
+index 0000000..a459e1e
+--- /dev/null
++++ b/mythtv/libs/libmythupnp/AVTCTL_scpd.xml
+@@ -0,0 +1,774 @@
++<scpd>
++	<serviceStateTable>
++		<stateVariable>
++			<name>TransportState</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++			<allowedValueList>
++				<allowedValue>STOPPED</allowedValue>
++				<allowedValue>PLAYING</allowedValue>
++			</allowedValueList>
++		</stateVariable>
++
++		<stateVariable>
++			<name>TransportStatus</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++			<allowedValueList>
++				<allowedValue>OK</allowedValue>
++				<allowedValue>ERROR_OCCURRED</allowedValue>
++			</allowedValueList>
++		</stateVariable>
++
++		<stateVariable>
++			<name>CurrentMediaCategory</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++			<allowedValueList>
++				<allowedValue>NO_MEDIA</allowedValue>
++				<allowedValue>TRACK_AWARE</allowedValue>
++				<allowedValue>TRACK_UNAWARE</allowedValue>
++			</allowedValueList>
++		</stateVariable>
++
++		<stateVariable>
++			<name>PlaybackStorageMedium</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>RecordStorageMedium</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>PossiblePlaybackStorageMedia</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>PossibleRecordStorageMedia</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>CurrentPlayMode</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++			<allowedValueList>
++				<allowedValue>NORMAL</allowedValue>
++			</allowedValueList>
++			<defaultValue>NORMAL</defaultValue>
++		</stateVariable>
++
++		<stateVariable>
++			<name>TransportPlaySpeed</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++			<allowedValueList>
++				<allowedValue>1</allowedValue>
++			</allowedValueList>
++			<defaultValue>1</defaultValue>
++		</stateVariable>
++
++		<stateVariable>
++			<name>RecordMediumWriteStatus</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>CurrentRecordQualityMode</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>PossibleRecordQualityModes</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>NumberOfTracks</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>ui4</dataType>
++			<allowedValueRange>
++				<minimum>0</minimum>
++			</allowedValueRange>
++		</stateVariable>
++
++		<stateVariable>
++			<name>CurrentTrack</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>ui4</dataType>
++			<allowedValueRange>
++				<minimum>0</minimum>
++				<step>1</step>
++			</allowedValueRange>
++		</stateVariable>
++
++		<stateVariable>
++			<name>CurrentTrackDuration</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>CurrentMediaDuration</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>CurrentTrackMetaData</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>CurrentTrackURI</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>AVTransportURI</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>AVTransportURIMetaData</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>NextAVTransportURI</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>NextAVTransportURIMetaData</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>RelativeTimePosition</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>AbsoluteTimePosition</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>RelativeCounterPosition</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>i4</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>AbsoluteCounterPosition</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>i4</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>CurrentTransportActions</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>LastChange</name>
++			<sendEventsAttribute>yes</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>DRMState</name>
++			<sendEventsAttribute>yes</sendEventsAttribute>
++			<dataType>string</dataType>
++			<allowedValueList>
++				<allowedValue>OK</allowedValue>
++			</allowedValueList>
++			<defaultValue>UNKNOWN</defaultValue>
++		</stateVariable>
++
++		<stateVariable>
++			<name>A_ARG_TYPE_SeekMode</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++			<allowedValueList>
++				<allowedValue>TRACK_NR</allowedValue>
++			</allowedValueList>
++		</stateVariable>
++
++		<stateVariable>
++			<name>A_ARG_TYPE_SeekTarget</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>A_ARG_TYPE_InstanceID</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>ui4</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>A_ARG_TYPE_DeviceUDN</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>A_ARG_TYPE_ServiceType</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>A_ARG_TYPE_ServiceID</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>A_ARG_TYPE_StateVariableValuePairs</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>A_ARG_TYPE_StateVariableList</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++	</serviceStateTable>
++
++	<actionList>
++		<action>
++			<name>SetAVTransportURI</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentURI</name>
++					<direction>in</direction>
++					<relatedStateVariable>AVTransportURI</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentURIMetaData</name>
++					<direction>in</direction>
++					<relatedStateVariable>AVTransportURIMetaData</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<!--action>
++			<Optional/>
++			<name>SetNextAVTransportURI</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>NextURI</name>
++					<direction>in</direction>
++					<relatedStateVariable>NextAVTransportURI</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>NextURIMetaData</name>
++					<direction>in</direction>
++					<relatedStateVariable>NextAVTransportURIMetaData</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action-->
++
++		<action>
++			<name>GetMediaInfo</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>NrTracks</name>
++					<direction>out</direction>
++					<relatedStateVariable>NumberOfTracks</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>MediaDuration</name>
++					<direction>out</direction>
++					<relatedStateVariable>CurrentMediaDuration</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentURI</name>
++					<direction>out</direction>
++					<relatedStateVariable>AVTransportURI</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentURIMetaData</name>
++					<direction>out</direction>
++					<relatedStateVariable>AVTransportURIMetaData</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>NextURI</name>
++					<direction>out</direction>
++					<relatedStateVariable>NextAVTransportURI</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>NextURIMetaData</name>
++					<direction>out</direction>
++					<relatedStateVariable>NextAVTransportURIMetaData</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>PlayMedium</name>
++					<direction>out</direction>
++					<relatedStateVariable>PlaybackStorageMedium</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>RecordMedium</name>
++					<direction>out</direction>
++					<relatedStateVariable>RecordStorageMedium</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>WriteStatus</name>
++					<direction>out</direction>
++					<relatedStateVariable>RecordMediumWriteStatus</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<!--action>
++			<name>GetMediaInfo_Ext</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentType</name>
++					<direction>out</direction>
++					<relatedStateVariable>CurrentMediaCategory</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>NrTracks</name>
++					<direction>out</direction>
++					<relatedStateVariable>NumberOfTracks</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>MediaDuration</name>
++					<direction>out</direction>
++					<relatedStateVariable>CurrentMediaDuration</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentURI</name>
++					<direction>out</direction>
++					<relatedStateVariable>AVTransportURI</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentURIMetaData</name>
++					<direction>out</direction>
++					<relatedStateVariable>AVTransportURIMetaData</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>NextURI</name>
++					<direction>out</direction>
++					<relatedStateVariable>NextAVTransportURI</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>NextURIMetaData</name>
++					<direction>out</direction>
++					<relatedStateVariable>NextAVTransportURIMetaData</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>PlayMedium</name>
++					<direction>out</direction>
++					<relatedStateVariable>PlaybackStorageMedium</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>RecordMedium</name>
++					<direction>out</direction>
++					<relatedStateVariable>RecordStorageMedium</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>WriteStatus</name>
++					<direction>out</direction>
++					<relatedStateVariable>RecordMediumWriteStatus</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action-->
++
++		<action>
++			<name>GetTransportInfo</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentTransportState</name>
++					<direction>out</direction>
++					<relatedStateVariable>TransportState</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentTransportStatus</name>
++					<direction>out</direction>
++					<relatedStateVariable>TransportStatus</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentSpeed</name>
++					<direction>out</direction>
++					<relatedStateVariable>TransportPlaySpeed</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<name>GetPositionInfo</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>Track</name>
++					<direction>out</direction>
++					<relatedStateVariable>CurrentTrack</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>TrackDuration</name>
++					<direction>out</direction>
++					<relatedStateVariable>CurrentTrackDuration</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>TrackMetaData</name>
++					<direction>out</direction>
++					<relatedStateVariable>CurrentTrackMetaData</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>TrackURI</name>
++					<direction>out</direction>
++					<relatedStateVariable>CurrentTrackURI</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>RelTime</name>
++					<direction>out</direction>
++					<relatedStateVariable>RelativeTimePosition</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>AbsTime</name>
++					<direction>out</direction>
++					<relatedStateVariable>AbsoluteTimePosition</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>RelCount</name>
++					<direction>out</direction>
++					<relatedStateVariable>RelativeCounterPosition</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>AbsCount</name>
++					<direction>out</direction>
++					<relatedStateVariable>AbsoluteCounterPosition</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<name>GetDeviceCapabilities</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>PlayMedia</name>
++					<direction>out</direction>
++					<relatedStateVariable>PossiblePlaybackStorageMedia</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>RecMedia</name>
++					<direction>out</direction>
++					<relatedStateVariable>PossibleRecordStorageMedia</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>RecQualityModes</name>
++					<direction>out</direction>
++					<relatedStateVariable>PossibleRecordQualityModes</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<name>GetTransportSettings</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>PlayMode</name>
++					<direction>out</direction>
++					<relatedStateVariable>CurrentPlayMode</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>RecQualityMode</name>
++					<direction>out</direction>
++					<relatedStateVariable>CurrentRecordQualityMode</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<name>Stop</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<name>Play</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>Speed</name>
++					<direction>in</direction>
++					<relatedStateVariable>TransportPlaySpeed</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<!--action>
++			<Optional/>
++			<name>Pause</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action-->
++
++		<!--action>
++			<Optional/>
++			<name>Record</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action-->
++
++		<action>
++			<name>Seek</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>Unit</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_SeekMode</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>Target</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_SeekTarget</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<name>Next</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<name>Previous</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<!--action>
++			<Optional/>
++			<name>SetPlayMode</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>NewPlayMode</name>
++					<direction>in</direction>
++					<relatedStateVariable>CurrentPlayMode</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>SetRecordQualityMode</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>NewRecordQualityMode</name>
++					<direction>in</direction>
++					<relatedStateVariable>CurrentRecordQualityMode</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>GetCurrentTransportActions</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>Actions</name>
++					<direction>out</direction>
++					<relatedStateVariable>CurrentTransportActions</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>GetDRMState</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentDRMState</name>
++					<direction>out</direction>
++					<relatedStateVariable>DRMState</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>GetStateVariables</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>StateVariableList</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_StateVariableList</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>StateVariableValuePairs</name>
++					<direction>out</direction>
++					<relatedStateVariable>A_ARG_TYPE_StateVariableValuePairs</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>SetStateVariables</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>AVTransportUDN</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_DeviceUDN</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>ServiceType</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_ServiceType</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>ServiceId</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_ServiceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>StateVariableValuePairs</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_StateVariableValuePairs</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>StateVariableList</name>
++					<direction>out</direction>
++					<relatedStateVariable>A_ARG_TYPE_StateVariableList</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action-->
++	</actionList>
++</scpd>
+diff --git a/mythtv/libs/libmythupnp/RCTL_scpd.xml b/mythtv/libs/libmythupnp/RCTL_scpd.xml
+new file mode 100644
+index 0000000..26b7697
+--- /dev/null
++++ b/mythtv/libs/libmythupnp/RCTL_scpd.xml
+@@ -0,0 +1,952 @@
++<?xml version="1.0" encoding="utf-8"?>
++<scpd xmlns="urn:schemas-upnp-org:service-1-0">
++   <specVersion>
++      <major>1</major>
++      <minor>0</minor>
++   </specVersion>
++
++	<serviceStateTable>
++        <!--stateVariable sendEvents="no">
++             <name>A_ARG_TYPE_ProtocolInfo</name>
++             <dataType>string</dataType>
++        </stateVariable-->
++
++		<stateVariable>
++			<name>LastChange</name>
++			<sendEventsAttribute>yes</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>PresetNameList</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<!--stateVariable>
++			<Optional/>
++			<name>Brightness</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>ui2</dataType>
++			<allowedValueRange>
++				<minimum>0</minimum>
++				<step>1</step>
++			</allowedValueRange>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>Contrast</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>ui2</dataType>
++			<allowedValueRange>
++				<minimum>0</minimum>
++				<step>1</step>
++			</allowedValueRange>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>Sharpness</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>ui2</dataType>
++			<allowedValueRange>
++				<minimum>0</minimum>
++				<step>1</step>
++			</allowedValueRange>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>RedVideoGain</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>ui2</dataType>
++			<allowedValueRange>
++				<minimum>0</minimum>
++				<step>1</step>
++			</allowedValueRange>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>GreenVideoGain</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>ui2</dataType>
++			<allowedValueRange>
++				<minimum>0</minimum>
++				<step>1</step>
++			</allowedValueRange>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>BlueVideoGain</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>ui2</dataType>
++			<allowedValueRange>
++				<minimum>0</minimum>
++				<step>1</step>
++			</allowedValueRange>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>RedVideoBlackLevel</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>ui2</dataType>
++			<allowedValueRange>
++				<minimum>0</minimum>
++				<step>1</step>
++			</allowedValueRange>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>GreenVideoBlackLevel</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>ui2</dataType>
++			<allowedValueRange>
++				<minimum>0</minimum>
++				<step>1</step>
++			</allowedValueRange>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>BlueVideoBlackLevel</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>ui2</dataType>
++			<allowedValueRange>
++				<minimum>0</minimum>
++				<step>1</step>
++			</allowedValueRange>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>ColorTemperature</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>ui2</dataType>
++			<allowedValueRange>
++				<minimum>0</minimum>
++				<step>1</step>
++			</allowedValueRange>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>HorizontalKeystone</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>i2</dataType>
++			<allowedValueRange>
++				<step>1</step>
++			</allowedValueRange>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>VerticalKeystone</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>i2</dataType>
++			<allowedValueRange>
++				<step>1</step>
++			</allowedValueRange>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>Mute</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>boolean</dataType>
++		</stateVariable-->
++
++		<stateVariable>
++			<Optional/>
++			<name>Volume</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>ui2</dataType>
++			<allowedValueRange>
++				<minimum>0</minimum>
++				<maximum>100</maximum>
++				<step>1</step>
++			</allowedValueRange>
++		</stateVariable>
++
++		<!--stateVariable>
++			<Optional/>
++			<name>VolumeDB</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>i2</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>Loudness</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>boolean</dataType>
++		</stateVariable-->
++
++		<stateVariable>
++			<Optional/>
++			<name>A_ARG_TYPE_Channel</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++			<allowedValueList>
++				<allowedValue>Master</allowedValue>
++			</allowedValueList>
++		</stateVariable>
++
++		<stateVariable>
++			<name>A_ARG_TYPE_InstanceID</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>ui4</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<name>A_ARG_TYPE_PresetName</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++			<allowedValueList>
++				<allowedValue>FactoryDefaults</allowedValue>
++			</allowedValueList>
++		</stateVariable>
++
++		<!--stateVariable>
++			<Optional/>
++			<name>A_ARG_TYPE_DeviceUDN</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>A_ARG_TYPE_ServiceType</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>A_ARG_TYPE_ServiceID</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>A_ARG_TYPE_StateVariableValuePairs</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable>
++
++		<stateVariable>
++			<Optional/>
++			<name>A_ARG_TYPE_StateVariableList</name>
++			<sendEventsAttribute>no</sendEventsAttribute>
++			<dataType>string</dataType>
++		</stateVariable-->
++	</serviceStateTable>
++
++	<actionList>
++		<action>
++			<name>ListPresets</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentPresetNameList</name>
++					<direction>out</direction>
++					<relatedStateVariable>PresetNameList</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<name>SelectPreset</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>PresetName</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_PresetName</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<!--action>
++			<Optional/>
++			<name>GetBrightness</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentBrightness</name>
++					<direction>out</direction>
++					<relatedStateVariable>Brightness</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>SetBrightness</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>DesiredBrightness</name>
++					<direction>in</direction>
++					<relatedStateVariable>Brightness</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>GetContrast</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentContrast</name>
++					<direction>out</direction>
++					<relatedStateVariable>Contrast</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action><Optional/>
++		<name>SetContrast</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>DesiredContrast</name>
++					<direction>in</direction>
++					<relatedStateVariable>Contrast</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>GetSharpness</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentSharpness</name>
++					<direction>out</direction>
++					<relatedStateVariable>Sharpness</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>SetSharpness</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>DesiredSharpness</name>
++					<direction>in</direction>
++					<relatedStateVariable>Sharpness</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>GetRedVideoGain</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentRedVideoGain</name>
++					<direction>out</direction>
++					<relatedStateVariable>RedVideoGain</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>SetRedVideoGain</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>DesiredRedVideoGain</name>
++					<direction>in</direction>
++					<relatedStateVariable>RedVideoGain</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>GetGreenVideoGain</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentGreenVideoGain</name>
++					<direction>out</direction>
++					<relatedStateVariable>GreenVideoGain</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>SetGreenVideoGain</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>DesiredGreenVideoGain</name>
++					<direction>in</direction>
++					<relatedStateVariable>GreenVideoGain</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>GetBlueVideoGain</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentBlueVideoGain</name>
++					<direction>out</direction>
++					<relatedStateVariable>BlueVideoGain</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>SetBlueVideoGain</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>DesiredBlueVideoGain</name>
++					<direction>in</direction>
++					<relatedStateVariable>BlueVideoGain</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>GetRedVideoBlackLevel</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentRedVideoBlackLevel</name>
++					<direction>out</direction>
++					<relatedStateVariable>RedVideoBlackLevel</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>SetRedVideoBlackLevel</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>DesiredRedVideoBlackLevel</name>
++					<direction>in</direction>
++					<relatedStateVariable>RedVideoBlackLevel</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>GetGreenVideoBlackLevel</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentGreenVideoBlackLevel</name>
++					<direction>out</direction>
++					<relatedStateVariable>GreenVideoBlackLevel</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>SetGreenVideoBlackLevel</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>DesiredGreenVideoBlackLevel</name>
++					<direction>in</direction>
++					<relatedStateVariable>GreenVideoBlackLevel</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>GetBlueVideoBlackLevel</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentBlueVideoBlackLevel</name>
++					<direction>out</direction>
++					<relatedStateVariable>BlueVideoBlackLevel</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>SetBlueVideoBlackLevel</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>DesiredBlueVideoBlackLevel</name>
++					<direction>in</direction>
++					<relatedStateVariable>BlueVideoBlackLevel</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>GetColorTemperature</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentColorTemperature</name>
++					<direction>out</direction>
++					<relatedStateVariable>ColorTemperature</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>SetColorTemperature</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>DesiredColorTemperature</name>
++					<direction>in</direction>
++					<relatedStateVariable>ColorTemperature</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>GetHorizontalKeystone</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentHorizontalKeystone</name>
++					<direction>out</direction>
++					<relatedStateVariable>HorizontalKeystone</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>SetHorizontalKeystone</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>DesiredHorizontalKeystone</name>
++					<direction>in</direction>
++					<relatedStateVariable>HorizontalKeystone</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>GetVerticalKeystone</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentVerticalKeystone</name>
++					<direction>out</direction>
++					<relatedStateVariable>VerticalKeystone</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>SetVerticalKeystone</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>DesiredVerticalKeystone</name>
++					<direction>in</direction>
++					<relatedStateVariable>VerticalKeystone</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>GetMute</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>Channel</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_Channel</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentMute</name>
++					<direction>out</direction>
++					<relatedStateVariable>Mute</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>SetMute</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>Channel</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_Channel</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>DesiredMute</name>
++					<direction>in</direction>
++					<relatedStateVariable>Mute</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action-->
++
++		<action>
++			<Optional/>
++			<name>GetVolume</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>Channel</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_Channel</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentVolume</name>
++					<direction>out</direction>
++					<relatedStateVariable>Volume</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>SetVolume</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>Channel</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_Channel</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>DesiredVolume</name>
++					<direction>in</direction>
++					<relatedStateVariable>Volume</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<!--action>
++			<Optional/>
++			<name>GetVolumeDB</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>Channel</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_Channel</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentVolume</name>
++					<direction>out</direction>
++					<relatedStateVariable>VolumeDB</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>SetVolumeDB</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>Channel</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_Channel</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>DesiredVolume</name>
++					<direction>in</direction>
++					<relatedStateVariable>VolumeDB</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>GetVolumeDBRange</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>Channel</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_Channel</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>MinValue</name>
++					<direction>out</direction>
++					<relatedStateVariable>VolumeDB</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>MaxValue</name>
++					<direction>out</direction>
++					<relatedStateVariable>VolumeDB</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>GetLoudness</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>Channel</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_Channel</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>CurrentLoudness</name>
++					<direction>out</direction>
++					<relatedStateVariable>Loudness</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>SetLoudness</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>Channel</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_Channel</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>DesiredLoudness</name>
++					<direction>in</direction>
++					<relatedStateVariable>Loudness</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>GetStateVariables</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>StateVariableList</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_StateVariableList</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>StateVariableValuePairs</name>
++					<direction>out</direction>
++					<relatedStateVariable>A_ARG_TYPE_StateVariableValuePairs</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action>
++
++		<action>
++			<Optional/>
++			<name>SetStateVariables</name>
++			<argumentList>
++				<argument>
++					<name>InstanceID</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>RenderingControlUDN</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_DeviceUDN</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>ServiceType</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_ServiceType</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>ServiceId</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_ServiceID</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>StateVariableValuePairs</name>
++					<direction>in</direction>
++					<relatedStateVariable>A_ARG_TYPE_StateVariableValuePairs</relatedStateVariable>
++				</argument>
++				<argument>
++					<name>StateVariableList</name>
++					<direction>out</direction>
++					<relatedStateVariable>A_ARG_TYPE_StateVariableList</relatedStateVariable>
++				</argument>
++			</argumentList>
++		</action-->
++	</actionList>
++</scpd>
+diff --git a/mythtv/libs/libmythupnp/httprequest.cpp b/mythtv/libs/libmythupnp/httprequest.cpp
+index 0652821..3ac772c 100644
+--- a/mythtv/libs/libmythupnp/httprequest.cpp
++++ b/mythtv/libs/libmythupnp/httprequest.cpp
+@@ -80,6 +80,7 @@ static MIMETypes g_MIMETypes[] =
+     { "mpeg", "video/mpeg"                 },
+     { "mpeg2","video/mpeg"                 },
+     { "ts"  , "video/mpegts"               },
++    { "mts" , "video/mp2t"                },
+     { "vob" , "video/mpeg"                 },
+     { "asf" , "video/x-ms-asf"             },
+     { "nuv" , "video/nupplevideo"          },
+diff --git a/mythtv/libs/libmythupnp/libmythupnp.pro b/mythtv/libs/libmythupnp/libmythupnp.pro
+index dc407e6..64e19dd 100644
+--- a/mythtv/libs/libmythupnp/libmythupnp.pro
++++ b/mythtv/libs/libmythupnp/libmythupnp.pro
+@@ -8,6 +8,7 @@ INSTALLS = target
+ 
+ setting.path = $${PREFIX}/share/mythtv/
+ setting.files += CDS_scpd.xml CMGR_scpd.xml MSRR_scpd.xml MXML_scpd.xml
++setting.files += RCTL_scpd.xml AVTCTL_scpd.xml
+ 
+ INSTALLS += setting
+ 
+@@ -22,17 +23,22 @@ HEADERS += httpserver.h upnpcds.h upnpcdsobjects.h bufferedsocketdevice.h upnpms
+ HEADERS += eventing.h upnpcmgr.h upnptaskevent.h upnptaskcache.h ssdpcache.h
+ HEADERS += upnpimpl.h multicast.h broadcast.h configuration.h
+ HEADERS += soapclient.h mythxmlclient.h mmembuf.h upnpexp.h
++HEADERS += upnprctl.h upnpavt.h
+ 
+ SOURCES += httprequest.cpp upnp.cpp ssdp.cpp taskqueue.cpp upnputil.cpp
+ SOURCES += upnpdevice.cpp upnptasknotify.cpp upnptasksearch.cpp threadpool.cpp
+ SOURCES += httpserver.cpp upnpcds.cpp upnpcdsobjects.cpp bufferedsocketdevice.cpp
+ SOURCES += eventing.cpp upnpcmgr.cpp upnpmsrr.cpp upnptaskevent.cpp ssdpcache.cpp
+ SOURCES += configuration.cpp soapclient.cpp mythxmlclient.cpp mmembuf.cpp
++SOURCES += upnprctl.cpp upnpavt.cpp
+ 
+ INCLUDEPATH += ../libmythdb ..
+ DEPENDPATH  += ../libmythdb ..
+ LIBS      += -L../libmythdb -lmythdb-$$LIBVERSION
+ 
++INCLUDEPATH += ../libmyth ../libmythui
++LIBS      += -L../libmythui -lmythui-$$LIBVERSION
++
+ LIBS += $$EXTRA_LIBS
+ 
+ mingw {
+diff --git a/mythtv/libs/libmythupnp/upnpavt.cpp b/mythtv/libs/libmythupnp/upnpavt.cpp
+new file mode 100644
+index 0000000..a14729f
+--- /dev/null
++++ b/mythtv/libs/libmythupnp/upnpavt.cpp
+@@ -0,0 +1,550 @@
++//////////////////////////////////////////////////////////////////////////////
++// Purpose - Provide a UPnP AVTransport control
++//
++//////////////////////////////////////////////////////////////////////////////
++
++#include "upnpavt.h"
++#include "upnp.h"
++
++#include "QString"
++#include "QCoreApplication"
++
++#include "mythuihelper.h" // for GetMythUI() in libmythui
++#include "mythmainwindow.h" // for GetMythMainWindow
++#include "mythcorecontext.h" // gCoreContext
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++
++UPnpAVTransport::UPnpAVTransport( UPnpDevice *pDevice , const QString sSharePath)
++  : Eventing( "UPnpAVTransport", "AVTransport_Event", sSharePath)
++{
++    // GetTransportInfo
++    AddVariable( new StateVariable< QString >( "TransportState", true ) );
++    // “STOPPED” R “PLAYING” R “TRANSITIONING” O ”PAUSED_PLAYBACK” O
++    // “PAUSED_RECORDING” O “RECORDING” O “NO_MEDIA_PRESENT” O
++    SetValue< QString >( "TransportState", "STOPPED" );
++    AddVariable( new StateVariable< QString >( "TransportStatus", true ) );
++    SetValue< QString >( "TransportStatus", "OK" ); // or ERROR_OCCURRED
++    AddVariable( new StateVariable< QString >( "TransportPlaySpeed", true ) );
++    SetValue< QString >( "TransportPlaySpeed", "1" );
++
++    // GetMediaInfo
++    AddVariable( new StateVariable< QString >( "NumberOfTracks", true ) );
++    SetValue< QString >( "NumberOfTracks", "0" );
++    AddVariable( new StateVariable< QString >( "CurrentMediaDuration", true ) );
++    SetValue< QString >( "CurrentMediaDuration", "0" );
++    AddVariable( new StateVariable< QString >( "AVTransportURI", true ) );
++    AddVariable( new StateVariable< QString >( "AVTransportURIMetaData", true ) );
++    AddVariable( new StateVariable< QString >( "NextAVTransportURI", true ) );
++    AddVariable( new StateVariable< QString >( "NextAVTransportURIMetaData", true ) );
++    // PlaybackStorageMedium, RecordStorageMedium:
++    // “UNKNOWN” ”DV”  “MINI-DV” “VHS” ”W-VHS” “S-VHS” “D-VHS” “VHSC”
++    // “VIDEO8” “HI8” “CD-ROM” “CD-DA” “CD-R” “CD-RW” “VIDEO-CD” ”SACD”
++    // “MD-AUDIO” “MD-PICTURE” “DVD-ROM” “DVD-VIDEO” “DVD-R” “DVD+RW”
++    // “DVD-RW” “DVD-RAM” “DVD-AUDIO” “DAT” “LD” “HDD” “MICRO-MV” "NETWORK”
++    // “NONE” “NOT_IMPLEMENTED” Vendor-defined
++    AddVariable( new StateVariable< QString >( "PlaybackStorageMedium", true ) );
++    SetValue< QString >( "PlaybackStorageMedium", "NETWORK" );
++    AddVariable( new StateVariable< QString >( "RecordStorageMedium", true ) );
++    SetValue< QString >( "RecordStorageMedium", "NOT_IMPLEMENTED" );
++    AddVariable( new StateVariable< QString >( "RecordMediumWriteStatus", true ) );
++    // “WRITABLE” ”PROTECTED” “NOT_WRITABLE” “UNKNOWN” “NOT_IMPLEMENTED”
++    SetValue< QString >( "RecordMediumWriteStatus", "NOT_IMPLEMENTED" );
++
++    // GetTransportSettings
++    AddVariable( new StateVariable< QString >( "CurrentPlayMode", true ) );
++    // “NORMAL” “SHUFFLE” “REPEAT_ONE” “REPEAT_ALL” “RANDOM” “DIRECT_1” “INTRO” Vendor-defined
++    SetValue< QString >( "CurrentPlayMode", "NORMAL" );
++    AddVariable( new StateVariable< QString >( "CurrentRecordQualityMode", true ) );
++    // “0:EP” “1:LP”. “2:SP” “0:BASIC” “1:MEDIUM” “2:HIGH” “NOT_IMPLEMENTED” Vendor-defined
++    SetValue< QString >( "CurrentRecordQualityMode", "NOT_IMPLEMENTED" );
++
++    // GetDeviceCapabilities
++    AddVariable( new StateVariable< QString >( "PossiblePlaybackStorageMedia", true ) );
++    SetValue< QString >( "PossiblePlaybackStorageMedia", "NETWORK" );
++    AddVariable( new StateVariable< QString >( "PossibleRecordStorageMedia", true ) );
++    SetValue< QString >( "PossibleRecordStorageMedia", "NOT_IMPLEMENTED" );
++    AddVariable( new StateVariable< QString >( "PossibleRecordQualityModes", true ) );
++    SetValue< QString >( "PossibleRecordQualityModes", "NOT_IMPLEMENTED" );
++
++    // GetPositionInfo
++    AddVariable( new StateVariable< QString >( "CurrentTrack", true ) );
++    SetValue< QString >( "CurrentTrack", "0" );
++    AddVariable( new StateVariable< QString >( "CurrentTrackDuration", true ) );
++    AddVariable( new StateVariable< QString >( "CurrentTrackMetaData", true ) );
++    AddVariable( new StateVariable< QString >( "CurrentTrackURI", true ) );
++
++    QString sUPnpDescPath = UPnp::g_pConfig->GetValue( "UPnP/DescXmlPath", m_sSharePath );
++
++    m_sServiceDescFileName = sUPnpDescPath + "AVTCTL_scpd.xml";
++    m_sControlUrl          = "/AVTransport";
++
++    m_mapAction.insert( "GetServDesc", &UPnpAVTransport::GetServDesc);
++    m_mapAction.insert( "SetAVTransportURI", &UPnpAVTransport::SetAVTransportURI);
++    m_mapAction.insert( "GetMediaInfo", &UPnpAVTransport::GetMediaInfo);
++    m_mapAction.insert( "GetTransportInfo", &UPnpAVTransport::GetTransportInfo);
++    m_mapAction.insert( "GetPositionInfo", &UPnpAVTransport::GetPositionInfo);
++    m_mapAction.insert( "GetDeviceCapabilities", &UPnpAVTransport::GetDeviceCapabilities);
++    m_mapAction.insert( "GetTransportSettings", &UPnpAVTransport::GetTransportSettings);
++    m_mapAction.insert( "Stop", &UPnpAVTransport::Stop);
++    m_mapAction.insert( "Play", &UPnpAVTransport::Play);
++    m_mapAction.insert( "Seek", &UPnpAVTransport::Seek);
++    m_mapAction.insert( "Next", &UPnpAVTransport::Next);
++    m_mapAction.insert( "Previous", &UPnpAVTransport::Previous);
++
++    // Add our Service Definition to the device.
++    RegisterService( pDevice );
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++
++UPnpAVTransport::~UPnpAVTransport()
++{
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++
++bool UPnpAVTransport::ProcessRequest( HttpWorkerThread *pThread, HTTPRequest *pRequest )
++{
++    try
++    {
++        if (pRequest)
++        {
++            if (pRequest->m_sBaseUrl != m_sControlUrl)
++                return( false );
++
++            VERBOSE(VB_UPNP|VB_EXTRA,
++                QString("UPnpAVTransport::ProcessRequest: %1 : %2")
++                .arg(pRequest->m_sMethod).arg(pRequest->m_sRawRequest));
++
++            Action UPnpAVTransport::*pfn = m_mapAction.value( pRequest->m_sMethod,
++                                                       &UPnpAVTransport::Unknown);
++            (this->*pfn)( pRequest );
++            return true;
++        }
++    }
++    catch( ... )
++    {
++        VERBOSE( VB_IMPORTANT, "UPnpAVTransport::ProcessRequest() - Unexpected Exception" );
++    }
++
++    return( false );
++}
++
++static inline void PostEvent(const QString &msg)
++{
++    MythEvent me(msg);
++    QCoreApplication::postEvent(GetMythMainWindow(), me.clone());
++}
++
++static inline void SendEvent(const QString &msg)
++{
++    MythEvent me(msg);
++    gCoreContext->dispatch(me);
++}
++
++// ==========================================================================
++// Request handler Methods
++// ==========================================================================
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++void UPnpAVTransport::Unknown( HTTPRequest *pRequest )
++{
++    VERBOSE(VB_IMPORTANT, QString("UPnpAVTransport Unknown action %1")
++        .arg(pRequest->m_sMethod));
++    UPnp::FormatErrorResponse( pRequest, UPnPResult_InvalidAction );
++}
++
++void UPnpAVTransport::GetServDesc( HTTPRequest *pRequest )
++{
++    pRequest->FormatFileResponse( m_sServiceDescFileName );
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++void UPnpAVTransport::SetAVTransportURI( HTTPRequest *pRequest )
++{
++    unsigned short nId = pRequest->m_mapParams[ "InstanceID" ].toUShort();
++    if ( nId != 0)
++    {
++        VERBOSE(VB_UPNP, "UPnpAVTransport::SetAVTransportURI invalid InstanceID");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueInvalid );
++        return;
++    }
++
++    QString uri = pRequest->m_mapParams[ "CurrentURI" ];
++    VERBOSE(VB_UPNP, QString("UPnpAVTransport::SetAVTransportURI: %1").arg(uri));
++    // TODO: Validate URI
++    SetValue< QString >( "AVTransportURI", uri );
++
++    QString sMeta = pRequest->m_mapParams[ "CurrentURIMetaData" ];
++    VERBOSE(VB_UPNP|VB_EXTRA,
++         QString("UPnpAVTransport::SetAVTransportURI metadata: '%1'").arg(sMeta));
++    SetValue< QString >( "AVTransportURIMetaData", sMeta );
++
++    if ( GetValue<QString>("TransportState") == "PLAYING")
++    {
++        UPnPResultCode res = StartPlay();
++        if ( UPnPResult_Success != res)
++        {
++            SetValue< QString >( "AVTransportURI", "" );
++            SetValue< QString >( "AVTransportURIMetaData", "" );
++            UPnp::FormatErrorResponse( pRequest, res);
++            return;
++        }
++    }
++
++    // For GetMediaInfo
++    SetValue< QString >( "NumberOfTracks", "1" ); // NB no playlists
++    SetValue< QString >( "CurrentMediaDuration", "0" ); // TODO
++
++    // For GetPositionInfo
++    SetValue< QString >( "CurrentTrack", "1" );
++    SetValue< QString >( "CurrentTrackDuration", "0" ); // TODO
++    SetValue< QString >( "CurrentTrackMetaData", sMeta );
++    SetValue< QString >( "CurrentTrackURI", uri );
++
++    pRequest->FormatActionResponse(NameValues());
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++void UPnpAVTransport::GetMediaInfo( HTTPRequest *pRequest )
++{
++    unsigned short nId = pRequest->m_mapParams[ "InstanceID" ].toUShort();
++    if ( nId != 0)
++    {
++        VERBOSE(VB_UPNP, "UPnpAVTransport::GetMediaInfo invalid InstanceID");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueInvalid );
++        return;
++    }
++
++    NameValues list;
++
++    list.push_back(
++        NameValue("NrTracks", GetValue<QString>("NumberOfTracks")));
++    list.push_back(
++        NameValue("MediaDuration", GetValue<QString>("CurrentMediaDuration")));
++    list.push_back(
++        NameValue("CurrentURI", GetValue<QString>("AVTransportURI")));
++    list.push_back(
++        NameValue("CurrentURIMetaData", GetValue<QString>("AVTransportURIMetaData")));
++    list.push_back(
++        NameValue("NextURI", GetValue<QString>("NextAVTransportURI")));
++    list.push_back(
++        NameValue("NextURIMetaData", GetValue<QString>("NextAVTransportURIMetaData")));
++    list.push_back(
++        NameValue("PlayMedium", GetValue<QString>("PlaybackStorageMedium")));
++    list.push_back(
++        NameValue("RecordMedium", GetValue<QString>("RecordStorageMedium")));
++    list.push_back(
++        NameValue("WriteStatus", GetValue<QString>("RecordMediumWriteStatus")));
++
++    pRequest->FormatActionResponse(list);
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++void UPnpAVTransport::GetTransportInfo( HTTPRequest *pRequest )
++{
++    unsigned short nId = pRequest->m_mapParams[ "InstanceID" ].toUShort();
++    if ( nId != 0)
++    {
++        VERBOSE(VB_UPNP, "UPnpAVTransport::GetTransportInfo invalid InstanceID");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueInvalid );
++        return;
++    }
++
++    NameValues list;
++
++    list.push_back(
++        NameValue("CurrentTransportState", GetValue<QString>("TransportState")));
++    list.push_back(
++        NameValue("CurrentTransportStatus", GetValue<QString>("TransportStatus")));
++    list.push_back(
++        NameValue("CurrentSpeed", GetValue<QString>("TransportPlaySpeed")));
++
++    pRequest->FormatActionResponse(list);
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++void UPnpAVTransport::GetPositionInfo( HTTPRequest *pRequest )
++{
++    unsigned short nId = pRequest->m_mapParams[ "InstanceID" ].toUShort();
++    if ( nId != 0)
++    {
++        VERBOSE(VB_UPNP, "UPnpAVTransport::GetPositionInfo invalid InstanceID");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueInvalid );
++        return;
++    }
++
++    NameValues list;
++
++    list.push_back(
++        NameValue("Track", GetValue<QString>("CurrentTrack")));
++    list.push_back(
++        NameValue("TrackDuration", GetValue<QString>("CurrentTrackDuration")));
++    list.push_back(
++        NameValue("TrackMetaData", GetValue<QString>("CurrentTrackMetaData")));
++    list.push_back(
++        NameValue("TrackURI", GetValue<QString>("CurrentTrackURI")));
++    // TODO real values from current playback
++    // see NetworkControl::processQuery location
++    list.push_back(
++        NameValue("RelTime", "0")); //GetValue<QString>("RelativeTimePosition")));
++    list.push_back(
++        NameValue("AbsTime", "0")); //GetValue<QString>("AbsoluteTimePosition")));
++    list.push_back(
++        NameValue("RelCount", "0")); //GetValue<QString>("RelativeCounterPosition")));
++    list.push_back(
++        NameValue("AbsCount", "0")); //GetValue<QString>("AbsoluteCounterPosition")));
++
++    pRequest->FormatActionResponse(list);
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++void UPnpAVTransport::GetDeviceCapabilities( HTTPRequest *pRequest )
++{
++    unsigned short nId = pRequest->m_mapParams[ "InstanceID" ].toUShort();
++    if ( nId != 0)
++    {
++        VERBOSE(VB_UPNP, "UPnpAVTransport::GetDeviceCapabilities invalid InstanceID");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueInvalid );
++        return;
++    }
++
++    NameValues list;
++
++    list.push_back(
++        NameValue("PlayMedia", GetValue<QString>("PossiblePlaybackStorageMedia")));
++    list.push_back(
++        NameValue("RecMedia", GetValue<QString>("PossibleRecordStorageMedia")));
++    list.push_back(
++        NameValue("RecQualityModes", GetValue<QString>("PossibleRecordQualityModes")));
++
++    pRequest->FormatActionResponse(list);
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++void UPnpAVTransport::GetTransportSettings( HTTPRequest *pRequest )
++{
++    unsigned short nId = pRequest->m_mapParams[ "InstanceID" ].toUShort();
++    if ( nId != 0)
++    {
++        VERBOSE(VB_UPNP, "UPnpAVTransport::GetTransportSettings invalid InstanceID");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueInvalid );
++        return;
++    }
++
++    NameValues list;
++
++    list.push_back(
++        NameValue("PlayMode", GetValue<QString>("CurrentPlayMode")));
++    list.push_back(
++        NameValue("RecQualityMode", GetValue<QString>("CurrentRecordQualityMode")));
++
++    pRequest->FormatActionResponse(list);
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++void UPnpAVTransport::Stop( HTTPRequest *pRequest )
++{
++    unsigned short nId = pRequest->m_mapParams[ "InstanceID" ].toUShort();
++    if ( nId != 0)
++    {
++        VERBOSE(VB_UPNP, "UPnpAVTransport::Stop invalid InstanceID");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueInvalid );
++        return;
++    }
++
++    VERBOSE(VB_UPNP, "UPnpAVTransport::Stop");
++
++    SendEvent("NETWORK_CONTROL STOP");
++    SetValue< QString >( "TransportState", "STOPPED" );
++
++    pRequest->FormatActionResponse(NameValues());
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++void UPnpAVTransport::Play( HTTPRequest *pRequest )
++{
++    unsigned short nId = pRequest->m_mapParams[ "InstanceID" ].toUShort();
++    if ( nId != 0)
++    {
++        VERBOSE(VB_UPNP, "UPnpAVTransport::Play invalid InstanceID");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueInvalid );
++        return;
++    }
++
++    QString speed = pRequest->m_mapParams[ "Speed" ];
++    if (speed != "1")
++    {
++        VERBOSE(VB_UPNP, "UPnpAVTransport::Play invalid speed");
++        UPnp::FormatErrorResponse( pRequest,  UPnPResult_ArgumentValueOutOfRange );
++        return;
++    }
++
++    VERBOSE(VB_UPNP, QString("UPnpAVTransport::Play(speed=%1)").arg(speed));
++
++    UPnPResultCode res = StartPlay();
++    if ( UPnPResult_Success != res)
++    {
++        UPnp::FormatErrorResponse( pRequest, res);
++        return;
++    }
++
++    SetValue< QString >( "TransportPlaySpeed", speed );
++
++    pRequest->FormatActionResponse(NameValues());
++}
++
++UPnPResultCode UPnpAVTransport::StartPlay()
++{
++    // TODO: TransportState STOPPED”, “PLAYING”, and “PAUSED_PLAYBACK” only
++
++    // TODO validate URI
++    QString uri = GetValue<QString>("AVTransportURI");
++    if ( uri.isEmpty() )
++    {
++        VERBOSE(VB_UPNP, "UPnpAVTransport::StartPlay empty AVTransportURI");
++        return UPnPResult_InvalidSequence;
++    }
++
++    SendEvent("NETWORK_CONTROL STOP");
++    SetValue< QString >( "TransportState", "STOPPED" );
++
++    QString const loc = "mainmenu", jump = "Main Menu";
++    if (GetMythUI()->GetCurrentLocation().toLower() != loc)
++    {
++        GetMythMainWindow()->JumpTo(jump);
++
++        // Ensure jump is executed before calling handler
++        QTime timer; timer.start();
++        while (GetMythUI()->GetCurrentLocation().toLower() != loc)
++        {
++            if (timer.elapsed() >= 10000)
++            {
++                VERBOSE(VB_IMPORTANT, "UPnpAVTransport::StartPlay timed out");
++                return UPnPResult_ActionFailed;
++            }
++            usleep(10000);
++        }
++    }
++
++    // TODO from metadata append
++    // plot, title, subtitle, director, season, episode, lenMins, year
++    //QString meta = GetValue<QString>("AVTransportURIMetaData");
++    PostEvent( QString("HANDLE_MEDIA UPnP %1").arg(uri) );
++    SetValue< QString >( "TransportState", "PLAYING" );
++
++    return UPnPResult_Success;
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++void UPnpAVTransport::Seek( HTTPRequest *pRequest )
++{
++    unsigned short nId = pRequest->m_mapParams[ "InstanceID" ].toUShort();
++    if ( nId != 0)
++    {
++        VERBOSE(VB_UPNP, "UPnpAVTransport::Seek invalid InstanceID");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueInvalid );
++        return;
++    }
++
++    if (pRequest->m_mapParams[ "Unit" ] != "TRACK_NR")
++    {
++        VERBOSE(VB_UPNP, "UPnpAVTransport::Seek invalid Unit");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueOutOfRange );
++        return;
++    }
++
++    QString target = pRequest->m_mapParams[ "Target" ];
++    // 0=end, 1=begin
++    if (target.isEmpty() || (target != "0" && target != "1"))
++    {
++        VERBOSE(VB_UPNP, "UPnpAVTransport::Seek invalid Target");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueOutOfRange );
++        return;
++    }
++    SetValue< QString >( "CurrentTrack", target);
++
++    // STOPPED or PLAYING only
++    VERBOSE(VB_UPNP, QString("UPnpAVTransport::Seek %1").arg(target));
++
++    // TODO see NetworkControl::processPlay seek
++
++    pRequest->FormatActionResponse(NameValues());
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++void UPnpAVTransport::Next( HTTPRequest *pRequest )
++{
++    unsigned short nId = pRequest->m_mapParams[ "InstanceID" ].toUShort();
++    if ( nId != 0)
++    {
++        VERBOSE(VB_UPNP, "UPnpAVTransport::Next invalid InstanceID");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueInvalid );
++        return;
++    }
++
++    // STOPPED or PLAYING only
++    VERBOSE(VB_UPNP, "UPnpAVTransport::Next");
++
++    SetValue< QString >( "CurrentTrack", "0"); // End of file
++
++    // TODO see NetworkControl::processPlay seek
++
++    pRequest->FormatActionResponse(NameValues());
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++void UPnpAVTransport::Previous( HTTPRequest *pRequest )
++{
++    unsigned short nId = pRequest->m_mapParams[ "InstanceID" ].toUShort();
++    if ( nId != 0)
++    {
++        VERBOSE(VB_UPNP, "UPnpAVTransport::Previous invalid InstanceID");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueInvalid );
++        return;
++    }
++
++    // STOPPED or PLAYING only
++    VERBOSE(VB_UPNP, "UPnpAVTransport::Previous");
++
++    SetValue< QString >( "CurrentTrack", "1"); // Begin of file
++
++    // TODO see NetworkControl::processPlay seek
++
++    pRequest->FormatActionResponse(NameValues());
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
+diff --git a/mythtv/libs/libmythupnp/upnpavt.h b/mythtv/libs/libmythupnp/upnpavt.h
+new file mode 100644
+index 0000000..861ee35
+--- /dev/null
++++ b/mythtv/libs/libmythupnp/upnpavt.h
+@@ -0,0 +1,40 @@
++#ifndef UPNPAVT_H_
++#define UPNPAVT_H_
++
++#include <QString>
++#include <QMap>
++
++#include "eventing.h"
++#include "upnp.h"
++
++class UPnpAVTransport : public Eventing
++{
++  public:
++    UPnpAVTransport( UPnpDevice *pDevice ,  const QString sSharePath);
++    virtual ~UPnpAVTransport();
++
++    bool ProcessRequest( HttpWorkerThread *pThread, HTTPRequest *pRequest );
++
++  protected:
++    // UPnpServiceImpl methods
++    virtual QString GetServiceType      () { return "urn:schemas-upnp-org:service:AVTransport:1"; }
++    virtual QString GetServiceId        () { return "urn:upnp-org:serviceId:AVTransport"; }
++    virtual QString GetServiceControlURL() { return m_sControlUrl.mid( 1 ); }
++    virtual QString GetServiceDescURL   () { return m_sControlUrl.mid( 1 ) + "/GetServDesc"; }
++
++  private:
++    typedef void Action(HTTPRequest *);
++    Action Unknown, GetServDesc;
++    Action SetAVTransportURI, GetMediaInfo, GetTransportInfo;
++    Action GetPositionInfo, GetDeviceCapabilities, GetTransportSettings;
++    Action Stop, Play, Seek, Next, Previous;
++
++    UPnPResultCode StartPlay();
++
++  private:
++    QString m_sControlUrl;
++    QString m_sServiceDescFileName;
++    QMap< QString, Action UPnpAVTransport::* > m_mapAction;
++};
++
++#endif
+diff --git a/mythtv/libs/libmythupnp/upnprctl.cpp b/mythtv/libs/libmythupnp/upnprctl.cpp
+new file mode 100644
+index 0000000..91864fe
+--- /dev/null
++++ b/mythtv/libs/libmythupnp/upnprctl.cpp
+@@ -0,0 +1,226 @@
++//////////////////////////////////////////////////////////////////////////////
++// Purpose - Provide a UPnP MediaRenderer control
++//
++//////////////////////////////////////////////////////////////////////////////
++
++#include "upnprctl.h"
++#include "upnp.h"
++
++#include "QString"
++
++#include "mythcorecontext.h" // gCoreContext
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++
++UPnpRCTL::UPnpRCTL( UPnpDevice *pDevice , const QString sSharePath)
++  : Eventing( "UPnpRCTL", "RenderingControl_Event", sSharePath)
++{
++    AddVariable( new StateVariable< QString >( "PresetNameList", true ) );
++    SetValue< QString >( "PresetNameList", "FactoryDefaults" );
++
++    AddVariable( new StateVariable< QString >( "Volume", true ) );
++    SetValue< QString >( "Volume", "100" );
++
++    QString sUPnpDescPath = UPnp::g_pConfig->GetValue( "UPnP/DescXmlPath", m_sSharePath );
++
++    m_sServiceDescFileName = sUPnpDescPath + "RCTL_scpd.xml";
++    m_sControlUrl          = "/RenderingControl";
++
++    m_mapAction.insert( "GetServDesc", &UPnpRCTL::GetServDesc);
++    m_mapAction.insert( "ListPresets", &UPnpRCTL::ListPresets);
++    m_mapAction.insert( "SelectPreset", &UPnpRCTL::SelectPreset);
++    m_mapAction.insert( "GetVolume", &UPnpRCTL::GetVolume);
++    m_mapAction.insert( "SetVolume", &UPnpRCTL::SetVolume);
++
++    // Add our Service Definition to the device.
++    RegisterService( pDevice );
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++
++UPnpRCTL::~UPnpRCTL()
++{
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++
++bool UPnpRCTL::ProcessRequest( HttpWorkerThread *pThread, HTTPRequest *pRequest )
++{
++    try
++    {
++        if (pRequest)
++        {
++            if (pRequest->m_sBaseUrl != m_sControlUrl)
++                return false;
++
++            VERBOSE(VB_UPNP|VB_EXTRA,
++                QString("UPnpRCTL::ProcessRequest: %1 : %2")
++                .arg(pRequest->m_sMethod).arg(pRequest->m_sRawRequest));
++
++            Action UPnpRCTL::*pfn = m_mapAction.value( pRequest->m_sMethod,
++                                                       &UPnpRCTL::Unknown);
++            (this->*pfn)( pRequest );
++            return true;
++        }
++    }
++    catch( ... )
++    {
++        VERBOSE( VB_IMPORTANT, "UPnpRCTL::ProcessRequest() - Unexpected Exception" );
++    }
++
++    return false;
++}
++
++static inline void SendEvent(const QString &msg)
++{
++    MythEvent me(msg);
++    gCoreContext->dispatch(me);
++}
++
++// ==========================================================================
++// Request handler Methods
++// ==========================================================================
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++void UPnpRCTL::Unknown( HTTPRequest *pRequest )
++{
++    VERBOSE(VB_IMPORTANT, QString("UPnpRCTL Unknown action %1")
++        .arg(pRequest->m_sMethod));
++    UPnp::FormatErrorResponse( pRequest, UPnPResult_InvalidAction );
++}
++
++void UPnpRCTL::GetServDesc( HTTPRequest *pRequest )
++{
++    pRequest->FormatFileResponse( m_sServiceDescFileName );
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++void UPnpRCTL::ListPresets( HTTPRequest *pRequest )
++{
++    unsigned short nId = pRequest->m_mapParams[ "InstanceID" ].toUShort();
++    if ( nId != 0)
++    {
++        VERBOSE(VB_UPNP, "UPnpRCTL::ListPresets invalid InstanceID");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueInvalid );
++        return;
++    }
++
++    NameValues list;
++
++    list.push_back(
++        NameValue("CurrentPresetNameList", GetValue<QString>("PresetNameList")));
++
++    pRequest->FormatActionResponse(list);
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++void UPnpRCTL::SelectPreset( HTTPRequest *pRequest )
++{
++    unsigned short nId = pRequest->m_mapParams[ "InstanceID" ].toUShort();
++    if ( nId != 0)
++    {
++        VERBOSE(VB_UPNP, "UPnpRCTL::SelectPreset invalid InstanceID");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueInvalid );
++        return;
++    }
++
++    QString preset = pRequest->m_mapParams[ "PresetName" ];
++    if (preset != "FactoryDefaults" && preset != "InstallationDefaults")
++    {
++        VERBOSE(VB_UPNP, "UPnpRCTL::SelectPreset invalid PresetName");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueOutOfRange );
++        return;
++    }
++
++    // TODO get default and set actual volume
++    VERBOSE(VB_UPNP, QString("UPnpRCTL::SelectPreset %1").arg(preset));
++    SetValue< QString >( "Volume", QString::number(100) );
++
++    pRequest->FormatActionResponse(NameValues());
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++void UPnpRCTL::GetVolume( HTTPRequest *pRequest )
++{
++    unsigned short nId = pRequest->m_mapParams[ "InstanceID" ].toUShort();
++    if ( nId != 0)
++    {
++        VERBOSE(VB_UPNP, "UPnpRCTL::GetVolume invalid InstanceID");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueInvalid );
++        return;
++    }
++
++    QString channel = pRequest->m_mapParams[ "Channel" ];
++    if (channel != "Master")
++    {
++        VERBOSE(VB_UPNP, "UPnpRCTL::GetVolume invalid Channel");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueOutOfRange );
++        return;
++    }
++
++    // TODO get actual volume
++    QString vol = GetValue<QString>("Volume");
++    VERBOSE(VB_UPNP, QString("UPnpRCTL::GetVolume %1").arg(vol));
++
++    NameValues list;
++
++    list.push_back(
++        NameValue("CurrentVolume", vol));
++
++    pRequest->FormatActionResponse(list);
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
++void UPnpRCTL::SetVolume( HTTPRequest *pRequest )
++{
++    unsigned short nId = pRequest->m_mapParams[ "InstanceID" ].toUShort();
++    if ( nId != 0)
++    {
++        VERBOSE(VB_UPNP, "UPnpRCTL::SetVolume invalid InstanceID");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueInvalid );
++        return;
++    }
++
++    QString channel = pRequest->m_mapParams[ "Channel" ];
++    if (channel != "Master")
++    {
++        VERBOSE(VB_UPNP, "UPnpRCTL::SetVolume invalid Channel");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueOutOfRange );
++        return;
++    }
++
++    unsigned short vol = pRequest->m_mapParams[ "DesiredVolume" ].toUShort();
++    if (vol > 100)
++    {
++        VERBOSE(VB_UPNP, "UPnpRCTL::SetVolume invalid DesiredVolume");
++        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueOutOfRange );
++        return;
++    }
++
++    VERBOSE(VB_UPNP, QString("UPnpRCTL::SetVolume %1").arg(vol));
++
++    SendEvent( QString("NETWORK_CONTROL VOLUME %1%").arg(vol) );
++    SetValue< QString >( "Volume", QString::number(vol) );
++
++    pRequest->FormatActionResponse(NameValues());
++}
++
++/////////////////////////////////////////////////////////////////////////////
++//
++/////////////////////////////////////////////////////////////////////////////
+diff --git a/mythtv/libs/libmythupnp/upnprctl.h b/mythtv/libs/libmythupnp/upnprctl.h
+new file mode 100644
+index 0000000..56eb83d
+--- /dev/null
++++ b/mythtv/libs/libmythupnp/upnprctl.h
+@@ -0,0 +1,37 @@
++#ifndef UPNPRCTLL_H_
++#define UPNPRCTLL_H_
++
++#include <QString>
++#include <QMap>
++
++#include "httpserver.h"
++#include "eventing.h"
++
++class UPnpRCTL : public Eventing
++{
++  public:
++    UPnpRCTL( UPnpDevice *pDevice ,  const QString sSharePath);
++    virtual ~UPnpRCTL();
++
++    bool ProcessRequest( HttpWorkerThread *pThread, HTTPRequest *pRequest );
++
++  protected:
++    // UPnpServiceImpl methods
++    virtual QString GetServiceType      () { return "urn:schemas-upnp-org:service:RenderingControl:1"; }
++    virtual QString GetServiceId        () { return "urn:upnp-org:serviceId:RenderingControl"; }
++    virtual QString GetServiceControlURL() { return m_sControlUrl.mid( 1 ); }
++    virtual QString GetServiceDescURL   () { return m_sControlUrl.mid( 1 ) + "/GetServDesc"; }
++
++  private:
++    typedef void Action(HTTPRequest *);
++    Action Unknown, GetServDesc;
++    Action ListPresets, SelectPreset;
++    Action GetVolume, SetVolume;
++
++  private:
++    QString m_sControlUrl;
++    QString m_sServiceDescFileName;
++    QMap< QString, Action UPnpRCTL::* > m_mapAction;
++};
++
++#endif
+diff --git a/mythtv/libs/libs.pro b/mythtv/libs/libs.pro
+index b5fd23e..6141834 100644
+--- a/mythtv/libs/libs.pro
++++ b/mythtv/libs/libs.pro
+@@ -17,7 +17,7 @@ using_x11:SUBDIRS += libmythnvctrl
+ SUBDIRS += libmythui libmythupnp libmyth
+ 
+ libmythui.depends = libmythdb
+-libmythupnp.depends = libmythdb
++libmythupnp.depends = libmythdb libmythui
+ libmyth.depends =  libmythdb libmythui libmythupnp
+ libmyth.depends += libmythsamplerate libmythsoundtouch libmythfreesurround
+ 
+diff --git a/mythtv/programs/mythbackend/mediaserver.cpp b/mythtv/programs/mythbackend/mediaserver.cpp
+index b7a6fd4..bd9909f 100644
+--- a/mythtv/programs/mythbackend/mediaserver.cpp
++++ b/mythtv/programs/mythbackend/mediaserver.cpp
+@@ -142,7 +142,11 @@ MediaServer::MediaServer( bool bIsMaster, bool bDisableUPnp /* = FALSE */ )
+                                        "http-get:*:video/avi:*,"
+                                        "http-get:*:audio/mpeg:*,"
+                                        "http-get:*:audio/wav:*,"
++                                       "http-get:*:audio/ogg:*,"
++                                       "http-get:*:audio/x-flac:*,"
+                                        "http-get:*:video/mpeg:*,"
++                                       "http-get:*:video/mp4:*,"
++                                       "http-get:*:video/mp2t:*,"
+                                        "http-get:*:video/nupplevideo:*,"
+                                        "http-get:*:video/x-ms-wmv:*";
+ 
+diff --git a/mythtv/programs/mythfrontend/main.cpp b/mythtv/programs/mythfrontend/main.cpp
+index b15ef77..d581134 100644
+--- a/mythtv/programs/mythfrontend/main.cpp
++++ b/mythtv/programs/mythfrontend/main.cpp
+@@ -790,6 +790,19 @@ static int internal_play_media(const QString &mrl, const QString &plot,
+     return res;
+ }
+ 
++static int upnp_play_media(const QString &mrl, const QString &plot,
++                        const QString &title, const QString &subtitle,
++                        const QString &director, int season, int episode,
++                        int lenMins, const QString &year)
++{
++    VERBOSE(VB_GENERAL, QString("upnp_play_media '%1'").arg(mrl));
++    ProgramInfo pginfo(
++        mrl, plot, title, subtitle, director, season, episode,
++        lenMins, (year.toUInt()) ? year.toUInt() : 1900);
++    TV::StartTV(&pginfo, kStartTVIgnoreBookmark | kStartTVByNetworkCommand);
++    return 0;
++}
++
+ static void gotoMainMenu(void)
+ {
+ }
+@@ -933,6 +946,8 @@ static int internal_media_init()
+ {
+     REG_MEDIAPLAYER("Internal", QT_TRANSLATE_NOOP("MythControls",
+         "MythTV's native media player."), internal_play_media);
++    REG_MEDIAPLAYER("UPnP", QT_TRANSLATE_NOOP("MythControls",
++        "MythTV's UPnP media player."), upnp_play_media);
+     return 0;
+ }
+ 
+diff --git a/mythtv/programs/mythfrontend/mediarenderer.cpp b/mythtv/programs/mythfrontend/mediarenderer.cpp
+index 51baf17..3b417fc 100644
+--- a/mythtv/programs/mythfrontend/mediarenderer.cpp
++++ b/mythtv/programs/mythfrontend/mediarenderer.cpp
+@@ -10,6 +10,8 @@
+ 
+ #include "mediarenderer.h"
+ #include "mythfexml.h"
++#include "upnprctl.h"
++#include "upnpavt.h"
+ #include "compat.h"
+ 
+ /////////////////////////////////////////////////////////////////////////////
+@@ -88,7 +90,11 @@ MediaRenderer::MediaRenderer()
+                                  "http-get:*:video/avi:*,"
+                                  "http-get:*:audio/mpeg:*,"
+                                  "http-get:*:audio/wav:*,"
++                                 "http-get:*:audio/ogg:*,"
++                                 "http-get:*:audio/x-flac:*,"
+                                  "http-get:*:video/mpeg:*,"
++                                 "http-get:*:video/mp4:*,"
++                                 "http-get:*:video/mp2t:*,"
+                                  "http-get:*:video/nupplevideo:*,"
+                                  "http-get:*:video/x-ms-wmv:*";
+         // ------------------------------------------------------------------
+@@ -98,8 +104,9 @@ MediaRenderer::MediaRenderer()
+         m_pHttpServer->RegisterExtension( new MythFEXML( RootDevice(),
+                                           m_pHttpServer->m_sSharePath));
+ 
+-        // VERBOSE(VB_UPNP, QString( "MediaRenderer::Registering AVTransport Service." ));
+-        // m_pHttpServer->RegisterExtension( m_pUPnpAVT = new UPnpAVTransport( RootDevice() ));
++        VERBOSE(VB_UPNP, QString( "MediaRenderer::Registering AVTransport Service." ));
++        m_pHttpServer->RegisterExtension( new UPnpAVTransport( RootDevice(),
++                                          m_pHttpServer->m_sSharePath ));
+ 
+         VERBOSE(VB_UPNP, QString( "MediaRenderer::Registering CMGR Service." ));
+         // HttpServer will be responsible for deleting UPnpCMGR
+@@ -108,8 +115,9 @@ MediaRenderer::MediaRenderer()
+                                                 m_pHttpServer->m_sSharePath,
+                                                 "", sSinkProtocols ));
+ 
+-        // VERBOSE(VB_UPNP, QString( "MediaRenderer::Registering RenderingControl Service." ));
+-        // m_pHttpServer->RegisterExtension( m_pUPnpRCTL= new UPnpRCTL( RootDevice() ));
++        VERBOSE(VB_UPNP, QString( "MediaRenderer::Registering RenderingControl Service." ));
++        m_pHttpServer->RegisterExtension( new UPnpRCTL( RootDevice(),
++                                          m_pHttpServer->m_sSharePath ));
+ 
+         Start();
+ 
+-- 
+1.7.9.5
+

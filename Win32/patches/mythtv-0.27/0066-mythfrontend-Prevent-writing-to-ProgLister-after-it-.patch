@@ -1,0 +1,41 @@
+From f862cb68db33ecc43f493abbe71b174962721e5d Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 8 Nov 2011 20:01:05 +0100
+Subject: [PATCH 066/207] mythfrontend: Prevent writing to ProgLister after
+ it's deleted,
+
+ProgLister::keyPressEvent passes unhanded events to
+MythScreenType::keyPressEvent.  These events include ESC which can close
+the screen and delete the object.  This patch ensures that the object
+is not read or writtem after MythScreenType::keyPressEvent is called.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythfrontend/proglist.cpp |    6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/mythtv/programs/mythfrontend/proglist.cpp b/mythtv/programs/mythfrontend/proglist.cpp
+index 753f0d6..4bde4b6 100644
+--- a/mythtv/programs/mythfrontend/proglist.cpp
++++ b/mythtv/programs/mythfrontend/proglist.cpp
+@@ -300,15 +300,13 @@ bool ProgLister::keyPressEvent(QKeyEvent *e)
+         }
+     }
+ 
+-    if (!handled && MythScreenType::keyPressEvent(e))
+-        handled = true;
+-
+     if (needUpdate)
+         LoadInBackground();
+ 
+     m_allowEvents = true;
+ 
+-    return handled;
++    // CAUTION: MythScreenType::keyPressEvent(ESCAPE) deletes this object
++    return handled ? true : MythScreenType::keyPressEvent(e);
+ }
+ 
+ void ProgLister::ShowMenu(void)
+-- 
+1.7.9.5
+

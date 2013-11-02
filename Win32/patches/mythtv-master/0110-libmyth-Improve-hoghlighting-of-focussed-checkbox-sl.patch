@@ -1,0 +1,69 @@
+From 166dadb4b6efcb4883edd72da8b7a1151ede99c5 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 14 May 2012 22:18:43 +0200
+Subject: [PATCH 110/202] libmyth: Improve hoghlighting of focussed checkbox &
+ slider controls
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/mythwidgets.cpp |   25 ++++++++++++++-----------
+ 1 file changed, 14 insertions(+), 11 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/mythwidgets.cpp b/mythtv/libs/libmyth/mythwidgets.cpp
+index 60734f3..b3954ee 100644
+--- a/mythtv/libs/libmyth/mythwidgets.cpp
++++ b/mythtv/libs/libmyth/mythwidgets.cpp
+@@ -204,17 +204,19 @@ void MythCheckBox::focusInEvent(QFocusEvent *e)
+ {
+     emit changeHelpText(helptext);
+ 
+-    QColor highlight = palette().color(QPalette::Highlight);
+-    QPalette palette;
+-    palette.setColor(backgroundRole(), highlight);
+-    setPalette(palette);
++    setBackgroundRole(QPalette::Highlight);
++    setForegroundRole(QPalette::HighlightedText);
++    setAutoFillBackground(true);
+ 
+     QCheckBox::focusInEvent(e);
+ }
+ 
+ void MythCheckBox::focusOutEvent(QFocusEvent *e)
+ {
+-    setPalette(QPalette());
++    setBackgroundRole(QPalette::NoRole);
++    setForegroundRole(QPalette::Text);
++    setAutoFillBackground(false);
++
+     QCheckBox::focusOutEvent(e);
+ }
+ 
+@@ -372,18 +374,19 @@ void MythSlider::focusInEvent(QFocusEvent *e)
+ {
+     emit changeHelpText(helptext);
+ 
+-    QColor highlight = palette().color(QPalette::Highlight);
+-
+-    QPalette palette;
+-    palette.setColor(backgroundRole(), highlight);
+-    setPalette(palette);
++    setBackgroundRole(QPalette::Highlight);
++    setForegroundRole(QPalette::HighlightedText);
++    setAutoFillBackground(true);
+ 
+     QSlider::focusInEvent(e);
+ }
+ 
+ void MythSlider::focusOutEvent(QFocusEvent *e)
+ {
+-    setPalette(QPalette());
++    setBackgroundRole(QPalette::NoRole);
++    setForegroundRole(QPalette::Text);
++    setAutoFillBackground(false);
++
+     QSlider::focusOutEvent(e);
+ }
+ 
+-- 
+1.7.9.5
+

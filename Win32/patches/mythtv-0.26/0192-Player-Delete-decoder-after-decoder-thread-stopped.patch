@@ -1,0 +1,30 @@
+From c41ac0ff738b80d69b6abdf73a3e08781beda363 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 9 Aug 2013 13:53:29 +0100
+Subject: [PATCH 192/227] Player: Delete decoder after decoder thread stopped
+
+It is important to delete the decoder in DecoderEnd to ensure that any
+threads allocated by the Ffmpeg decoder are stopped before the video
+buffers are deallocated.  If not then random crashes can be observed
+when exiting playback of H264 encoded material if CPUs are > 1.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |    1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 0d54efe..6108daa 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -3099,6 +3099,7 @@ void MythPlayer::DecoderEnd(void)
+         LOG(VB_GENERAL, LOG_ERR, LOC + "Failed to stop decoder loop.");
+     else
+         LOG(VB_PLAYBACK, LOG_INFO, LOC + "Exited decoder loop.");
++    SetDecoder(NULL);
+ }
+ 
+ void MythPlayer::DecoderPauseCheck(void)
+-- 
+1.7.9.5
+

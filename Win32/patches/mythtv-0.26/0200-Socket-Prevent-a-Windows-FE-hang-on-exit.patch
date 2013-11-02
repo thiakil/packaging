@@ -1,0 +1,76 @@
+From d452cbd7db180d8c740994965eb69f852da5cdb3 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 12 Aug 2013 11:44:48 +0100
+Subject: [PATCH 200/227] Socket: Prevent a Windows FE hang on exit
+
+The Windows build doesn't support the select call on a pipe so the
+readyread thread uses a while loop.  However, the while loop never
+checks if the thread should be exiting and so never terminates leaving
+the Windows FE hung on exit.
+
+This patch checks if the ready thread should exit in the
+'select (no pipe)' while loop.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythbase/mythsocketthread.cpp |   10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythbase/mythsocketthread.cpp b/mythtv/libs/libmythbase/mythsocketthread.cpp
+index 2b75e1c..d07cbd6 100644
+--- a/mythtv/libs/libmythbase/mythsocketthread.cpp
++++ b/mythtv/libs/libmythbase/mythsocketthread.cpp
+@@ -30,7 +30,7 @@
+ 
+ #define SLOC(a) QString("MythSocketThread(sock 0x%1:%2): ")\
+                     .arg((uint64_t)a, 0, 16).arg(a->socket())
+-#define LOC     QString("MythSocketThread: ")
++#define LOC     QString("MythSocketThread::%1: ").arg(__func__)
+ 
+ const uint MythSocketThread::kShortWait = 100;
+ 
+@@ -46,16 +46,20 @@ MythSocketThread::MythSocketThread()
+ 
+ void ShutdownRRT(void)
+ {
++    LOG(VB_SOCKET, LOG_DEBUG, LOC + "-- begin");
+     QMutexLocker locker(&MythSocket::s_readyread_thread_lock);
+     if (MythSocket::s_readyread_thread)
+     {
+         MythSocket::s_readyread_thread->ShutdownReadyReadThread();
++        LOG(VB_SOCKET, LOG_DEBUG, LOC + "waiting");
+         MythSocket::s_readyread_thread->wait();
+     }
++    LOG(VB_SOCKET, LOG_DEBUG, LOC + "-- end");
+ }
+ 
+ void MythSocketThread::ShutdownReadyReadThread(void)
+ {
++    LOG(VB_SOCKET, LOG_DEBUG, LOC + "-- begin");
+     {
+         QMutexLocker locker(&m_readyread_lock);
+         m_readyread_run = false;
+@@ -63,9 +67,11 @@ void MythSocketThread::ShutdownReadyReadThread(void)
+ 
+     WakeReadyReadThread();
+ 
++    LOG(VB_SOCKET, LOG_DEBUG, LOC + "waiting");
+     wait(); // waits for thread to exit
+ 
+     CloseReadyReadPipe();
++    LOG(VB_SOCKET, LOG_DEBUG, LOC + "-- end");
+ }
+ 
+ void MythSocketThread::CloseReadyReadPipe(void) const
+@@ -284,7 +290,7 @@ void MythSocketThread::run(void)
+             // Unfortunately, select on a pipe is not supported on all
+             // platforms. So we fallback to a loop that instead times out
+             // of select and checks for wakeAll event.
+-            while (!rval)
++            while (m_readyread_run && !rval)
+             {
+                 // also exit select on exceptions on same descriptors
+                 fd_set efds;
+-- 
+1.7.9.5
+

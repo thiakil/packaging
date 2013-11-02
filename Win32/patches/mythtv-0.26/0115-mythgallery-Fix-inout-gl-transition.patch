@@ -1,0 +1,48 @@
+From ab0512c856f6474effb8f9f6d154beaa7b7ff5a4 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 1 Feb 2013 22:04:20 +0000
+Subject: [PATCH 115/227] mythgallery: Fix inout(gl) transition
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../mythgallery/mythgallery/glsingleview.cpp       |   15 ++++++++-------
+ 1 file changed, 8 insertions(+), 7 deletions(-)
+
+diff --git a/mythplugins/mythgallery/mythgallery/glsingleview.cpp b/mythplugins/mythgallery/mythgallery/glsingleview.cpp
+index 8edb77d..dd83e56 100644
+--- a/mythplugins/mythgallery/mythgallery/glsingleview.cpp
++++ b/mythplugins/mythgallery/mythgallery/glsingleview.cpp
+@@ -896,7 +896,8 @@ void GLSingleView::EffectInOut(void)
+ 
+     int  texnum  = m_texCur;
+     bool fadeout = false;
+-    if (m_effect_frame_time.elapsed() <= m_effect_transition_timeout / 2)
++    float const elapsed = m_effect_frame_time.elapsed();
++    if (elapsed <= m_effect_transition_timeout / 2)
+     {
+         texnum  = (m_texCur) ? 0 : 1;
+         fadeout = true;
+@@ -905,14 +906,14 @@ void GLSingleView::EffectInOut(void)
+     glMatrixMode(GL_MODELVIEW);
+     glLoadIdentity();
+ 
+-    float tt = m_effect_frame_time.elapsed() * m_effect_transition_timeout_inv;
+-    float t = 2.0f / ((fadeout) ? (0.5f - tt) : (tt - 0.5f));
++    float tt = elapsed * m_effect_transition_timeout_inv;
++    float t = 2.0f * ((fadeout) ? (0.5f - tt) : (tt - 0.5f));
+ 
+-    glScalef(t, t, 1.0f);
++    glScalef(t, t, 1);
+     t = 1.0f - t;
+-    glTranslatef((m_effect_rotate_direction % 2 == 0) ? ((m_effect_rotate_direction == 2)? 1 : -1) * t : 0.0f,
+-                 (m_effect_rotate_direction % 2 == 1) ? ((m_effect_rotate_direction == 1)? 1 : -1) * t : 0.0f,
+-                 0.0f);
++    glTranslatef((m_effect_rotate_direction % 2 == 0) ? ((m_effect_rotate_direction == 2)? t : -t) : 0,
++                 (m_effect_rotate_direction % 2 == 1) ? ((m_effect_rotate_direction == 1)? t : -t) : 0,
++                 0);
+ 
+     m_texItem[texnum].MakeQuad();
+ 
+-- 
+1.7.9.5
+

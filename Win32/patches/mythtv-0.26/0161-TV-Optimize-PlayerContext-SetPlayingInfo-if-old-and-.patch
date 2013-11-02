@@ -1,0 +1,28 @@
+From 5fe0c9c01eb2e5aaa7b6a8c91fb186f85b430898 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 26 May 2013 10:45:52 +0100
+Subject: [PATCH 161/227] TV: Optimize PlayerContext::SetPlayingInfo if old
+ and new are identical
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/playercontext.cpp |    3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/playercontext.cpp b/mythtv/libs/libmythtv/playercontext.cpp
+index 2f9f664..ee525bf 100644
+--- a/mythtv/libs/libmythtv/playercontext.cpp
++++ b/mythtv/libs/libmythtv/playercontext.cpp
+@@ -856,6 +856,9 @@ void PlayerContext::SetPlayingInfo(const ProgramInfo *info)
+ 
+     if (playingInfo)
+     {
++        if (info && info->MakeUniqueKey() == playingInfo->MakeUniqueKey())
++            return;
++
+         if (!ignoreDB)
+             playingInfo->MarkAsInUse(false, recUsage);
+         delete playingInfo;
+-- 
+1.7.9.5
+

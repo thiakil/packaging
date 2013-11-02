@@ -1,0 +1,120 @@
+From 70e47c21d03c2599e82cd66651d5b38eb38220bf Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 29 Jun 2013 11:20:07 +0100
+Subject: [PATCH 239/285] Netstream: Add a mutex to prevent concurrent access
+ to QNetworkAccessManager
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/netstream.cpp |   26 ++++++++++++++++++--------
+ mythtv/libs/libmythtv/netstream.h   |    8 ++++++--
+ 2 files changed, 24 insertions(+), 10 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/netstream.cpp b/mythtv/libs/libmythtv/netstream.cpp
+index 27be597..f718807 100644
+--- a/mythtv/libs/libmythtv/netstream.cpp
++++ b/mythtv/libs/libmythtv/netstream.cpp
+@@ -527,8 +527,10 @@ void NetStream::Abort()
+ 
+     if (m_reply)
+     {
+-        VERBOSE(VB_FILE, LOC + QString("(%1) Abort 0x%2")
+-            .arg(m_id).arg(quintptr(m_reply),0,16) );
++        if (m_state >= kStarted && m_state < kFinished)
++            VERBOSE(VB_FILE, LOC + QString("(%1) Abort 0x%2")
++                .arg(m_id).arg(quintptr(m_reply),0,16) );
++
+         NAMThread::PostEvent(new NetStreamAbort(m_id, m_reply));
+         // NAMthread will delete the reply
+         m_reply = 0;
+@@ -553,6 +555,9 @@ int NetStream::safe_read(void *data, unsigned sz, unsigned millisecs /* = 0 */)
+         m_ready.wait(&m_mutex, millisecs - elapsed);
+     }
+ 
++    locker.unlock();
++    QMutexLocker lockNAM(NAMThread::GetMutex());
++    locker.relock();
+     if (!m_reply)
+         return -1;
+ 
+@@ -721,7 +726,7 @@ NAMThread & NAMThread::manager()
+     return thread;
+ }
+ 
+-NAMThread::NAMThread() : m_bQuit(false), m_nam(0)
++NAMThread::NAMThread() : m_bQuit(false), m_mutexNAM(QMutex::Recursive), m_nam(0)
+ {
+     setObjectName("NAMThread");
+ 
+@@ -785,18 +790,25 @@ void NAMThread::run()
+ 
+     m_running.release();
+ 
++    QMutexLocker lockNAM(&m_mutexNAM);
+     while(!m_bQuit)
+     {
+         // Process NAM events
+         QCoreApplication::processEvents();
+ 
++        lockNAM.unlock();
++
+         QMutexLocker locker(&m_mutex);
+         m_work.wait(&m_mutex, 100);
++
++        lockNAM.relock();
++
+         while (!m_workQ.isEmpty())
+         {
+             QScopedPointer< QEvent > ev(m_workQ.dequeue());
+             locker.unlock();
+             NewRequest(ev.data());
++            locker.relock();
+         }
+     }
+ 
+@@ -815,12 +827,10 @@ void NAMThread::quit()
+     QThread::quit();
+ }
+ 
+-// static
+-void NAMThread::PostEvent(QEvent *event)
++void NAMThread::Post(QEvent *event)
+ {
+-    NAMThread &m = manager();
+-    QMutexLocker locker(&m.m_mutex);
+-    m.m_workQ.enqueue(event);
++    QMutexLocker locker(&m_mutex);
++    m_workQ.enqueue(event);
+ }
+ 
+ bool NAMThread::NewRequest(QEvent *event)
+diff --git a/mythtv/libs/libmythtv/netstream.h b/mythtv/libs/libmythtv/netstream.h
+index 5dc6ad6..e7d84e1 100644
+--- a/mythtv/libs/libmythtv/netstream.h
++++ b/mythtv/libs/libmythtv/netstream.h
+@@ -120,7 +120,10 @@ public:
+     static NAMThread & manager(); // Singleton
+     virtual ~NAMThread();
+ 
+-    static void PostEvent(QEvent *);
++    static inline void PostEvent(QEvent *e) { manager().Post(e); }
++    void Post(QEvent *event);
++
++    static inline QMutex* GetMutex() { return &manager().m_mutexNAM; }
+ 
+     static bool isAvailable(); // is network usable
+     static QDateTime GetLastModified(const QString &url);
+@@ -141,8 +144,9 @@ private slots:
+ private:
+     volatile bool m_bQuit;
+     QSemaphore m_running;
+-    mutable QMutex m_mutex; // Protects r/w access to the following data
++    mutable QMutex m_mutexNAM; // Provides recursive access to m_nam
+     QNetworkAccessManager *m_nam;
++    mutable QMutex m_mutex; // Protects r/w access to the following data
+     QQueue< QEvent * > m_workQ;
+     QWaitCondition m_work;
+ };
+-- 
+1.7.9.5
+

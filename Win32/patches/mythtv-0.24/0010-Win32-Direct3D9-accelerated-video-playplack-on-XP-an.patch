@@ -1,0 +1,842 @@
+From 3f50f1ea57bef509b595cb19390a2e028cb6d9f9 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 14 Mar 2011 21:14:33 +0100
+Subject: [PATCH 010/285] Win32 Direct3D9 accelerated video playplack on XP
+ and early graphics
+
+This patch enables WinXP/2K with older GPUs to support h/w accelerated
+video playback.
+
+The nub of the problem was the texture surface format.  This format has
+to be verified with CheckDeviceFormatConversion so that StretchRect
+works OK.  I've also added some code to keep Wine happy
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythui/mythrender_d3d9.cpp |  445 ++++++++++++++++++++---------
+ mythtv/libs/libmythui/mythrender_d3d9.h   |   34 +--
+ 2 files changed, 323 insertions(+), 156 deletions(-)
+
+diff --git a/mythtv/libs/libmythui/mythrender_d3d9.cpp b/mythtv/libs/libmythui/mythrender_d3d9.cpp
+index 9afb06c..437fa24 100644
+--- a/mythtv/libs/libmythui/mythrender_d3d9.cpp
++++ b/mythtv/libs/libmythui/mythrender_d3d9.cpp
+@@ -1,5 +1,14 @@
+-using namespace std;
+ #define _WIN32_WINNT 0x500
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++
++#include <cstdlib>
++#include <algorithm>
++using std::min;
+ 
+ #include <QRect>
+ #include <QMap>
+@@ -8,31 +17,36 @@ using namespace std;
+ #include "mythverbose.h"
+ #include "mythrender_d3d9.h"
+ 
+-class MythD3DVertexBuffer
+-{
+-  public:
+-    MythD3DVertexBuffer(IDirect3DTexture9* tex = NULL) :
+-        m_color(0xFFFFFFFF), m_dest(QRect(QPoint(0,0),QSize(0,0))),
+-        m_src(QRect(QPoint(0,0),QSize(0,0))), m_texture(tex)
+-    {
+-    }
++#define D3DLOC QString("MythRenderD3D9: ")
++#define D3DERR QString("MythRenderD3D9 Error: ")
++
++#define D3DFVF_TEXTUREVERTEX (D3DFVF_XYZRHW|D3DFVF_DIFFUSE|D3DFVF_TEX1|D3DFVF_TEX2)
++#define D3DFVF_VERTEX        (D3DFVF_XYZRHW|D3DFVF_DIFFUSE)
++
++const D3DFORMAT mD3DFMT_YV12 = (D3DFORMAT)MAKEFOURCC('Y','V','1','2');
++const D3DFORMAT mD3DFMT_IYUV = (D3DFORMAT)MAKEFOURCC('I','Y','U','V');
++const D3DFORMAT mD3DFMT_I420 = (D3DFORMAT)MAKEFOURCC('I','4','2','0');
++const D3DFORMAT mD3DFMT_YV16 = (D3DFORMAT)MAKEFOURCC('Y','V','1','6');
+ 
++struct MythD3DVertexBuffer
++{
+     uint32_t           m_color;
+     QRect              m_dest;
+     QRect              m_src;
+     IDirect3DTexture9 *m_texture;
++
++    MythD3DVertexBuffer(IDirect3DTexture9* tex = NULL) : m_color(~0), m_texture(tex)
++    { }
+ };
+ 
+-class MythD3DSurface
++struct MythD3DSurface
+ {
+-  public:
+-    MythD3DSurface(QSize size = QSize(0,0), D3DFORMAT fmt = D3DFMT_UNKNOWN) :
+-        m_size(size), m_fmt(fmt)
+-    {
+-    }
+-
+     QSize     m_size;
+     D3DFORMAT m_fmt;
++
++    MythD3DSurface(QSize size = QSize(0,0), D3DFORMAT fmt = D3DFMT_UNKNOWN) :
++        m_size(size), m_fmt(fmt)
++    { }
+ };
+ 
+ typedef struct
+@@ -57,17 +71,49 @@ typedef struct
+     D3DCOLOR    diffuse;
+ } VERTEX;
+ 
+-D3D9Image::D3D9Image(MythRenderD3D9 *render, QSize size, bool video)
+-  : m_size(size), m_valid(false), m_render(render), m_vertexbuffer(NULL),
+-    m_texture(NULL), m_surface(NULL)
++
++// Direct3D error code to string
++static const QString errString(HRESULT hr)
+ {
+-    if (m_render)
++#define ECASE(e) case e: return #e
++    switch (hr)
+     {
+-        m_texture      = m_render->CreateTexture(m_size);
+-        m_vertexbuffer = m_render->CreateVertexBuffer(m_texture);
+-        m_surface      = m_render->CreateSurface(m_size, video);
++        ECASE(D3D_OK);
++        ECASE(D3DOK_NOAUTOGEN);
++        ECASE(D3DERR_WRONGTEXTUREFORMAT);
++        ECASE(D3DERR_UNSUPPORTEDCOLOROPERATION);
++        ECASE(D3DERR_UNSUPPORTEDCOLORARG);
++        ECASE(D3DERR_UNSUPPORTEDALPHAOPERATION);
++        ECASE(D3DERR_UNSUPPORTEDALPHAARG);
++        ECASE(D3DERR_TOOMANYOPERATIONS);
++        ECASE(D3DERR_CONFLICTINGTEXTUREFILTER);
++        ECASE(D3DERR_UNSUPPORTEDFACTORVALUE);
++        ECASE(D3DERR_CONFLICTINGRENDERSTATE);
++        ECASE(D3DERR_UNSUPPORTEDTEXTUREFILTER);
++        ECASE(D3DERR_CONFLICTINGTEXTUREPALETTE);
++        ECASE(D3DERR_DRIVERINTERNALERROR);
++        ECASE(D3DERR_NOTFOUND);
++        ECASE(D3DERR_MOREDATA);
++        ECASE(D3DERR_DEVICELOST);
++        ECASE(D3DERR_DEVICENOTRESET);
++        ECASE(D3DERR_NOTAVAILABLE);
++        ECASE(D3DERR_OUTOFVIDEOMEMORY);
++        ECASE(D3DERR_INVALIDDEVICE);
++        ECASE(D3DERR_INVALIDCALL);
++        ECASE(D3DERR_DRIVERINVALIDCALL);
++        ECASE(D3DERR_WASSTILLDRAWING);
+     }
+-    m_valid = m_texture && m_vertexbuffer && m_surface;
++    return QString("0x%1").arg((ulong)hr,0,16);
++}
++
++
++D3D9Image::D3D9Image(MythRenderD3D9* render, QSize size, bool video) :
++  m_render(render), m_size(size),
++  m_texture(render ? render->CreateTexture(size) : 0),
++  m_vertexbuffer(render && m_texture ? render->CreateVertexBuffer(m_texture) : 0),
++  m_surface(render ? render->CreateSurface(size, video) : 0),
++  m_valid(m_vertexbuffer && m_texture && m_surface)
++{
+ }
+ 
+ D3D9Image::~D3D9Image()
+@@ -83,41 +129,35 @@ D3D9Image::~D3D9Image()
+         m_render->DeleteSurface(m_surface);
+ }
+ 
+-bool D3D9Image::SetAsRenderTarget(void)
++bool D3D9Image::SetAsRenderTarget(void) const
+ {
+-    if (m_valid)
+-        return m_render->SetRenderTarget(m_texture);
+-    return m_valid;
++    return m_valid ? m_render->SetRenderTarget(m_texture) : false;
+ }
+ 
+-bool D3D9Image::UpdateImage(const MythImage *img)
++bool D3D9Image::UpdateImage(const MythImage *img) const
+ {
+-    bool result = true;
+-    if (m_valid)
++    bool result = m_valid;
++    if (result)
+     {
+         result &= m_render->UpdateSurface(m_surface, img);
+         result &= m_render->StretchRect(m_texture, m_surface);
+     }
+-    return m_valid && result;
++    return result;
+ }
+ 
+-bool D3D9Image::UpdateVertices(const QRect &dvr, const QRect &vr, int alpha,
+-                               bool video)
++bool D3D9Image::UpdateVertices(const QRect &dvr, const QRect &vr,
++    int alpha, bool video) const
+ {
+-    if (m_valid)
+-        return m_render->UpdateVertexBuffer(m_vertexbuffer, dvr, vr,
+-                                            alpha, video);
+-    return m_valid;
++    return m_valid ? m_render->UpdateVertexBuffer(
++                        m_vertexbuffer, dvr, vr, alpha, video) : false;
+ }
+ 
+-bool D3D9Image::Draw(void)
++bool D3D9Image::Draw(void) const
+ {
+-    if (m_valid)
+-        return m_render->DrawTexturedQuad(m_vertexbuffer);
+-    return m_valid;
++    return m_valid ? m_render->DrawTexturedQuad(m_vertexbuffer) : false;
+ }
+ 
+-uint8_t* D3D9Image::GetBuffer(bool &hardware_conv, uint &pitch)
++uint8_t* D3D9Image::GetBuffer(bool &hardware_conv, uint &pitch) const
+ {
+     if (!m_valid)
+         return NULL;
+@@ -126,7 +166,7 @@ uint8_t* D3D9Image::GetBuffer(bool &hardware_conv, uint &pitch)
+     return m_render->GetBuffer(m_surface, pitch);
+ }
+ 
+-void D3D9Image::ReleaseBuffer(void)
++void D3D9Image::ReleaseBuffer(void) const
+ {
+     if (!m_valid)
+         return;
+@@ -134,23 +174,17 @@ void D3D9Image::ReleaseBuffer(void)
+     m_render->StretchRect(m_texture, m_surface);
+ }
+ 
+-QRect D3D9Image::GetRect(void)
++QRect D3D9Image::GetRect(void) const
+ {
+-    if (!m_valid)
+-        return QRect();
+-    return m_render->GetRect(m_vertexbuffer);
++    return m_valid ? m_render->GetRect(m_vertexbuffer) : QRect();
+ }
+ 
+-#define D3DFVF_TEXTUREVERTEX (D3DFVF_XYZRHW|D3DFVF_DIFFUSE|D3DFVF_TEX1|D3DFVF_TEX2)
+-#define D3DFVF_VERTEX        (D3DFVF_XYZRHW|D3DFVF_DIFFUSE)
+-#define D3DLOC QString("MythRenderD3D9: ")
+-#define D3DERR QString("MythRenderD3D9 Error: ")
+ 
+ MythRenderD3D9::MythRenderD3D9(void)
+   : m_d3d(NULL), m_d3dDevice(NULL),
+     m_adaptor_fmt(D3DFMT_UNKNOWN),
+-    m_videosurface_fmt((D3DFORMAT)MAKEFOURCC('Y','V','1','2')),
+-    m_surface_fmt(D3DFMT_A8R8G8B8), m_texture_fmt(D3DFMT_A8R8G8B8),
++    m_videosurface_fmt(D3DFMT_UNKNOWN),
++    m_surface_fmt(D3DFMT_UNKNOWN), m_texture_fmt(D3DFMT_UNKNOWN),
+     m_rect_vertexbuffer(NULL), m_default_surface(NULL), m_current_surface(NULL),
+     m_lock(QMutex::Recursive),
+     m_blend(true), m_multi_texturing(true), m_texture_vertices(true)
+@@ -185,28 +219,34 @@ MythRenderD3D9::~MythRenderD3D9(void)
+         VERBOSE(VB_GENERAL, D3DLOC + "Deleting D3D9.");
+         m_d3d->Release();
+     }
++
++    VERBOSE(VB_GENERAL, D3DLOC + "D3D9 resources released.");
++}
++
++bool MythRenderD3D9::HardwareYUVConversion() const
++{
++    return m_videosurface_fmt == mD3DFMT_YV12;
+ }
+ 
+-bool MythRenderD3D9::FormatSupported(D3DFORMAT surface, D3DFORMAT adaptor)
++bool MythRenderD3D9::FormatSupported(D3DFORMAT src, D3DFORMAT dst) const
+ {
+     if (!m_d3d)
+         return false;
+ 
+-    HRESULT hr = m_d3d->CheckDeviceFormat(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+-                                          adaptor, 0, D3DRTYPE_SURFACE, surface);
+-    if (SUCCEEDED(hr))
+-    {
+-        hr = m_d3d->CheckDeviceFormatConversion(D3DADAPTER_DEFAULT,
+-                                                D3DDEVTYPE_HAL, surface, adaptor);
+-        if (SUCCEEDED(hr))
+-            return true;
+-    }
+-    return false;
++    if (FAILED(m_d3d->CheckDeviceFormat(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
++            m_adaptor_fmt, 0, D3DRTYPE_SURFACE, src)))
++        return false;
++
++    // NB CheckDeviceFormatConversion is not implemented in Wine as of 1.3.6
++    if (FAILED(m_d3d->CheckDeviceFormatConversion(D3DADAPTER_DEFAULT,
++            D3DDEVTYPE_HAL, src, dst)))
++        return false;
++
++    return true;
+ }
+ 
+ static const QString toString(D3DFORMAT fmt)
+ {
+-    QString res = "Unknown";
+     switch (fmt)
+     {
+         case D3DFMT_A8:
+@@ -215,10 +255,26 @@ static const QString toString(D3DFORMAT fmt)
+             return "A8R8G8B8";
+         case D3DFMT_X8R8G8B8:
+             return "X8R8G8B8";
++        case D3DFMT_A8B8G8R8:
++            return "A8B8G8R8";
++        case D3DFMT_X8B8G8R8:
++            return "X8B8G8R8";
++        case mD3DFMT_YV12:
++            return "YV12";
++        case D3DFMT_UYVY:
++            return "UYVY";
++        case D3DFMT_YUY2:
++            return "YUY2";
++        case mD3DFMT_IYUV:
++            return "IYUV";
++        case mD3DFMT_I420:
++            return "I420";
++        case mD3DFMT_YV16:
++            return "YV16";
+         default:
+-            return res;
++            break;
+     }
+-    return res;
++    return QString().setNum((ulong)fmt,16);
+ }
+ 
+ bool MythRenderD3D9::Create(QSize size, HWND window)
+@@ -228,7 +284,6 @@ bool MythRenderD3D9::Create(QSize size, HWND window)
+     typedef LPDIRECT3D9 (WINAPI *LPFND3DC)(UINT SDKVersion);
+     static  HINSTANCE hD3DLib            = NULL;
+     static  LPFND3DC  OurDirect3DCreate9 = NULL;
+-    D3DCAPS9 d3dCaps;
+ 
+     if (!hD3DLib)
+     {
+@@ -256,39 +311,111 @@ bool MythRenderD3D9::Create(QSize size, HWND window)
+         return false;
+     }
+ 
++    D3DCAPS9 d3dCaps;
+     ZeroMemory(&d3dCaps, sizeof(d3dCaps));
+-    if (D3D_OK != m_d3d->GetDeviceCaps(
+-            D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, &d3dCaps))
++    HRESULT hr = m_d3d->GetDeviceCaps(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, &d3dCaps);
++    if (FAILED(hr))
+     {
+-        VERBOSE(VB_IMPORTANT, D3DERR + "Could not read adapter capabilities.");
+-        return false;
++        VERBOSE(VB_IMPORTANT, D3DERR + QString("GetDeviceCaps: %1.")
++            .arg(errString(hr)));
+     }
+ 
+     D3DDISPLAYMODE d3ddm;
+-    if (D3D_OK != m_d3d->GetAdapterDisplayMode(D3DADAPTER_DEFAULT, &d3ddm))
++    hr = m_d3d->GetAdapterDisplayMode(D3DADAPTER_DEFAULT, &d3ddm);
++    if (FAILED(hr))
+     {
+-        VERBOSE(VB_IMPORTANT, D3DERR + "Could not read adapter display mode.");
++        VERBOSE(VB_IMPORTANT, D3DERR + QString("GetAdapterDisplayMode: %1.")
++            .arg(errString(hr)));
+         return false;
+     }
+ 
+-    // TODO - check adaptor format is reasonable and try alternatives
+     m_adaptor_fmt = d3ddm.Format;
+-    bool default_ok = FormatSupported(m_videosurface_fmt, m_adaptor_fmt);
+-    if (!default_ok)
+-        m_videosurface_fmt = m_adaptor_fmt;
+-
+     VERBOSE(VB_GENERAL, D3DLOC +
+-        QString("Default Adaptor Format %1 - Hardware YV12 to RGB %2 ")
+-            .arg(toString(m_adaptor_fmt))
+-            .arg(default_ok ? "supported" : "unsupported"));
+-
+-    // TODO - try alternative formats if necessary
+-    if (!FormatSupported(m_surface_fmt, m_adaptor_fmt))
+-        VERBOSE(VB_IMPORTANT, D3DERR + QString("%1 surface format not supported.")
+-                                          .arg(toString(m_surface_fmt)));
++            QString("Default Adaptor Format %1.").arg(toString(m_adaptor_fmt)));
++
++    // Find the best back buffer surface format
++    static const D3DFORMAT bfmt[] =
++    {
++        D3DFMT_A8R8G8B8,
++        D3DFMT_X8R8G8B8
++    };
++
++    for (unsigned i = 0; i < sizeof bfmt / sizeof bfmt[0]; ++i)
++    {
++        if (SUCCEEDED(m_d3d->CheckDeviceType(D3DADAPTER_DEFAULT,
++                      D3DDEVTYPE_HAL, m_adaptor_fmt, bfmt[i], FALSE)))
++        {
++            m_surface_fmt = bfmt[i];
++            break;
++        }
++    }
++
++    if (D3DFMT_UNKNOWN != m_surface_fmt)
++    {
++        VERBOSE(VB_GENERAL, D3DLOC +
++                QString("Best back buffer format: %1.").arg(toString(m_surface_fmt)));
++        m_texture_fmt = m_surface_fmt;
++    }
++    else
++    {
++        VERBOSE(VB_IMPORTANT, D3DERR + "Failed to agree back buffer format");
++        return false;
++    }
++
++    // This must fail on any real Windows system but Wine has a stub that
++    // always returns success
++    bool isWine = false;
++    if (FAILED(m_d3d->CheckDeviceFormatConversion(D3DADAPTER_DEFAULT,
++            D3DDEVTYPE_HAL, D3DFMT_UNKNOWN, m_adaptor_fmt)))
++    {
++        // Find the best h/w supported video surface format
++        static const D3DFORMAT vfmt[] =
++        {
++            mD3DFMT_YV12,
++            D3DFMT_A8R8G8B8,
++            D3DFMT_X8R8G8B8
++        };
++
++        for (unsigned i = 0; i < sizeof vfmt / sizeof vfmt[0]; ++i)
++        {
++            if (FormatSupported(vfmt[i], m_texture_fmt))
++            {
++                m_videosurface_fmt = vfmt[i];
++                break;
++            }
++        }
++    }
+     else
+-        VERBOSE(VB_GENERAL, D3DLOC + QString("Using %1 surface format.")
+-                                          .arg(toString(m_surface_fmt)));
++    {
++        VERBOSE(VB_GENERAL, D3DLOC + "Broken CheckDeviceFormatConversion (Wine?).");
++        isWine = true;
++        m_videosurface_fmt = m_texture_fmt;
++    }
++
++    if (mD3DFMT_YV12 == m_videosurface_fmt)
++    {
++        VERBOSE(VB_GENERAL, D3DLOC + "Hardware YV12 to RGB conversion available.");
++    }
++    // If YV12 is unavailable from the best back buffer format try with the
++    // current adapter format
++    else if (!isWine && FormatSupported(mD3DFMT_YV12, m_adaptor_fmt))
++    {
++        m_videosurface_fmt = mD3DFMT_YV12;
++        m_texture_fmt = m_adaptor_fmt;
++        VERBOSE(VB_GENERAL, D3DLOC +
++                QString("Hardware YV12 to RGB conversion with texture format %1.")
++                .arg(toString(m_texture_fmt)));
++    }
++    else if (D3DFMT_UNKNOWN != m_videosurface_fmt)
++    {
++        VERBOSE(VB_GENERAL, D3DLOC +
++                QString("Hardware YV12 to RGB conversion unavailable, using %1.")
++                .arg(toString(m_videosurface_fmt)));
++    }
++    else
++    {
++        VERBOSE(VB_IMPORTANT, D3DERR + "Failed to agree video surface format.");
++    }
+ 
+     D3DPRESENT_PARAMETERS d3dpp;
+     ZeroMemory(&d3dpp, sizeof(D3DPRESENT_PARAMETERS));
+@@ -303,21 +430,27 @@ bool MythRenderD3D9::Create(QSize size, HWND window)
+     d3dpp.Flags                  = D3DPRESENTFLAG_VIDEO;
+     d3dpp.PresentationInterval   = D3DPRESENT_INTERVAL_ONE;
+ 
+-    if (D3D_OK != m_d3d->CreateDevice(D3DADAPTER_DEFAULT,
+-                                      D3DDEVTYPE_HAL, d3dpp.hDeviceWindow,
+-                                      D3DCREATE_SOFTWARE_VERTEXPROCESSING,
+-                                      &d3dpp, &m_d3dDevice))
++    hr = m_d3d->CreateDevice(D3DADAPTER_DEFAULT,
++                D3DDEVTYPE_HAL, d3dpp.hDeviceWindow,
++                D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_MULTITHREADED,
++                &d3dpp, &m_d3dDevice);
++    if (FAILED(hr))
+     {
+-        VERBOSE(VB_IMPORTANT, D3DERR + "Could not create the D3D device.");
++        VERBOSE(VB_IMPORTANT, D3DERR + QString("CreateDevice: %1.")
++            .arg(errString(hr)));
+         return false;
+     }
+ 
+-    VERBOSE(VB_GENERAL, D3DLOC +
+-               QString("Hardware YV12 to RGB conversion %1.")
+-               .arg(m_videosurface_fmt != (D3DFORMAT)MAKEFOURCC('Y','V','1','2') ?
+-                 "unavailable" : "enabled"));
++    VERBOSE(VB_GENERAL, D3DLOC + QString("Device backbuffer format: %1.")
++                                      .arg(toString(d3dpp.BackBufferFormat)));
++    if (D3DFMT_UNKNOWN == m_texture_fmt)
++        m_texture_fmt = d3dpp.BackBufferFormat;
++    if (D3DFMT_UNKNOWN == m_surface_fmt)
++        m_surface_fmt = d3dpp.BackBufferFormat;
++    if (D3DFMT_UNKNOWN == m_videosurface_fmt)
++        m_videosurface_fmt = d3dpp.BackBufferFormat;
+ 
+-    static bool debugged = false;
++    static bool debugged;
+     if (!debugged)
+     {
+         debugged = true;
+@@ -384,7 +517,8 @@ bool MythRenderD3D9::ClearBuffer(void)
+                                     D3DCOLOR_ARGB(0, 0, 0, 0), 1.0f, 0);
+     if (FAILED(hr))
+     {
+-        VERBOSE(VB_IMPORTANT, D3DERR + "Clear() failed.");
++        VERBOSE(VB_IMPORTANT, D3DERR + QString("Clear: %1.")
++            .arg(errString(hr)));
+         return false;
+     }
+     return true;
+@@ -396,7 +530,8 @@ bool MythRenderD3D9::Begin(void)
+     HRESULT hr = m_d3dDevice->BeginScene();
+     if (FAILED(hr))
+     {
+-        VERBOSE(VB_IMPORTANT, D3DERR + "BeginScene() failed.");
++        VERBOSE(VB_IMPORTANT, D3DERR + QString("BeginScene: %1.")
++            .arg(errString(hr)));
+         return false;
+     }
+     return true;
+@@ -408,12 +543,36 @@ bool MythRenderD3D9::End(void)
+     HRESULT hr = m_d3dDevice->EndScene();
+     if (FAILED(hr))
+     {
+-        VERBOSE(VB_IMPORTANT, D3DERR + "EndScene() failed.");
++        VERBOSE(VB_IMPORTANT, D3DERR + QString("EndScene: %1.")
++            .arg(errString(hr)));
++        return false;
++    }
++    return true;
++}
++
++bool MythRenderD3D9::Present(HWND win)
++{
++    QMutexLocker locker(&m_lock);
++    HRESULT hr = m_d3dDevice->Present(NULL, NULL, win, NULL);
++    if (FAILED(hr))
++    {
++        VERBOSE(VB_IMPORTANT, D3DERR + "Present() failed)");
+         return false;
+     }
++    SetThreadExecutionState(ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
+     return true;
+ }
+ 
++static QString sfcString(IDirect3DSurface9 *surface)
++{
++    D3DSURFACE_DESC desc;
++    return SUCCEEDED(surface->GetDesc(&desc)) ?
++        QString("fmt=%1 type=%2 usage=%3 pool=%4 width=%5 height=%6")
++            .arg(toString(desc.Format)).arg(desc.Type).arg(desc.Usage)
++            .arg(desc.Pool).arg(desc.Width).arg(desc.Height)
++        : QString("GetDesc failed");
++}
++
+ bool MythRenderD3D9::StretchRect(IDirect3DTexture9 *texture,
+                               IDirect3DSurface9 *surface)
+ {
+@@ -426,7 +585,8 @@ bool MythRenderD3D9::StretchRect(IDirect3DTexture9 *texture,
+     HRESULT hr = texture->GetSurfaceLevel(0, &d3ddest);
+     if (FAILED(hr))
+     {
+-        VERBOSE(VB_IMPORTANT, D3DERR + "GetSurfaceLevel() failed");
++        VERBOSE(VB_IMPORTANT, D3DERR + QString("GetSurfaceLevel: %1.")
++            .arg(errString(hr)));
+         return false;
+     }
+ 
+@@ -435,7 +595,10 @@ bool MythRenderD3D9::StretchRect(IDirect3DTexture9 *texture,
+     d3ddest->Release();
+     if (FAILED(hr))
+     {
+-        VERBOSE(VB_IMPORTANT, D3DERR + "StretchRect() failed");
++        VERBOSE(VB_IMPORTANT, D3DERR + QString("StretchRect: %1, src%2 dst%3")
++            .arg(errString(hr)).arg(sfcString(surface)).arg(sfcString(d3ddest)) );
++
++        (void)m_d3dDevice->ColorFill(d3ddest, NULL, D3DCOLOR_ARGB(0xFF, 0, 0, 0xff) );
+         return false;
+     }
+     return true;
+@@ -461,14 +624,16 @@ bool MythRenderD3D9::DrawTexturedQuad(IDirect3DVertexBuffer9 *vertexbuffer)
+                                               0, sizeof(TEXTUREVERTEX));
+     if (FAILED(hr))
+     {
+-        VERBOSE(VB_IMPORTANT, D3DERR + "SetStreamSource() failed");
++        VERBOSE(VB_IMPORTANT, D3DERR + QString("SetStreamSource: %1.")
++            .arg(errString(hr)));
+         return false;
+     }
+ 
+     hr = m_d3dDevice->DrawPrimitive(D3DPT_TRIANGLEFAN, 0, 2);
+     if (FAILED(hr))
+     {
+-        VERBOSE(VB_IMPORTANT, D3DERR + "DrawPrimitive() failed");
++        VERBOSE(VB_IMPORTANT, D3DERR + QString("drawPrimitive: %1.")
++            .arg(errString(hr)));
+         return false;
+     }
+ 
+@@ -486,7 +651,8 @@ void MythRenderD3D9::DrawRect(const QRect &rect, const QColor &color)
+ 
+         if (FAILED(hr))
+         {
+-            VERBOSE(VB_IMPORTANT, D3DERR + "Failed to create vertex buffer");
++            VERBOSE(VB_IMPORTANT, D3DERR + QString("CreateVertexBuffer: %1.")
++                .arg(errString(hr)));
+             return;
+         }
+     }
+@@ -504,7 +670,8 @@ void MythRenderD3D9::DrawRect(const QRect &rect, const QColor &color)
+                                            D3DLOCK_DISCARD);
+     if (FAILED(hr))
+     {
+-        VERBOSE(VB_IMPORTANT, D3DERR + "Failed to lock vertex buffer.");
++        VERBOSE(VB_IMPORTANT, D3DERR + QString("Lock vertex buffer: %1.")
++            .arg(errString(hr)));
+         return;
+     }
+ 
+@@ -540,14 +707,16 @@ void MythRenderD3D9::DrawRect(const QRect &rect, const QColor &color)
+                                       0, sizeof(VERTEX));
+     if (FAILED(hr))
+     {
+-        VERBOSE(VB_IMPORTANT, D3DERR + "SetStreamSource() failed");
++        VERBOSE(VB_IMPORTANT, D3DERR + QString("SetStreamSource: %1.")
++            .arg(errString(hr)));
+         return;
+     }
+ 
+     hr = m_d3dDevice->DrawPrimitive(D3DPT_TRIANGLEFAN, 0, 2);
+     if (FAILED(hr))
+     {
+-        VERBOSE(VB_IMPORTANT, D3DERR + "DrawPrimitive() failed");
++        VERBOSE(VB_IMPORTANT, D3DERR + QString("DrawPrimitive: %1.")
++            .arg(errString(hr)));
+         return;
+     }
+ }
+@@ -584,19 +753,6 @@ void MythRenderD3D9::MultiTexturing(bool enable, IDirect3DTexture9 *texture)
+     m_multi_texturing = enable;
+ }
+ 
+-bool MythRenderD3D9::Present(HWND win)
+-{
+-    QMutexLocker locker(&m_lock);
+-    HRESULT hr = m_d3dDevice->Present(NULL, NULL, win, NULL);
+-    if (FAILED(hr))
+-    {
+-        VERBOSE(VB_IMPORTANT, D3DERR + "Present() failed)");
+-        return false;
+-    }
+-    SetThreadExecutionState(ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
+-    return true;
+-}
+-
+ QRect MythRenderD3D9::GetRect(IDirect3DVertexBuffer9 *vertexbuffer)
+ {
+     if (!m_vertexbuffers.contains(vertexbuffer))
+@@ -615,7 +771,8 @@ bool MythRenderD3D9::SetRenderTarget(IDirect3DTexture9 *texture)
+             hr = m_d3dDevice->GetRenderTarget(0, &m_default_surface);
+             if (FAILED(hr))
+             {
+-                VERBOSE(VB_IMPORTANT, QString("Failed to get default surface."));
++                VERBOSE(VB_IMPORTANT, D3DERR + QString("GetRenderTarget: %1.")
++                    .arg(errString(hr)));
+                 return false;
+             }
+         }
+@@ -623,7 +780,8 @@ bool MythRenderD3D9::SetRenderTarget(IDirect3DTexture9 *texture)
+         IDirect3DSurface9 *new_surface = NULL;
+         hr = texture->GetSurfaceLevel(0, &new_surface);
+         if (FAILED(hr))
+-            VERBOSE(VB_IMPORTANT, QString("Failed to get surface level."));
++            VERBOSE(VB_IMPORTANT, D3DERR + QString("GetSurfaceLevel: %1.")
++                .arg(errString(hr)));
+         else
+         {
+             if (m_current_surface && m_current_surface != new_surface)
+@@ -631,7 +789,8 @@ bool MythRenderD3D9::SetRenderTarget(IDirect3DTexture9 *texture)
+             m_current_surface = new_surface;
+             hr = m_d3dDevice->SetRenderTarget(0, m_current_surface);
+             if (FAILED(hr))
+-                VERBOSE(VB_IMPORTANT, QString("Failed to set render target."));
++                VERBOSE(VB_IMPORTANT, D3DERR + QString("SetRenderTarget: %1.")
++                    .arg(errString(hr)));
+         }
+     }
+     else if (!texture)
+@@ -640,7 +799,8 @@ bool MythRenderD3D9::SetRenderTarget(IDirect3DTexture9 *texture)
+         {
+             hr = m_d3dDevice->SetRenderTarget(0, m_default_surface);
+             if (FAILED(hr))
+-                VERBOSE(VB_IMPORTANT, QString("Failed to set render target."));
++                VERBOSE(VB_IMPORTANT, D3DERR + QString("SetRenderTarget: %1.")
++                    .arg(errString(hr)));
+         }
+         else
+             VERBOSE(VB_IMPORTANT, QString("No default surface for render target."));
+@@ -655,7 +815,8 @@ bool MythRenderD3D9::SetTexture(IDirect3DTexture9 *texture, int num)
+     HRESULT hr = m_d3dDevice->SetTexture(num, (LPDIRECT3DBASETEXTURE9)texture);
+     if (FAILED(hr))
+     {
+-        VERBOSE(VB_IMPORTANT, D3DERR + "SetTexture() failed");
++        VERBOSE(VB_IMPORTANT, D3DERR + QString("SetTexture: %1.")
++            .arg(errString(hr)));
+         return false;
+     }
+     return true;
+@@ -672,7 +833,8 @@ IDirect3DTexture9* MythRenderD3D9::CreateTexture(const QSize &size)
+ 
+     if (FAILED(hr) || !temp_texture)
+     {
+-        VERBOSE(VB_IMPORTANT, D3DERR + "Failed to create texture.");
++        VERBOSE(VB_IMPORTANT, D3DERR + QString("CreateTexture: %1.")
++            .arg(errString(hr)));
+         return NULL;
+     }
+ 
+@@ -702,7 +864,6 @@ IDirect3DSurface9* MythRenderD3D9::CreateSurface(const QSize &size, bool video)
+ {
+     QMutexLocker locker(&m_lock);
+     IDirect3DSurface9* temp_surface = NULL;
+-
+     D3DFORMAT format = video ? m_videosurface_fmt : m_surface_fmt;
+ 
+     HRESULT hr = m_d3dDevice->CreateOffscreenPlainSurface(
+@@ -711,7 +872,8 @@ IDirect3DSurface9* MythRenderD3D9::CreateSurface(const QSize &size, bool video)
+ 
+     if (FAILED(hr)|| !temp_surface)
+     {
+-        VERBOSE(VB_IMPORTANT, D3DERR + "Failed to create surface.");
++        VERBOSE(VB_IMPORTANT, D3DERR + QString("CreateOffscreenPlainSurface: %1.")
++            .arg(errString(hr)));
+         return NULL;
+     }
+ 
+@@ -742,22 +904,24 @@ bool MythRenderD3D9::UpdateSurface(IDirect3DSurface9 *surface,
+         return false;
+ 
+     D3DFORMAT format = m_surfaces[surface].m_fmt;
+-    if (format == D3DFMT_A8R8G8B8)
++    switch (format)
+     {
+-        int i;
++    case D3DFMT_A8R8G8B8:
++    case D3DFMT_X8R8G8B8:
++        {
+         uint pitch = image->width() << 2;
+         uint8_t *dst = buf;
+         uint8_t *src = (uint8_t*)image->bits();
+-        for (i = 0; i < image->height(); i++)
++        for (int i = 0; i < image->height(); i++)
+         {
+             memcpy(dst, src, pitch);
+             dst += d3dpitch;
+             src += pitch;
+-        }
+-    }
+-    else
+-    {
++        }}
++        break;
++    default:
+         VERBOSE(VB_IMPORTANT, D3DERR + "Surface format not supported.");
++        break;
+     }
+ 
+     ReleaseBuffer(surface);
+@@ -828,7 +992,8 @@ IDirect3DVertexBuffer9* MythRenderD3D9::CreateVertexBuffer(IDirect3DTexture9* te
+ 
+     if (FAILED(hr))
+     {
+-        VERBOSE(VB_IMPORTANT, D3DERR + "Failed to create vertex buffer");
++        VERBOSE(VB_IMPORTANT, D3DERR + QString("CreateVertexBuffer: %1.")
++            .arg(errString(hr)));
+         return false;
+     }
+ 
+diff --git a/mythtv/libs/libmythui/mythrender_d3d9.h b/mythtv/libs/libmythui/mythrender_d3d9.h
+index d1db84b..19959b3 100644
+--- a/mythtv/libs/libmythui/mythrender_d3d9.h
++++ b/mythtv/libs/libmythui/mythrender_d3d9.h
+@@ -18,22 +18,23 @@ class D3D9Image
+ 
+     bool     IsValid(void) const { return m_valid; }
+     QSize    GetSize(void) const { return m_size;  }
+-    bool     SetAsRenderTarget(void);
+-    bool     UpdateImage(const MythImage *img);
++    bool     SetAsRenderTarget(void) const;
++    bool     UpdateImage(const MythImage *img) const;
+     bool     UpdateVertices(const QRect &dvr, const QRect &vr, int alpha = 255,
+-                            bool video = false);
+-    bool     Draw(void);
+-    uint8_t* GetBuffer(bool &hardware_conv, uint &pitch);
+-    void     ReleaseBuffer(void);
+-    QRect    GetRect(void);
++                            bool video = false) const;
++    bool     Draw(void) const;
++    uint8_t* GetBuffer(bool &hardware_conv, uint &pitch) const;
++    void     ReleaseBuffer(void) const;
++    QRect    GetRect(void) const;
+ 
+   private:
+-    QSize                   m_size;
+-    bool                    m_valid;
+-    MythRenderD3D9         *m_render;
+-    IDirect3DVertexBuffer9 *m_vertexbuffer;
+-    IDirect3DTexture9      *m_texture;
+-    IDirect3DSurface9      *m_surface;
++    friend class MythRenderD3D9;
++    MythRenderD3D9*         const m_render;
++    QSize                   const m_size;
++    IDirect3DTexture9*      const m_texture;
++    IDirect3DVertexBuffer9* const m_vertexbuffer;
++    IDirect3DSurface9*      const m_surface;
++    bool                    const m_valid;
+ };
+ 
+ class MythRenderD3D9
+@@ -52,11 +53,12 @@ class MythRenderD3D9
+     bool DrawTexturedQuad(IDirect3DVertexBuffer9 *vertexbuffer);
+     void DrawRect(const QRect &rect,  const QColor &color);
+     bool Present(HWND win);
+-    bool HardwareYUVConversion(void)
+-        { return m_videosurface_fmt == (D3DFORMAT)MAKEFOURCC('Y','V','1','2'); }
++    bool HardwareYUVConversion() const;
+     QRect GetRect(IDirect3DVertexBuffer9 *vertexbuffer);
+     bool SetRenderTarget(IDirect3DTexture9 *texture);
+ 
++  private:
++    friend class D3D9Image;
+     IDirect3DTexture9*      CreateTexture(const QSize &size);
+     void                    DeleteTexture(IDirect3DTexture9* texture);
+ 
+@@ -74,7 +76,7 @@ class MythRenderD3D9
+     void                    ReleaseBuffer(IDirect3DSurface9* surface);
+ 
+   private:
+-    bool                    FormatSupported(D3DFORMAT surface, D3DFORMAT adaptor);
++    bool                    FormatSupported(D3DFORMAT src, D3DFORMAT dst) const;
+     bool                    SetTexture(IDirect3DTexture9 *texture, int num = 0);
+     void                    DeleteTextures(void);
+     void                    DeleteVertexBuffers(void);
+-- 
+1.7.9.5
+

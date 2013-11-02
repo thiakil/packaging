@@ -1,0 +1,33 @@
+From 47e9a41aba57dcba7f995c90c5cbbb87af313b00 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 30 Oct 2011 09:57:44 +0100
+Subject: [PATCH 071/285] previewgen: Fix handling of --infile
+
+Currently if the infile name looks like a myth recording title with a valid
+channel ID and start time then the file is only searched for in the
+recordings folder and so is consequently not found.
+
+This fix checks if the file exists and if so doesn't attempt to extract
+the channel ID and start time with the result that the file is not searched for in the recordings folder.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythpreviewgen/main.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/programs/mythpreviewgen/main.cpp b/mythtv/programs/mythpreviewgen/main.cpp
+index c9d6d60..e0e6404 100644
+--- a/mythtv/programs/mythpreviewgen/main.cpp
++++ b/mythtv/programs/mythpreviewgen/main.cpp
+@@ -98,7 +98,7 @@ int preview_helper(const QString &_chanid, const QString &starttime,
+ 
+     uint chanid = _chanid.toUInt();
+     QDateTime recstartts = myth_dt_from_string(starttime);
+-    if (!chanid || !recstartts.isValid())
++    if (!QFileInfo(infile).isReadable() && (!chanid || !recstartts.isValid()))
+         ProgramInfo::ExtractKeyFromPathname(infile, chanid, recstartts);
+ 
+     ProgramInfo *pginfo = NULL;
+-- 
+1.7.9.5
+

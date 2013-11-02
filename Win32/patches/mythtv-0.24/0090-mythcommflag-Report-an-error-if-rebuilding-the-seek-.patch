@@ -1,0 +1,56 @@
+From 1df5000a8b893cc8d5ca66e1781eae1efc5bb9cd Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 3 Feb 2012 15:04:16 +0100
+Subject: [PATCH 090/285] mythcommflag: Report an error if rebuilding the seek
+ table fails
+
+If mythcommflag --rebuild is executed and no seek table is generated
+the failure is ignored.  This patch adds a warning message.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythcommflagplayer.cpp |    3 ++-
+ mythtv/programs/mythcommflag/main.cpp        |   10 ++++++----
+ 2 files changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mythcommflagplayer.cpp b/mythtv/libs/libmythtv/mythcommflagplayer.cpp
+index 6b15270..8e879e9 100644
+--- a/mythtv/libs/libmythtv/mythcommflagplayer.cpp
++++ b/mythtv/libs/libmythtv/mythcommflagplayer.cpp
+@@ -185,5 +185,6 @@ bool MythCommFlagPlayer::RebuildSeekTable(
+         new RebuildSaver(decoder, pmap_first, myFramesPlayed));
+     RebuildSaver::Wait(decoder);
+ 
+-    return true;
++    // Return true iff the DB contains a valid pos map
++    return decoder->PosMapFromDb();
+ }
+diff --git a/mythtv/programs/mythcommflag/main.cpp b/mythtv/programs/mythcommflag/main.cpp
+index 417a0a2..04fd248 100644
+--- a/mythtv/programs/mythcommflag/main.cpp
++++ b/mythtv/programs/mythcommflag/main.cpp
+@@ -779,15 +779,17 @@ static int FlagCommercials(
+ 
+     if (rebuildSeekTable)
+     {
+-        cfp->RebuildSeekTable();
+-
+-        if (!quiet)
++        bool ok = cfp->RebuildSeekTable(!quiet);
++        if (!ok)
++            cerr << "Failed\n";
++        else if (!quiet)
+             cerr << "Rebuilt\n";
+ 
+         delete ctx;
+         global_program_info = NULL;
+ 
+-        return COMMFLAG_EXIT_NO_ERROR_WITH_NO_BREAKS;
++        return ok ? COMMFLAG_EXIT_NO_ERROR_WITH_NO_BREAKS :
++            COMMFLAG_EXIT_NO_PROGRAM_DATA;
+     }
+ 
+     if (program_info->GetRecordingEndTime() > QDateTime::currentDateTime())
+-- 
+1.7.9.5
+

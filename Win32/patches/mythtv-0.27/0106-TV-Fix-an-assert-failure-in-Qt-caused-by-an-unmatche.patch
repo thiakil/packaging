@@ -1,0 +1,54 @@
+From c994b78b91c7fa1a1bbe89cde5126ca2d34d3574 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 12 May 2013 10:23:53 +0100
+Subject: [PATCH 106/207] TV: Fix an assert failure in Qt caused by an
+ unmatched ReturnPlayerLock
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+When a speed x1 command is issued from the network command port, Qt aborts
+
+2013-05-11 19:16:07.920 TV: ProcessNetworkControlCommand(NETWORK_CONTROL SPEED 1x) ignoreKeys: 0
+2013-05-11 19:16:07.920 Player(3): Play(  1.0, normal 1, unpause audio 1)
+2013-05-11 19:16:07.921 UpdateOSDSeekMessage(Play, 2)
+ASSERT failure in QReadWriteLock::unlock(): "Cannot unlock an unlocked lock", file thread/qreadwritelock.cpp, line 405
+Aborted (core dumped)
+
+Traceback
+
+    buf=0xab315a0 "ASSERT failure in QReadWriteLock::unlock(): \"Cannot unlock an unlocked lock\", file thread/qreadwritelock.cpp, line 405")
+    at global/qglobal.cpp:2252
+    msg=0xb2cd31b0 "ASSERT failure in %s: \"%s\", file %s, line %d",
+    ap=0xbff14774 "\304HͲ@IͲ\221HͲ\225\001") at global/qglobal.cpp:2298
+    msg=0xb2cd31b0 "ASSERT failure in %s: \"%s\", file %s, line %d")
+    at global/qglobal.cpp:2481
+    what=0xb2cd4940 "Cannot unlock an unlocked lock",
+    file=0xb2cd4891 "thread/qreadwritelock.cpp", line=405)
+    at global/qglobal.cpp:2007
+    at thread/qreadwritelock.cpp:405
+    at tv_play.cpp:12033
+    at tv_play.cpp:2700
+    at kernel/qobject.cpp:1157
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/tv_play.cpp |    2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/tv_play.cpp b/mythtv/libs/libmythtv/tv_play.cpp
+index 6d36608..15815c9 100644
+--- a/mythtv/libs/libmythtv/tv_play.cpp
++++ b/mythtv/libs/libmythtv/tv_play.cpp
+@@ -4993,8 +4993,6 @@ void TV::ProcessNetworkControlCommand(PlayerContext *ctx,
+                     StopFFRew(ctx);
+                     ctx->ts_normal = 1.0f;
+                     ChangeTimeStretch(ctx, 0, false);
+-
+-                    ReturnPlayerLock(ctx);
+                     return;
+                 }
+ 
+-- 
+1.7.9.5
+

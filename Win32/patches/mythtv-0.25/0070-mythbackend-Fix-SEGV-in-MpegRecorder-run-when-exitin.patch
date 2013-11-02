@@ -1,0 +1,29 @@
+From f50166b45627b87c65a8864e7f1f272b8ccb58c0 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 13 Apr 2012 17:57:43 +0200
+Subject: [PATCH 070/124] mythbackend: Fix SEGV in MpegRecorder::run when
+ exiting LiveTV
+
+Start FE live TV from demo recorder.  Exit and BE crashes.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mpegrecorder.cpp |    2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/mpegrecorder.cpp b/mythtv/libs/libmythtv/mpegrecorder.cpp
+index 66747f2..3f25fc8 100644
+--- a/mythtv/libs/libmythtv/mpegrecorder.cpp
++++ b/mythtv/libs/libmythtv/mpegrecorder.cpp
+@@ -1017,6 +1017,8 @@ void MpegRecorder::run(void)
+                 _error = "Device EOF detected";
+             }
+         }
++        else if (readfd < 0)
++            continue;
+         else
+         {
+             if (has_select)
+-- 
+1.7.9.5
+

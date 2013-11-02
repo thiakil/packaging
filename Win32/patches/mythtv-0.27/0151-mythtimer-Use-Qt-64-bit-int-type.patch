@@ -1,0 +1,26 @@
+From efc52dc7cc37b96b75c3fd40c2fe0b15f449e1e8 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 11 Mar 2013 13:31:46 +0000
+Subject: [PATCH 151/207] mythtimer: Use Qt 64-bit int type
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythbase/mythtimer.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythbase/mythtimer.cpp b/mythtv/libs/libmythbase/mythtimer.cpp
+index 3f5c0e9..03fb691 100644
+--- a/mythtv/libs/libmythbase/mythtimer.cpp
++++ b/mythtv/libs/libmythbase/mythtimer.cpp
+@@ -95,7 +95,7 @@ int MythTimer::elapsed(void) const
+         return 0;
+     }
+ 
+-    int64_t e = m_timer.elapsed();
++    qint64 e = m_timer.elapsed();
+     if (!m_timer.isMonotonic() && (e > 86300000))
+     {
+         const_cast<MythTimer*>(this)->start();
+-- 
+1.7.9.5
+

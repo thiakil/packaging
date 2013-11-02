@@ -1,0 +1,33 @@
+From 9d2fc385c7f8a127c8670744bdffafac2316754d Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 5 Jul 2013 19:36:39 +0100
+Subject: [PATCH 176/227] vsync: Don't use DRM vsync when frame rate isn't a
+ multiple of display rate
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/vsync.cpp |    8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/vsync.cpp b/mythtv/libs/libmythtv/vsync.cpp
+index 25b3750..53132a0 100644
+--- a/mythtv/libs/libmythtv/vsync.cpp
++++ b/mythtv/libs/libmythtv/vsync.cpp
+@@ -276,6 +276,14 @@ bool DRMVideoSync::TryInit(void)
+         return false; // VBLANK ioctl didn't worko
+     }
+ 
++    if (m_frame_interval % m_refresh_interval > 100)
++    {
++        LOG(VB_PLAYBACK, LOG_INFO, LOC + QString("DRMVideoSync: frame interval"
++                " %1uS not a close multiple of the display interval %2uS")
++            .arg(m_frame_interval).arg(m_refresh_interval) );
++        return false;
++    }
++
+     return true;
+ }
+ 
+-- 
+1.7.9.5
+

@@ -1,0 +1,68 @@
+From 1b4955292bb005cd2ddc8c6f95b87ff26b63d0d8 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 19 Sep 2013 15:12:55 +0100
+Subject: [PATCH 225/227] mytharchive: Workaround DVDAuthor chapterlist
+ problem
+
+DVDAuthor 0.7.0 needs n+1 timestamps for n chapters otherwise DVD
+creation with chapter buttons fails
+
+This patch also fixes a stale settings cache bug preventing MythArchive
+from detecting that a new DVD has been created if the previous one failed
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../mytharchive/mythburn/scripts/mythburn.py       |   16 ++++++++++------
+ 1 file changed, 10 insertions(+), 6 deletions(-)
+
+diff --git a/mythplugins/mytharchive/mythburn/scripts/mythburn.py b/mythplugins/mytharchive/mythburn/scripts/mythburn.py
+index 988f276..a517e6b 100755
+--- a/mythplugins/mytharchive/mythburn/scripts/mythburn.py
++++ b/mythplugins/mytharchive/mythburn/scripts/mythburn.py
+@@ -189,6 +189,7 @@ themeFonts = {}
+ cpuCount = 1
+ 
+ DB = MythTV.MythDB()
++BE = MythTV.MythBE(db=DB)
+ MVID = MythTV.MythVideo(db=DB)
+ Video = MythTV.Video()
+ 
+@@ -283,7 +284,7 @@ def fatalError(msg):
+     write("See mythburn.log for more information.")
+     write("*"*60)
+     write("")
+-    saveSetting("MythArchiveLastRunResult", "Failed: " + quoteString(msg));
++    saveSetting("MythArchiveLastRunStatus", "Failed: " + quoteString(msg));
+     saveSetting("MythArchiveLastRunEnd", time.strftime("%Y-%m-%d %H:%M:%S "))
+     sys.exit(0)
+ 
+@@ -871,6 +872,7 @@ def getDefaultParametersFromMythTVDB():
+ def saveSetting(name, data):
+     host = DB.gethostname()
+     DB.settings[host][name] = data
++    BE.clearSettings()
+ 
+ #############################################################
+ # Remove all archive items from the archiveitems DB table
+@@ -2867,11 +2869,13 @@ def createDVDAuthorXML(screensize, numberofitems):
+ 
+             vob = dvddom.createElement("vob")
+             if wantChapterMenu:
+-                vob.setAttribute("chapters",
+-                    createVideoChapters(itemnum,
+-                                        chapters,
+-                                        getLengthOfVideo(itemnum),
+-                                        False))
++                thumblist = createVideoChapters(itemnum, chapters, getLengthOfVideo(itemnum), False)
++                chapterlist = string.split(thumblist, ",")
++                if chapterlist[0] != '00:00:00':
++                    thumblist = '00:00:00,' + thumblist
++                # dvdauthor 0.7.0 wants a final timestamp
++                thumblist = thumblist + time.strftime(",%H:%M:%S",time.gmtime(getLengthOfVideo(itemnum)))
++                vob.setAttribute("chapters", thumblist)
+             else:
+                 vob.setAttribute("chapters", 
+                     createVideoChaptersFixedLength(itemnum,
+-- 
+1.7.9.5
+

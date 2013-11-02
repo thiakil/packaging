@@ -1,0 +1,75 @@
+From f9a338880bba6a0f147135a55cc50d55c0b79247 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 18 Jul 2011 20:27:07 +0200
+Subject: [PATCH 002/124] freemheg: Fix the colour of default initialised
+ visible elements
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythfreemheg/Visible.cpp |   45 ++++++++++++++++---------------
+ 1 file changed, 24 insertions(+), 21 deletions(-)
+
+diff --git a/mythtv/libs/libmythfreemheg/Visible.cpp b/mythtv/libs/libmythfreemheg/Visible.cpp
+index 1d69a39..8ee4e3f 100644
+--- a/mythtv/libs/libmythfreemheg/Visible.cpp
++++ b/mythtv/libs/libmythfreemheg/Visible.cpp
+@@ -164,32 +164,35 @@ void MHVisible::Deactivation(MHEngine *engine)
+ MHRgba MHVisible::GetColour(const MHColour &colour)
+ {
+     int red = 0, green = 0, blue = 0, alpha = 0;
+-    int cSize = colour.m_ColStr.Size();
+-
+-    if (cSize != 4)
++    if (colour.IsSet())
+     {
+-        MHLOG(MHLogWarning, QString("Colour string has length %1 not 4.").arg(cSize));
+-    }
++        int cSize = colour.m_ColStr.Size();
+ 
+-    // Just in case the length is short we handle those properly.
+-    if (cSize > 0)
+-    {
+-        red = colour.m_ColStr.GetAt(0);
+-    }
++        if (cSize != 4)
++        {
++            MHLOG(MHLogWarning, QString("Colour string has length %1 not 4.").arg(cSize));
++        }
+ 
+-    if (cSize > 1)
+-    {
+-        green = colour.m_ColStr.GetAt(1);
+-    }
++        // Just in case the length is short we handle those properly.
++        if (cSize > 0)
++        {
++            red = colour.m_ColStr.GetAt(0);
++        }
+ 
+-    if (cSize > 2)
+-    {
+-        blue = colour.m_ColStr.GetAt(2);
+-    }
++        if (cSize > 1)
++        {
++            green = colour.m_ColStr.GetAt(1);
++        }
+ 
+-    if (cSize > 3)
+-    {
+-        alpha = 255 - colour.m_ColStr.GetAt(3);    // Convert transparency to alpha
++        if (cSize > 2)
++        {
++            blue = colour.m_ColStr.GetAt(2);
++        }
++
++        if (cSize > 3)
++        {
++            alpha = 255 - colour.m_ColStr.GetAt(3);    // Convert transparency to alpha
++        }
+     }
+ 
+     return MHRgba(red, green, blue, alpha);
+-- 
+1.7.9.5
+

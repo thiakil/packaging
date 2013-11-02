@@ -1,0 +1,32 @@
+From 4f70cde3c988992228c5b147b841de002ed4e9dc Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 15 Jul 2013 10:06:54 +0100
+Subject: [PATCH 260/285] AO: SetStretchFactor sets pause until buffered to
+ smooth playback start
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/audiooutputbase.cpp |    5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/mythtv/libs/libmyth/audiooutputbase.cpp b/mythtv/libs/libmyth/audiooutputbase.cpp
+index 1be28d4..56a217d 100644
+--- a/mythtv/libs/libmyth/audiooutputbase.cpp
++++ b/mythtv/libs/libmyth/audiooutputbase.cpp
+@@ -262,8 +262,13 @@ void AudioOutputBase::SetStretchFactorLocked(float lstretchfactor)
+             processing = true;
+             bytes_per_frame = source_channels *
+                               AudioOutputSettings::SampleSize(FORMAT_FLT);
++            audbuf_timecode = audiotime = frames_buffered = 0;
+             waud = raud = 0;
+             reset_active.Ref();
++            was_paused = pauseaudio;
++            pauseaudio = true;
++            actually_paused = false;
++            unpause_when_ready = true;
+         }
+     }
+ }
+-- 
+1.7.9.5
+

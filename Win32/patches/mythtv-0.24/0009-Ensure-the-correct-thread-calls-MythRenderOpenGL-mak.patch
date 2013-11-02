@@ -1,0 +1,123 @@
+From 902ef6c78924eb1f5585c9f2201f952eadc15bda Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 14 Mar 2011 14:19:01 +0100
+Subject: [PATCH 009/285] Ensure the correct thread calls
+ MythRenderOpenGL::makeCurrent
+
+This is important on win32 where each  thread has its own OpenGL context
+see http://msdn.microsoft.com/en-us/library/dd374387%28v=VS.85%29.aspx
+
+Ticket URL: <http://svn.mythtv.org/trac/ticket/9268>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp        |    6 ++++++
+ mythtv/libs/libmythtv/mythplayer.h          |    3 ++-
+ mythtv/libs/libmythui/mythrender_opengl.cpp |   18 ++++++++++++++----
+ mythtv/libs/libmythui/mythrender_opengl.h   |    2 ++
+ 4 files changed, 24 insertions(+), 5 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 79d9551..6fc8056 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -762,6 +762,9 @@ void MythPlayer::SetScanType(FrameScanType scan)
+ 
+     if (interlaced)
+     {
++        if (QThread::currentThread() != this->playerThread)
++            return;
++
+         m_deint_possible = videoOutput->SetDeinterlacingEnabled(true);
+         if (!m_deint_possible)
+         {
+@@ -787,6 +790,9 @@ void MythPlayer::SetScanType(FrameScanType scan)
+     {
+         if (kScan_Progressive == scan)
+         {
++            if (QThread::currentThread() != this->playerThread)
++                return;
++
+             m_double_process = false;
+             m_double_framerate = false;
+             videoOutput->SetDeinterlacingEnabled(false);
+diff --git a/mythtv/libs/libmythtv/mythplayer.h b/mythtv/libs/libmythtv/mythplayer.h
+index d16b70c..68dd7eb 100644
+--- a/mythtv/libs/libmythtv/mythplayer.h
++++ b/mythtv/libs/libmythtv/mythplayer.h
+@@ -86,7 +86,8 @@ class DecoderThread : public QThread
+ 
+   public:
+     DecoderThread(MythPlayer *mp, bool start_paused)
+-      : QThread(NULL), m_mp(mp), m_start_paused(start_paused) { }
++      : QThread(NULL), m_mp(mp), m_start_paused(start_paused)
++      { setObjectName("DecoderThread"); }
+ 
+   protected:
+     virtual void run(void);
+diff --git a/mythtv/libs/libmythui/mythrender_opengl.cpp b/mythtv/libs/libmythui/mythrender_opengl.cpp
+index 80903c9..57eb275 100644
+--- a/mythtv/libs/libmythui/mythrender_opengl.cpp
++++ b/mythtv/libs/libmythui/mythrender_opengl.cpp
+@@ -1,3 +1,4 @@
++#include <QThread>
+ #include "mythverbose.h"
+ #include "mythrender_opengl.h"
+ #include "mythxdisplay.h"
+@@ -99,13 +100,13 @@ OpenGLLocker::~OpenGLLocker()
+ }
+ 
+ MythRenderOpenGL::MythRenderOpenGL(const QGLFormat& format, QPaintDevice* device)
+-  : QGLContext(format, device)
++  : QGLContext(format, device), m_creator(QThread::currentThread())
+ {
+     Reset();
+ }
+ 
+ MythRenderOpenGL::MythRenderOpenGL(const QGLFormat& format)
+-  : QGLContext(format)
++  : QGLContext(format), m_creator(QThread::currentThread())
+ {
+     Reset();
+ }
+@@ -135,8 +136,17 @@ void MythRenderOpenGL::Init(void)
+ void MythRenderOpenGL::makeCurrent()
+ {
+     m_lock->lock();
+-    if (this != MythRenderOpenGL::currentContext())
+-        QGLContext::makeCurrent();
++    if (this->m_creator == QThread::currentThread())
++    {
++        if (this != MythRenderOpenGL::currentContext())
++            QGLContext::makeCurrent();
++    }
++    else
++    {
++        VERBOSE(VB_IMPORTANT, LOC_ERR +
++            QString("Wrong thread '%1' calls makeCurrent()")
++            .arg(QThread::currentThread()->objectName()));
++    }
+     m_lock_level++;
+ }
+ 
+diff --git a/mythtv/libs/libmythui/mythrender_opengl.h b/mythtv/libs/libmythui/mythrender_opengl.h
+index 460c2bb..a88920b 100644
+--- a/mythtv/libs/libmythui/mythrender_opengl.h
++++ b/mythtv/libs/libmythui/mythrender_opengl.h
+@@ -49,6 +49,7 @@ typedef enum
+ class MythGLTexture;
+ class MythGLShaderObject;
+ class MythRenderOpenGL;
++class QThread;
+ 
+ class MPUBLIC OpenGLLocker
+ {
+@@ -160,6 +161,7 @@ class MPUBLIC MythRenderOpenGL : public QGLContext, public MythRender
+     QVector<GLuint>              m_programs;
+     QVector<GLuint>              m_framebuffers;
+     GLuint                       m_fence;
++    QThread* const               m_creator;
+ 
+     QMutex  *m_lock;
+     int      m_lock_level;
+-- 
+1.7.9.5
+

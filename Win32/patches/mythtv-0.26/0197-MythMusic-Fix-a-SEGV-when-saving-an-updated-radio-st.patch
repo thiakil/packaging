@@ -1,0 +1,78 @@
+From 2222001af47fe054f4ad0903105535338f2174f8 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 11 Aug 2013 09:58:17 +0100
+Subject: [PATCH 197/227] MythMusic: Fix a SEGV when saving an updated radio
+ stream
+
+Edit a radio stream and click save.  Often the FE will abort with:
+QFile::remove: Empty or null file name
+Handling Segmentation fault
+
+It appears that when StreamView::updateStream calls
+gMusicData->all_streams->updateStream(mdata), the mdata is free'd.
+Subsequent reference to mdata causes random crashes.
+
+gdb...
+Program terminated with signal 11, Segmentation fault.
+0  detach (this=0x5000000, type=IT_FRONTCOVER)
+    at /home/lvr/Projects/myth/mythinstall/include/QtCore/qlist.h:139
+139	    inline void detach() { if (d->ref != 1) detach_helper(); }
+
+bt full
+0  detach (this=0x5000000, type=IT_FRONTCOVER) at /home/lvr/Projects/myth/mythinstall/include/QtCore/qlist.h:139
+No locals.
+1  begin (this=0x5000000, type=IT_FRONTCOVER) at /home/lvr/Projects/myth/mythinstall/include/QtCore/qlist.h:267
+No locals.
+2  AlbumArtImages::getImage (this=0x5000000, type=IT_FRONTCOVER) at metadata.cpp:1584
+No locals.
+3  0xa63418b0 in Metadata::getAlbumArtFile (this=0x95ab488) at metadata.cpp:905
+        albumart_image = 0x0
+        res = {static null = {<No data fields>}, static shared_null = {ref = {_q_value = 1}, alloc = 0, size = 0, data = 0x830b34a, clean = 0, simpletext = 0, righttoleft = 0, asciiCache = 0, capacity = 0, reserved = 0, array = {0}}, static shared_empty = {ref = {_q_value = 2878}, alloc = 0, size = 0, data = 0xb26d20d2, clean = 0, simpletext = 0, righttoleft = 0, asciiCache = 0, capacity = 0, reserved = 0, array = {0}}, d = 0x830b338, static codecForCStrings = 0x0}
+4  0xa6406a07 in StreamView::updateStream (this=0x95a7720, mdata=0x95ab488) at streamview.cpp:551
+        __FUNCTION__ = "updateStream"
+5  0xa6407727 in EditStreamMetadata::saveClicked (this=0x9a56b90) at streamview.cpp:675
+        doUpdate = true
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/mythmusic/mythmusic/streamview.cpp |   14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/mythplugins/mythmusic/mythmusic/streamview.cpp b/mythplugins/mythmusic/mythmusic/streamview.cpp
+index cb938e4..181ee6e 100644
+--- a/mythplugins/mythmusic/mythmusic/streamview.cpp
++++ b/mythplugins/mythmusic/mythmusic/streamview.cpp
+@@ -545,12 +545,18 @@ void StreamView::updateStream(Metadata *mdata)
+         return;
+     }
+ 
+-    gMusicData->all_streams->updateStream(mdata);
+-
+     // force the icon to reload incase it changed
+-    QFile::remove(mdata->getAlbumArtFile());
++    QString filename = mdata->getAlbumArtFile();
++    if (!filename.isEmpty())
++        QFile::remove(filename);
+     mdata->reloadAlbumArtImages();
+ 
++    Metadata::IdType ID = mdata->ID();
++
++    // The next line will make mdata invalid
++    gMusicData->all_streams->updateStream(mdata);
++    mdata = 0;
++
+     updateStreamList();
+ 
+     // find the stream and make it the active item
+@@ -560,7 +566,7 @@ void StreamView::updateStream(Metadata *mdata)
+         Metadata *itemsdata = qVariantValue<Metadata*> (item->GetData());
+         if (itemsdata)
+         {
+-            if (mdata->ID() == itemsdata->ID())
++            if (ID == itemsdata->ID())
+             {
+                 m_streamList->SetItemCurrent(item);
+                 break;
+-- 
+1.7.9.5
+

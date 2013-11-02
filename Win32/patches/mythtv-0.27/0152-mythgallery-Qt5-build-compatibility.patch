@@ -1,0 +1,40 @@
+From 10c9de7f1a0cb2041b6166c7c4d49c723d0bce32 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 18 Mar 2013 12:45:23 +0000
+Subject: [PATCH 152/207] mythgallery: Qt5 build compatibility
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../mythgallery/dcrawplugin/dcrawplugin.pro        |    3 +++
+ .../mythgallery/mythgallery/mythgallery.pro        |    4 ++++
+ 2 files changed, 7 insertions(+)
+
+diff --git a/mythplugins/mythgallery/dcrawplugin/dcrawplugin.pro b/mythplugins/mythgallery/dcrawplugin/dcrawplugin.pro
+index b74a2fb..ff51eaf 100644
+--- a/mythplugins/mythgallery/dcrawplugin/dcrawplugin.pro
++++ b/mythplugins/mythgallery/dcrawplugin/dcrawplugin.pro
+@@ -16,3 +16,6 @@ SOURCES += dcrawhandler.cpp
+ SOURCES += dcrawplugin.cpp
+ 
+ QT += sql
++contains(QT_VERSION, ^5\\.[0-9]\\..*) {
++QT += widgets
++}
+diff --git a/mythplugins/mythgallery/mythgallery/mythgallery.pro b/mythplugins/mythgallery/mythgallery/mythgallery.pro
+index bd7219d..817b5a9 100644
+--- a/mythplugins/mythgallery/mythgallery/mythgallery.pro
++++ b/mythplugins/mythgallery/mythgallery/mythgallery.pro
+@@ -41,6 +41,10 @@ opengl {
+ #The following line was inserted by qt3to4
+ QT += network opengl sql xml
+ 
++contains(QT_VERSION, ^5\\.[0-9]\\..*) {
++QT += widgets
++}
++
+ DEFINES += MPLUGIN_API
+ 
+ use_hidesyms {
+-- 
+1.7.9.5
+

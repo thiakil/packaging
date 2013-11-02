@@ -1,0 +1,47 @@
+From 2d9539c314ba2e7fe05d46ebc367959c50f59851 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 12 Jul 2013 15:13:07 +0100
+Subject: [PATCH 050/207] Player: Finer a/v sync adjustments
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |   12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 3705279..23c0ac5 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -2044,8 +2044,8 @@ void MythPlayer::AVSync(VideoFrame *buffer, bool limit_delay)
+                     prevrp == 0)
+                 {
+                     // wait an extra frame interval
+-                    LOG(VB_PLAYBACK | VB_TIMESTAMP, LOG_INFO, LOC +
+-                        QString("A/V delay %1").arg(delta));
++                    LOG(VB_PLAYBACK, LOG_INFO, LOC +
++                        QString("Dropped frame. A/V delay %1mS").arg(delta));
+                     avsync_adjustment += frame_interval;
+                     // If we're duplicating a frame, it may be because
+                     // the container frame rate doesn't match the
+@@ -2075,12 +2075,16 @@ void MythPlayer::AVSync(VideoFrame *buffer, bool limit_delay)
+                the video by one interlaced field (1/2 frame) */
+             if (!lastsync)
+             {
+-                if (avsync_used > refreshrate)
++                if (avsync_used >= (4 * refreshrate) / 3)
+                 {
++                    LOG(VB_PLAYBACK, LOG_DEBUG, LOC +
++                        "Video leads audio - wait a sync interval");
+                     avsync_adjustment += refreshrate;
+                 }
+-                else if (avsync_used < 0 - refreshrate)
++                else if (avsync_used <= -(4 * refreshrate) / 3)
+                 {
++                    LOG(VB_PLAYBACK, LOG_DEBUG, LOC +
++                        "Video lags audio - advance a sync interval");
+                     avsync_adjustment -= refreshrate;
+                 }
+             }
+-- 
+1.7.9.5
+

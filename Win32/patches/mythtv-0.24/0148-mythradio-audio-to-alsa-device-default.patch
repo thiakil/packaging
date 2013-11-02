@@ -1,0 +1,25 @@
+From 40de273a982a5d831d141b8f27fb8d3e1af47314 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 29 Aug 2012 19:42:47 +0200
+Subject: [PATCH 148/285] mythradio: audio to alsa:device=default
+
+This allows .asoundrc to map output to analog/spdif/hdmi
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/scripts/mythradio |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/programs/scripts/mythradio b/mythtv/programs/scripts/mythradio
+index e5700d5..9e2ac9d 100755
+--- a/mythtv/programs/scripts/mythradio
++++ b/mythtv/programs/scripts/mythradio
+@@ -7,4 +7,4 @@ Log() { echo >&2 "`date '+%H:%M:%S.%N'` $name: $*" ; }
+ 
+ Log "$*"
+ pkill mplayer || true
+-[ -n "$1" ] && mplayer -nolirc -quiet -msglevel all=1 -nostop-xscreensaver "$*" &
++[ -n "$1" ] && mplayer -nolirc -quiet -msglevel all=1 -nostop-xscreensaver -ao alsa:device=default -mixer-channel Master "$*" &
+-- 
+1.7.9.5
+

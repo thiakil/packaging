@@ -1,0 +1,35 @@
+From 512246cebcc1478596aad6f68435e168cc3d9508 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 2 Jul 2013 15:38:53 +0100
+Subject: [PATCH 245/285] AFD: Prevent in-use video buffers from being
+ over-written.
+
+When changing livetv program or channel the all video buffers can become
+used while the ringbuffer is refilling.  At present in-use buffers can
+be over-written when MythPlayer::GetNextVideoFrame is called, which
+causes nasty visual glitches.
+
+This changes the parameter allow_unsafe to false when calling
+GetNextVideoFrame.  This is recommended in VideoBuffers::GetNextFreeFrame.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index 9419f00..e91c00b 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -2401,7 +2401,7 @@ int get_avf_buffer(struct AVCodecContext *c, AVFrame *pic)
+     }
+     nd->directrendering = true;
+ 
+-    VideoFrame *frame = nd->GetPlayer()->GetNextVideoFrame(true);
++    VideoFrame *frame = nd->GetPlayer()->GetNextVideoFrame(false);
+ 
+     if (!frame)
+         return -1;
+-- 
+1.7.9.5
+

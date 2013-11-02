@@ -1,0 +1,40 @@
+From 067b81b083f8d2744e4dbd0ded21997b02d6a0f3 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 19 Mar 2013 12:53:34 +0000
+Subject: [PATCH 2/5] mysql: Fix win32 xcompile include paths and libs
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ src/sql/drivers/mysql/qsql_mysql.pri |   11 ++++++-----
+ 1 files changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/src/sql/drivers/mysql/qsql_mysql.pri b/src/sql/drivers/mysql/qsql_mysql.pri
+index 1b9c3dd..d6bfad8 100644
+--- a/src/sql/drivers/mysql/qsql_mysql.pri
++++ b/src/sql/drivers/mysql/qsql_mysql.pri
+@@ -1,16 +1,17 @@
+ HEADERS += $$PWD/qsql_mysql.h
+ SOURCES += $$PWD/qsql_mysql.cpp
+ 
+-unix {
+-    isEmpty(QT_LFLAGS_MYSQL) {
++isEmpty(QT_LFLAGS_MYSQL) {
++    unix {
+         !contains(LIBS, .*mysqlclient.*):!contains(LIBS, .*mysqld.*) {
+             use_libmysqlclient_r:LIBS += -lmysqlclient_r
+             else:LIBS += -lmysqlclient
+         }
+     } else {
+-        LIBS += $$QT_LFLAGS_MYSQL
+-        QMAKE_CXXFLAGS *= $$QT_CFLAGS_MYSQL
++        !contains(LIBS, .*mysql.*):!contains(LIBS, .*mysqld.*):LIBS += -llibmysql
+     }
+ } else {
+-    !contains(LIBS, .*mysql.*):!contains(LIBS, .*mysqld.*):LIBS += -llibmysql
++    LIBS += $$QT_LFLAGS_MYSQL
++    QMAKE_CXXFLAGS *= $$QT_CFLAGS_MYSQL
+ }
++
+-- 
+1.7.4.1
+

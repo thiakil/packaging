@@ -1,0 +1,32 @@
+From b8eab55c8b4006c2e8b65a8ed7d3c15030d5b8ca Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 7 Jul 2013 16:46:03 +0100
+Subject: [PATCH 149/207] AO: Pause resets PauseUntilBuffered
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/audio/audiooutputbase.cpp |    3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmyth/audio/audiooutputbase.cpp b/mythtv/libs/libmyth/audio/audiooutputbase.cpp
+index c2d47f2..7de058c 100644
+--- a/mythtv/libs/libmyth/audio/audiooutputbase.cpp
++++ b/mythtv/libs/libmyth/audio/audiooutputbase.cpp
+@@ -914,12 +914,13 @@ void AudioOutputBase::KillAudio()
+ 
+ void AudioOutputBase::Pause(bool paused)
+ {
+-    if (unpause_when_ready)
++    if (!paused && unpause_when_ready)
+         return;
+     VBAUDIO(QString("Pause %1").arg(paused));
+     if (pauseaudio != paused)
+         was_paused = pauseaudio;
+     pauseaudio = paused;
++    unpause_when_ready = false;
+     actually_paused = false;
+ }
+ 
+-- 
+1.7.9.5
+

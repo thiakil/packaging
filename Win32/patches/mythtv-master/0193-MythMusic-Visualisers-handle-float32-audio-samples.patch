@@ -1,0 +1,71 @@
+From 42f80a4ea563f6a7ac1b9cae2d31c81150e58103 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 7 Oct 2013 11:09:22 +0100
+Subject: [PATCH 193/202] MythMusic: Visualisers handle float32 audio samples
+
+Ogg and wma audio recordings are passed to the visualiser as
+32-bit floating point buffers which are currently incorrectly
+displayed.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/mythmusic/mythmusic/mainvisual.cpp |   29 ++++++++++++++++++++++++
+ 1 file changed, 29 insertions(+)
+
+diff --git a/mythplugins/mythmusic/mythmusic/mainvisual.cpp b/mythplugins/mythmusic/mythmusic/mainvisual.cpp
+index b651d3f..7c68e3b 100644
+--- a/mythplugins/mythmusic/mythmusic/mainvisual.cpp
++++ b/mythplugins/mythmusic/mythmusic/mainvisual.cpp
+@@ -144,6 +144,27 @@ void MainVisual::prepare()
+         delete m_nodes.takeLast();
+ }
+ 
++// TODO Add MMX path
++static inline void stereo16_from_stereofloat32(
++    short l[], short r[], const float s[], unsigned long cnt)
++{
++    const float f((1 << 15) - 1);
++    while (cnt--)
++    {
++        *l++ = short(f * *s++);
++        *r++ = short(f * *s++);
++    }
++}
++
++// TODO Add MMX path
++static inline void mono16_from_monofloat32(
++    short l[], const float s[], unsigned long cnt)
++{
++    const float f((1 << 15) - 1);
++    while (cnt--)
++        *l++ = short(f * *s++);
++}
++
+ // This is called via : mythtv/libs/libmyth/output.cpp :: OutputListeners::dispatchVisual
+ //    from : mythtv/libs/libmyth/audio/audiooutputbase.cpp :: AudioOutputBase::AddData
+ // Caller holds mutex() lock
+@@ -170,6 +191,10 @@ void MainVisual::add(uchar *buffer, unsigned long b_len, unsigned long timecode,
+             stereo16_from_stereopcm8(l, r, buffer, cnt);
+         else if (bits_per_sample == 16)
+             stereo16_from_stereopcm16(l, r, (short *) buffer, cnt);
++        else if (bits_per_sample == 32)
++            stereo16_from_stereofloat32(l, r, reinterpret_cast<const float * >(buffer), cnt);
++        else
++            len = 0;
+     }
+     else if (source_channels == 1)
+     {
+@@ -179,6 +204,10 @@ void MainVisual::add(uchar *buffer, unsigned long b_len, unsigned long timecode,
+             mono16_from_monopcm8(l, buffer, cnt);
+         else if (bits_per_sample == 16)
+             mono16_from_monopcm16(l, (short *) buffer, cnt);
++        else if (bits_per_sample == 32)
++            mono16_from_monofloat32(l, reinterpret_cast<const float * >(buffer), cnt);
++        else
++            len = 0;
+     }
+     else
+         len = 0;
+-- 
+1.7.9.5
+

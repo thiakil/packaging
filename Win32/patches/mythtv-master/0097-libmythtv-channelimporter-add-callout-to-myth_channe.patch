@@ -1,0 +1,47 @@
+From a5f931846581b3a0852f5033f914bc09fffe5182 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 2 Dec 2011 20:57:37 +0100
+Subject: [PATCH 097/202] libmythtv: channelimporter add callout to
+ 'myth_channel_helper'
+
+Add a callout to a user defined script after ChannelImporter::Process()
+finishes.  This permits user defined channel renumbering and assignment
+of logos after a re-scan.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../libs/libmythtv/channelscan/channelimporter.cpp |   11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/channelscan/channelimporter.cpp b/mythtv/libs/libmythtv/channelscan/channelimporter.cpp
+index 058ab0f..9c0968e 100644
+--- a/mythtv/libs/libmythtv/channelscan/channelimporter.cpp
++++ b/mythtv/libs/libmythtv/channelscan/channelimporter.cpp
+@@ -18,6 +18,8 @@ using namespace std;
+ #include "mythdb.h"
+ #include "mpegstreamdata.h" // for kEncDecrypted
+ #include "channelutil.h"
++#include "mythsystemlegacy.h"
++#include "mythcorecontext.h"
+ 
+ #define LOC QString("ChanImport: ")
+ 
+@@ -120,6 +122,15 @@ void ChannelImporter::Process(const ScanDTVTransportList &_transports)
+ 
+     if (do_delete || do_insert)
+         ScanInfo::MarkProcessed(saved_scan);
++
++    // Call user script to handle channel numbering etc
++    if (do_insert)
++    {
++        QString command = gCoreContext->GetSetting(
++            "ChannelImporterHelper", "myth_channel_helper");
++        if (!command.isEmpty())
++            myth_system(command);
++    }
+ }
+ 
+ QString ChannelImporter::toString(ChannelType type)
+-- 
+1.7.9.5
+

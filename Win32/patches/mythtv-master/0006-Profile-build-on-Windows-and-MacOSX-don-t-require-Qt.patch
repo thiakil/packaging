@@ -1,0 +1,46 @@
+From 5285fc32dce8d319f24f948667b796a8ffae3652 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 13 Mar 2012 17:47:34 +0100
+Subject: [PATCH 006/202] Profile build on Windows and MacOSX don't require Qt
+ debug libs
+
+At present profile builds pull in debug builds of Qt.  This
+causes link errors on Windows and MacOSX unless the debug libs
+are available.  This patch removes debug from CONFIG on these
+platforms.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/settings.pro |    2 +-
+ mythtv/settings.pro      |    2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/mythplugins/settings.pro b/mythplugins/settings.pro
+index 42301b2..58be7f2 100644
+--- a/mythplugins/settings.pro
++++ b/mythplugins/settings.pro
+@@ -30,7 +30,7 @@ QMAKE_CXXFLAGS += $$CONFIG_DIRECTFB_CXXFLAGS
+ QMAKE_CXXFLAGS_SHLIB = -DPIC -fPIC
+ QMAKE_CXXFLAGS += $$ECXXFLAGS
+ 
+-profile:CONFIG += debug
++profile:!win32:!macx:CONFIG += debug
+ 
+ QMAKE_CXXFLAGS_RELEASE = $$OPTFLAGS -fomit-frame-pointer
+ release:contains( TARGET_ARCH_POWERPC, yes ) {
+diff --git a/mythtv/settings.pro b/mythtv/settings.pro
+index 05c2d6d..a486835 100755
+--- a/mythtv/settings.pro
++++ b/mythtv/settings.pro
+@@ -280,7 +280,7 @@ macx {
+     QMAKE_CXXFLAGS *= $$CXXPPFLAGS $$ECXXFLAGS
+ }
+ 
+-profile:CONFIG += debug
++profile:!win32:!macx:CONFIG += debug
+ 
+ release:contains( ARCH_POWERPC, yes ) {
+     # Auto-inlining causes some Qt moc methods to go missing
+-- 
+1.7.9.5
+

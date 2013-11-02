@@ -1,0 +1,266 @@
+From 4479b652a7a8de0433b30b7427a9f804f1157653 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 8 Jun 2013 11:52:02 +0100
+Subject: [PATCH 191/285] DB: Load all dbase settings into cache at startup
+
+1. Considerably reduce dbase overhead and startup overhead especiallu
+   on remote frontends.
+
+2. Enable dbase cache earlier.
+
+3. Add default values to settings so they will be cached.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/mythcontext.cpp |    3 +-
+ mythtv/libs/libmythdb/mythdb.cpp    |  110 ++++++++++++++++++++++++++++++++---
+ mythtv/libs/libmythdb/mythdb.h      |    2 +
+ 3 files changed, 106 insertions(+), 9 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/mythcontext.cpp b/mythtv/libs/libmyth/mythcontext.cpp
+index 317bf26..fff3a37 100644
+--- a/mythtv/libs/libmyth/mythcontext.cpp
++++ b/mythtv/libs/libmyth/mythcontext.cpp
+@@ -311,6 +311,7 @@ bool MythContextPrivate::Init(const bool gui, UPnp *UPnPclient,
+         MythTranslation::load("mythfrontend");
+         EndTempWindow();
+     }
++    gCoreContext->ActivateSettingsCache(true);
+     gCoreContext->InitLocale();
+     gCoreContext->SaveLocaleDefaults();
+ 
+@@ -1386,8 +1387,6 @@ bool MythContext::Init(const bool gui, UPnp *UPnPclient,
+         return false;
+     }
+ 
+-    gCoreContext->ActivateSettingsCache(true);
+-
+     return true;
+ }
+ 
+diff --git a/mythtv/libs/libmythdb/mythdb.cpp b/mythtv/libs/libmythdb/mythdb.cpp
+index d62f6a1..793fb9e 100644
+--- a/mythtv/libs/libmythdb/mythdb.cpp
++++ b/mythtv/libs/libmythdb/mythdb.cpp
+@@ -86,6 +86,7 @@ class MythDBPrivate
+ 
+     bool haveDBConnection;
+     bool haveSchema;
++    bool isCacheCoherent;
+ };
+ 
+ static const int settings_reserve = 61;
+@@ -93,7 +94,7 @@ static const int settings_reserve = 61;
+ MythDBPrivate::MythDBPrivate()
+     : m_settings(new Settings()),
+       ignoreDatabase(false), suppressDBMessages(true), useSettingsCache(false),
+-      haveDBConnection(false), haveSchema(false)
++      haveDBConnection(false), haveSchema(false), isCacheCoherent(false)
+ {
+     m_localhostname.clear();
+     settingsCache.reserve(settings_reserve);
+@@ -323,14 +324,76 @@ bool MythDB::SaveSettingOnHost(const QString &key,
+     return success;
+ }
+ 
++// Caller must hold d->settingsCacheLock
++bool MythDB::LoadCacheFromSettings()
++{
++    if (d->isCacheCoherent)
++        return true;
++
++    if (d->ignoreDatabase || !HaveValidDatabase())
++        return false;
++
++    MSqlQuery query(MSqlQuery::InitCon());
++    if (!query.isConnected())
++    {
++        if (!d->suppressDBMessages)
++            VERBOSE(VB_IMPORTANT, "MythDB::LoadCacheFromSettings dbase not open");
++        return false;
++    }
++
++    d->settingsCacheLock.unlock();
++    d->settingsCacheLock.lockForWrite();
++    if (d->isCacheCoherent)
++        return true;
++
++    query.prepare("SELECT value, data, hostname FROM settings"
++        " WHERE hostname = :HOSTNAME OR hostname IS NULL ORDER BY hostname DESC;");
++    query.bindValue(":HOSTNAME", d->m_localhostname );
++    if (query.exec())
++    {
++        // NB results are ordered by hostname with host specific coming first.
++        // So any values that have both a global and host specific value will
++        // result in the global value being ignored
++        while (query.next())
++        {
++            QString const key = query.value(0).toString().toLower();
++            QString const data = query.value(1).toString();
++
++            SettingsMap::const_iterator it = d->settingsCache.find(key);
++            if (it == d->settingsCache.end())
++                d->settingsCache.insert(key, data);
++
++            QString const hostname = query.value(2).toString();
++            if (!hostname.isEmpty())
++            {
++                QString const mykey = hostname.toLower() + ' ' + key;
++                it = d->settingsCache.find(mykey);
++                if (it == d->settingsCache.end())
++                    d->settingsCache.insert(mykey, data);
++            }
++        }
++
++        d->isCacheCoherent = true;
++        return true;
++    }
++    else if (!d->suppressDBMessages)
++        DBError("MythDB::LoadCacheFromSettings", query);
++
++    return false;
++}
++
+ QString MythDB::GetSetting(const QString &_key, const QString &defaultval)
+ {
+     QString key = _key.toLower();
+     QString value;
+ 
+     d->settingsCacheLock.lockForRead();
+-    if (d->useSettingsCache)
++    // Speedup dbase upgrade checks by using the cache if it's coherent
++    if (d->useSettingsCache || (d->isCacheCoherent && key.endsWith("dbschemaver")) )
+     {
++        if (!d->isCacheCoherent)
++            LoadCacheFromSettings();
++
+         SettingsMap::const_iterator it = d->settingsCache.find(key);
+         if (it != d->settingsCache.end())
+         {
+@@ -338,6 +401,14 @@ QString MythDB::GetSetting(const QString &_key, const QString &defaultval)
+             d->settingsCacheLock.unlock();
+             return value;
+         }
++
++        VERBOSE(VB_DATABASE,
++            QString("GetSetting(%1,%2) cache miss").arg(_key).arg(defaultval) );
++        if (d->isCacheCoherent)
++        {
++            d->settingsCacheLock.unlock();
++            return d->m_settings->GetSetting(key, defaultval);
++        }
+     }
+     else
+     {
+@@ -424,6 +495,9 @@ bool MythDB::GetSettings(QMap<QString,QString> &_key_value_pairs)
+         d->settingsCacheLock.lockForRead();
+         if (d->useSettingsCache)
+         {
++            if (!d->isCacheCoherent)
++                LoadCacheFromSettings();
++
+             for (; kvit != _key_value_pairs.end(); ++dit, ++kvit)
+             {
+                 SettingsMap::const_iterator it = d->settingsCache.find(dit.key());
+@@ -433,6 +507,11 @@ bool MythDB::GetSettings(QMap<QString,QString> &_key_value_pairs)
+                     *dit = true;
+                     done_cnt++;
+                 }
++                else if (d->isCacheCoherent)
++                {
++                    *dit = true;
++                    done_cnt++;
++                }
+             }
+         }
+         else
+@@ -572,8 +651,11 @@ double MythDB::GetFloatSetting(const QString &key)
+ QString MythDB::GetSettingOnHost(const QString &_key, const QString &_host,
+                                  const QString &defaultval)
+ {
+-    QString key   = _key.toLower();
+     QString host  = _host.toLower();
++    if (host == d->m_localhostname)
++        return GetSetting(_key, defaultval);
++
++    QString key   = _key.toLower();
+     QString value = defaultval;
+     QString myKey = host + ' ' + key;
+ 
+@@ -587,6 +669,10 @@ QString MythDB::GetSettingOnHost(const QString &_key, const QString &_host,
+             d->settingsCacheLock.unlock();
+             return value;
+         }
++
++        VERBOSE(VB_DATABASE,
++            QString("GetSettingOnHost(%1,%2,%3) cache miss")
++                .arg(_key).arg(_host).arg(defaultval) );
+     }
+     else
+     {
+@@ -704,7 +790,7 @@ void MythDB::GetResolutionSetting(const QString &type,
+         sHeight = QString("%1Height%2").arg(type).arg(index);
+     }
+ 
+-    QString res = GetSetting(sRes);
++    QString res = GetSetting(sRes, "");
+ 
+     if (!res.isEmpty())
+     {
+@@ -720,8 +806,8 @@ void MythDB::GetResolutionSetting(const QString &type,
+         {
+             width = w;
+             height = h;
+-            refresh_rate = GetFloatSetting(sRR);
+-            forced_aspect = GetFloatSetting(sAspect);
++            refresh_rate = GetFloatSetting(sRR, 0.);
++            forced_aspect = GetFloatSetting(sAspect, 0.);
+         }
+     }
+     else
+@@ -831,18 +917,28 @@ void MythDB::ClearSettingsCache(const QString &_key)
+             clear(d->settingsCache, d->overriddenSettings, mkl);
+     }
+ 
++    d->isCacheCoherent = false;
+     d->settingsCacheLock.unlock();
+ }
+ 
+ void MythDB::ActivateSettingsCache(bool activate)
+ {
++    if (d->useSettingsCache == activate)
++        return;
++
+     if (activate)
+         VERBOSE(VB_DATABASE, "Enabling Settings Cache.");
+     else
+         VERBOSE(VB_DATABASE, "Disabling Settings Cache.");
+ 
++    // It is only necessary to clear the cache when enabling it and any
++    // settings have changed.  This covers a DB upgrade which concludes
++    // with a call to SaveSettingOnHost (to upgrade the schema version) while
++    // the settings cache is disabled
++    if (activate && !d->isCacheCoherent)
++        ClearSettingsCache();
++
+     d->useSettingsCache = activate;
+-    ClearSettingsCache();
+ }
+ 
+ void MythDB::WriteDelayedSettings(void)
+diff --git a/mythtv/libs/libmythdb/mythdb.h b/mythtv/libs/libmythdb/mythdb.h
+index 339230a..997387f 100644
+--- a/mythtv/libs/libmythdb/mythdb.h
++++ b/mythtv/libs/libmythdb/mythdb.h
+@@ -86,6 +86,8 @@ class MPUBLIC MythDB
+     MythDB();
+    ~MythDB();
+ 
++    bool LoadCacheFromSettings();
++
+   private:
+     MythDBPrivate *d;
+ };
+-- 
+1.7.9.5
+

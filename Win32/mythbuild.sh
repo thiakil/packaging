@@ -164,7 +164,8 @@ readonly packages2="LIBXSLT LIBOGG LIBVORBIS FLAC LIBCDIO TAGLIB FFTW LIBSDL"
 readonly packages3="LIBVISUAL LIBDVDCSS"
 
 # Tools
-: ${MYTHPATCHES:="mythpatches-0.24"}
+: ${SCRIPTDIR:="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"}
+: ${MYTHPATCHES:="${SCRIPTDIR}/patches"}
 : ${MYTHPATCHES_URL:="http://www.softsystem.co.uk/download/mythtv/$MYTHPATCHES.tar.bz2"}
 : ${YASM:="yasm-1.1.0"}
 : ${YASM_URL:="http://www.tortall.net/projects/yasm/releases/$YASM.tar.gz"}
@@ -471,7 +472,7 @@ function dopatches() {
     local d=$1 i ret=0 patched dryrun
     shift
     echo "$*" | grep -- --dry > /dev/null 2>&1 && dryrun="yes"
-    local patches=`ls 2>/dev/null $MYTHDIR/$MYTHPATCHES/$d/*.{patch,diff} | sort`
+    local patches=`ls 2>/dev/null $MYTHPATCHES/$d/*.{patch,diff} | sort`
     for i in $patches ; do
         if [ -r "$i" ]; then
             patched=`patchapplied "$i"`
@@ -491,7 +492,7 @@ function dopatches() {
 function undopatches() {
     local d=$1 i patched
     shift
-    local patches=`ls 2>/dev/null $MYTHDIR/$MYTHPATCHES/$d/*.{patch,diff} | sort -r`
+    local patches=`ls 2>/dev/null $MYTHPATCHES/$d/*.{patch,diff} | sort -r`
     for i in $patches ; do
         if [ -r "$i" ]; then
             patched=`patchapplied "$i"`

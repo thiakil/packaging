@@ -1,0 +1,11 @@
+--- mysql-5.1.54.orig/libmysql/libmysql.c	2010-11-29 11:38:01.000000000 +0100
++++ mysql-5.1.54/libmysql/libmysql.c	2010-12-31 20:56:07.000000000 +0100
+@@ -4364,7 +4364,7 @@ static my_bool setup_one_fetch_function(
+   case MYSQL_TYPE_LONG_BLOB:
+   case MYSQL_TYPE_BLOB:
+   case MYSQL_TYPE_BIT:
+-    DBUG_ASSERT(param->buffer_length != 0);
++    /*DBUG_ASSERT(param->buffer_length != 0);*/
+     param->fetch_result= fetch_result_bin;
+     break;
+   case MYSQL_TYPE_VAR_STRING:

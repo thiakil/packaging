@@ -1,0 +1,67 @@
+From 22ce4bbe277ef8e45174400c69b9f3d5b74ca2f4 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 11 Aug 2013 19:58:37 +0100
+Subject: [PATCH 199/227] MediaMon: Use a wait condition to reduce the latency
+ exiting mythfrontend
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/mythmediamonitor.cpp |    6 +++++-
+ mythtv/libs/libmyth/mythmediamonitor.h   |    4 +++-
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/mythmediamonitor.cpp b/mythtv/libs/libmyth/mythmediamonitor.cpp
+index c5cdc66..702aa3f 100644
+--- a/mythtv/libs/libmyth/mythmediamonitor.cpp
++++ b/mythtv/libs/libmyth/mythmediamonitor.cpp
+@@ -49,10 +49,12 @@ MonitorThread::MonitorThread(MediaMonitor* pMon, unsigned long interval) :
+ void MonitorThread::run(void)
+ {
+     RunProlog();
++    QMutex mtx;
++    mtx.lock();
+     while (m_Monitor && m_Monitor->IsActive())
+     {
+         m_Monitor->CheckDevices();
+-        msleep(m_Interval);
++        m_Monitor->m_wait.wait(&mtx, m_Interval);
+     }
+     RunEpilog();
+ }
+@@ -454,7 +456,9 @@ void MediaMonitor::StopMonitoring(void)
+ 
+     LOG(VB_MEDIA, LOG_NOTICE, "Stopping MediaMonitor");
+     m_Active = false;
++    m_wait.wakeAll();
+     m_Thread->wait();
++    LOG(VB_MEDIA, LOG_NOTICE, "Stopped MediaMonitor");
+ }
+ 
+ /** \fn MediaMonitor::ValidateAndLock(MythMediaDevice *pMedia)
+diff --git a/mythtv/libs/libmyth/mythmediamonitor.h b/mythtv/libs/libmyth/mythmediamonitor.h
+index 38be7dd..dbdac90 100644
+--- a/mythtv/libs/libmyth/mythmediamonitor.h
++++ b/mythtv/libs/libmyth/mythmediamonitor.h
+@@ -4,6 +4,7 @@
+ #include <QStringList>
+ #include <QPointer>
+ #include <QMutex>
++#include <QWaitCondition>
+ #include <QList>
+ 
+ #include "mthread.h"
+@@ -115,9 +116,10 @@ class MPUBLIC MediaMonitor : public QObject
+     // List of devices/mountpoints that the user doesn't want to monitor:
+     QStringList                  m_IgnoreList;
+ 
+-    bool                         m_Active;      ///< Was MonitorThread started?
++    bool volatile                m_Active;      ///< Was MonitorThread started?
+     bool                         m_SendEvent;   ///< Send MediaEvent to plugins?
+     bool                         m_StartThread; ///< Should we actually monitor?
++    QWaitCondition               m_wait;
+ 
+     MonitorThread                *m_Thread;
+     unsigned long                m_MonitorPollingInterval;
+-- 
+1.7.9.5
+

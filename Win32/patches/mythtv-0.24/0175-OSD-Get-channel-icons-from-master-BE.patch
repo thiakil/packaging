@@ -1,0 +1,47 @@
+From 1d4bbfd0f32197e0bd53db8bfcb47265e22eb0c2 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 8 Mar 2013 20:08:24 +0000
+Subject: [PATCH 175/285] OSD: Get channel icons from master BE
+
+Channel icon paths are relative to the master BE.  When a remote frontend
+shows an OSD with a channel icon then the image is loaded locally which
+normally fails.
+
+Aside: the TV guide correctly handles channel icons.
+
+This patch to OSD::SetText loads the icon from the local cache (channels/)
+if present, if not it fetches the icon from the master BE and saves
+it to the cache.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/osd.cpp |    6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/osd.cpp b/mythtv/libs/libmythtv/osd.cpp
+index 7b192c0..4128a23 100644
+--- a/mythtv/libs/libmythtv/osd.cpp
++++ b/mythtv/libs/libmythtv/osd.cpp
+@@ -22,6 +22,7 @@
+ #include "subtitlescreen.h"
+ #include "interactivescreen.h"
+ #include "osd.h"
++#include "dbchannelinfo.h"
+ 
+ #define LOC     QString("OSD: ")
+ #define LOC_ERR QString("OSD_ERR: ")
+@@ -413,6 +414,11 @@ void OSD::SetText(const QString &window, QHash<QString,QString> &map,
+                 iconpath = map["iconpath"];
+             else
+                 iconpath = ChannelUtil::GetIcon(chanid);
++
++            PixmapChannel c(DBChannel("","",0,0,0,0,false,"",iconpath));
++            if (c.CacheChannelIcon())
++                iconpath = c.m_localIcon;
++
+             icon->SetFilename(iconpath);
+             icon->Load(false);
+         }
+-- 
+1.7.9.5
+

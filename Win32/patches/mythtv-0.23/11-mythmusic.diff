@@ -1,0 +1,49 @@
+diff --git a/mythplugins/mythmusic/mythmusic/main.cpp b/mythplugins/mythmusic/mythmusic/main.cpp
+index d525aaf..26b0da7 100644
+--- mythplugins/mythmusic/mythmusic/main.cpp
++++ mythplugins/mythmusic/mythmusic/main.cpp
+@@ -185,6 +185,7 @@ void startDatabaseTree(void)
+ 
+ void startRipper(void)
+ {
++#ifndef USING_MINGW
+     MythScreenStack *mainStack = GetMythMainWindow()->GetMainStack();
+ 
+     Ripper *rip = new Ripper(mainStack, chooseCD());
+@@ -195,10 +196,12 @@ void startRipper(void)
+         delete rip;
+ 
+ //   connect(rip, SIGNAL(Success()), SLOT(RebuildMusicTree()));
++#endif
+ }
+ 
+ void startImport(void)
+ {
++#ifndef USING_MINGW
+     MythScreenStack *mainStack = GetMythMainWindow()->GetMainStack();
+ 
+     ImportMusicDialog *import = new ImportMusicDialog(mainStack);
+@@ -209,6 +212,7 @@ void startImport(void)
+         delete import;
+ 
+ //   connect(import, SIGNAL(Changed()), SLOT(RebuildMusicTree()));
++#endif
+ }
+ 
+ void RebuildMusicTree(void)
+@@ -615,6 +619,7 @@ void runMusicSelection(void)
+ 
+ void runRipCD(void)
+ {
++#ifndef USING_MINGW
+     preMusic();
+ 
+     MythScreenStack *mainStack = GetMythMainWindow()->GetMainStack();
+@@ -629,6 +634,7 @@ void runRipCD(void)
+ //   connect(rip, SIGNAL(Success()), SLOT(RebuildMusicTree()));
+ 
+ //     postMusic();
++#endif
+ }
+ 
+ void runScan(void)

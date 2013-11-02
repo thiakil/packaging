@@ -1,0 +1,31 @@
+From c858f2b0a8937b4179d1b474028c66c73f2ca2e3 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 4 Feb 2013 20:31:50 +0000
+Subject: [PATCH 149/227] LoadCacheImage: Fix check of filedate causing
+ unnecessary cache reload
+
+This bug causes premature discarding of files from the cache and is
+responsible for flicker in MythGallery while building the thumbnail
+preview images for a folder containing a large (>30) number of files.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythui/mythuihelper.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythui/mythuihelper.cpp b/mythtv/libs/libmythui/mythuihelper.cpp
+index 0e8dfe4..df8b7ef 100644
+--- a/mythtv/libs/libmythui/mythuihelper.cpp
++++ b/mythtv/libs/libmythui/mythuihelper.cpp
+@@ -1533,7 +1533,7 @@ MythImage *MythUIHelper::LoadCacheImage(QString srcfile, QString label,
+             srcLastModified = original.lastModified();
+ 
+         if (!!(cacheMode & kCacheIgnoreDisk) ||
+-            (fi.lastModified() > srcLastModified))
++            (fi.lastModified() >= srcLastModified))
+         {
+             // Check Memory Cache
+             ret = GetImageFromCache(label);
+-- 
+1.7.9.5
+

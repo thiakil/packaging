@@ -1,0 +1,118 @@
+From b889b0c4845bc4b47ec04f6af54755cd5cad808c Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 11 Sep 2013 17:52:00 +0100
+Subject: [PATCH 184/207] TV: Move ownership of the AudioOutputSync setting to
+ PlayerContext
+
+Currently the audio sync offset is setup in the MythPlayer ctor from
+the AudioSyncOffset dbase setting.  However, this means that all
+users of MythPlayer, including the transcoder, use the same offset.
+This is OK for recordings and liveTV (where the user has interactively
+set the value based on observed delays) but adversely affects transcoding
+which results in permanent A/V offsets.
+
+This patch moves ownership of AudioSyncOffset from MythPlayer
+to PlayerContext.  PlayerContext sets the offset in StartPlaying and saves
+it in StopPlaying.
+
+Also the offset is set to 0 when using the cutlist editor to ensure
+synchronisation between the audio output graph and the pause frame.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp    |    9 +++++++--
+ mythtv/libs/libmythtv/mythplayer.h      |    1 +
+ mythtv/libs/libmythtv/playercontext.cpp |    9 +++++++++
+ 3 files changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 00a3395..688f473 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -226,6 +226,7 @@ MythPlayer::MythPlayer(PlayerFlags flags)
+       // Time Code stuff
+       prev_audiotime(0),
+       prevtc(0),                    prevrp(0),
++      savedAudioTimecodeOffset(0),
+       // LiveTVChain stuff
+       m_tv(NULL),                   isDummy(false),
+       // Debugging variables
+@@ -249,7 +250,6 @@ MythPlayer::MythPlayer(PlayerFlags flags)
+     clearSavedPosition = gCoreContext->GetNumSetting("ClearSavedPosition", 1);
+     endExitPrompt      = gCoreContext->GetNumSetting("EndOfRecordingExitPrompt");
+     pip_default_loc    = (PIPLocation)gCoreContext->GetNumSetting("PIPLocation", kPIPTopLeft);
+-    tc_wrap[TC_AUDIO]  = gCoreContext->GetNumSetting("AudioSyncOffset", 0);
+ 
+     // Get VBI page number
+     QString mypage = gCoreContext->GetSetting("VBIpageNr", "888");
+@@ -3456,7 +3456,6 @@ int64_t MythPlayer::AdjustAudioTimecodeOffset(int64_t v, int newsync)
+         tc_wrap[TC_AUDIO] = newsync;
+     else
+         tc_wrap[TC_AUDIO] += v;
+-    gCoreContext->SaveSetting("AudioSyncOffset", tc_wrap[TC_AUDIO]);
+     return tc_wrap[TC_AUDIO];
+ }
+ 
+@@ -3984,6 +3983,9 @@ bool MythPlayer::EnableEdit(void)
+     m_audiograph.SetSampleCount((unsigned)(sample_rate / video_frame_rate));
+     GetAudio()->addVisual(&m_audiograph);
+ 
++    savedAudioTimecodeOffset = tc_wrap[TC_AUDIO];
++    tc_wrap[TC_AUDIO] = 0;
++
+     speedBeforeEdit = play_speed;
+     pausedBeforeEdit = Pause();
+     deleteMap.SetEditing(true);
+@@ -4037,6 +4039,9 @@ void MythPlayer::DisableEdit(int howToSave)
+     player_ctx->UnlockPlayingInfo(__FILE__, __LINE__);
+     GetAudio()->removeVisual(&m_audiograph);
+     m_audiograph.Reset();
++    tc_wrap[TC_AUDIO] = savedAudioTimecodeOffset;
++    savedAudioTimecodeOffset = 0;
++
+     if (!pausedBeforeEdit)
+         Play(speedBeforeEdit);
+     else
+diff --git a/mythtv/libs/libmythtv/mythplayer.h b/mythtv/libs/libmythtv/mythplayer.h
+index 4f53ea9..d92af92 100644
+--- a/mythtv/libs/libmythtv/mythplayer.h
++++ b/mythtv/libs/libmythtv/mythplayer.h
+@@ -822,6 +822,7 @@ class MTV_PUBLIC MythPlayer
+     int        prevrp;        ///< repeat_pict of last frame
+     int64_t    tc_wrap[TCTYPESMAX];
+     int64_t    tc_lastval[TCTYPESMAX];
++    int64_t    savedAudioTimecodeOffset;
+ 
+     // LiveTV
+     TV *m_tv;
+diff --git a/mythtv/libs/libmythtv/playercontext.cpp b/mythtv/libs/libmythtv/playercontext.cpp
+index d48d2c5..6c11f6f 100644
+--- a/mythtv/libs/libmythtv/playercontext.cpp
++++ b/mythtv/libs/libmythtv/playercontext.cpp
+@@ -450,6 +450,9 @@ bool PlayerContext::StartPlaying(int maxWait)
+     if (!player)
+         return false;
+ 
++    player->AdjustAudioTimecodeOffset(
++                0, gCoreContext->GetNumSetting("AudioSyncOffset", 0));
++
+     if (!player->StartPlaying())
+     {
+         LOG(VB_GENERAL, LOG_ERR, LOC + "StartPlaying() Failed to start player");
+@@ -485,7 +488,13 @@ bool PlayerContext::StartPlaying(int maxWait)
+ void PlayerContext::StopPlaying(void)
+ {
+     if (player)
++    {
+         player->StopPlaying();
++
++        int64_t aoff = player->GetAudioTimecodeOffset();
++        if (aoff > INT64_MIN)
++            gCoreContext->SaveSetting("AudioSyncOffset", QString::number(aoff));
++    }
+ }
+ 
+ void PlayerContext::UpdateTVChain(const QStringList &data)
+-- 
+1.7.9.5
+

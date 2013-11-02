@@ -1,0 +1,15 @@
+diff --git mythtv/libs/libmythui/mythmainwindow.cpp mythtv/libs/libmythui/mythmainwindow.cpp
+index 0ee172d..1f3e056 100644
+--- mythtv/libs/libmythui/mythmainwindow.cpp
++++ mythtv/libs/libmythui/mythmainwindow.cpp
+@@ -898,6 +898,10 @@ void MythMainWindow::Init(void)
+     if (d->does_fill_screen && !GetMythUI()->IsGeometryOverridden())
+     {
+         VERBOSE(VB_GENERAL, "Using Full Screen Window");
++#ifdef Q_WS_X11
++        // BUG: with Compiz the window must be visible before setting state
++        show();
++#endif
+         setWindowState(Qt::WindowFullScreen);
+     }
+ 

@@ -1,0 +1,34 @@
+From 8705cadb445a651a3fbf401bf99bf7b6865a9196 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 4 Oct 2013 14:44:52 +0100
+Subject: [PATCH 191/202] Transcode: Check aspect ratio when hoonouring the
+ cutlist
+
+If the recording is transcoded with a cutlist then the pixel aspect
+ratio is currently not set correctly.  This typically affects 4:3
+material which is coded at 544x576 resolution.
+
+This patch sets the aspect ratio from the 1st frame decoded after
+the cut.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index b63222b..3c2e155 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -1156,7 +1156,7 @@ void MythPlayer::ReleaseNextVideoFrame(VideoFrame *buffer,
+         videoOutput->ReleaseFrame(buffer);
+ 
+     detect_letter_box->Detect(buffer);
+-    if (allpaused)
++    if (allpaused || transcoding)
+         CheckAspectRatio(buffer);
+ }
+ 
+-- 
+1.7.9.5
+

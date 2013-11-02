@@ -1,0 +1,30 @@
+From df5b9ab073d25142f319998074634be81c2d7b9a Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 12 Jun 2012 15:15:50 +0200
+Subject: [PATCH 095/124] UK EIT fixups: Retain series and episode number in
+ description
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/eitfixup.cpp |    3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/eitfixup.cpp b/mythtv/libs/libmythtv/eitfixup.cpp
+index 8148018..a55f1fe 100644
+--- a/mythtv/libs/libmythtv/eitfixup.cpp
++++ b/mythtv/libs/libmythtv/eitfixup.cpp
+@@ -734,9 +734,10 @@ void EITFixUp::FixUK(DBEventEIT &event) const
+         {
+             event.partnumber = tmpExp1.cap(1).toUInt();
+             event.parttotal  = tmpExp1.cap(2).toUInt();
+-            // Remove from the description
++#if 0       // Remove from the description
+             event.description = event.description.left(position1) +
+                 event.description.mid(position1+tmpExp1.cap(0).length());
++#endif
+             series = true;
+         }
+     }
+-- 
+1.7.9.5
+

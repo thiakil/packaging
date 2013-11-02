@@ -1,0 +1,67 @@
+From d830e833304e670d8024c16a89c1c1dbeab236f2 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 27 Feb 2013 18:17:54 +0000
+Subject: [PATCH 060/207] mythtranscode: Allow for audio description track
+ that has discontinuous time stamps
+
+Somme audio descriptive tracks on ITV can have a discontinous PTS.
+
+1. This can cause the index FIFO to overflow so add code to expand them
+when necessary.
+2. Track the jumps in the PTS.
+
+This bug is demonstrated when lossless transcoding The New Avengers.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythtranscode/mpeg2fix.cpp |   20 +++++++++++++++++++-
+ 1 file changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/programs/mythtranscode/mpeg2fix.cpp b/mythtv/programs/mythtranscode/mpeg2fix.cpp
+index 077000e..d9cfa6b 100644
+--- a/mythtv/programs/mythtranscode/mpeg2fix.cpp
++++ b/mythtv/programs/mythtranscode/mpeg2fix.cpp
+@@ -681,7 +681,7 @@ int MPEG2fixup::AddFrame(MPEG2frame *f)
+                     ring_free(rbi) >= sizeof(index_unit))
+         {
+             // increase memory to avoid deadlock
+-            unsigned int inc_size = 10 * (unsigned int)f->pkt.size;
++            unsigned int inc_size = rb->size;
+             LOG(VB_GENERAL, LOG_NOTICE,
+                 QString("Increasing ringbuffer size by %1 to avoid deadlock")
+                     .arg(inc_size));
+@@ -689,6 +689,17 @@ int MPEG2fixup::AddFrame(MPEG2frame *f)
+             if (!ring_reinit(rb, rb->size + inc_size))
+                 ok = 1;
+         }
++        else if (!ok && ring_free(rb) >= (unsigned int)f->pkt.size &&
++                    ring_free(rbi) < sizeof(index_unit))
++        {
++            // increase memory to avoid deadlock
++            unsigned int inc_size = rbi->size;
++            LOG(VB_GENERAL, LOG_NOTICE,
++                 QString("Increasing index ringbuffer size by %1 to avoid deadlock")
++                    .arg(inc_size));
++            if (! ring_reinit(rbi, rbi->size + inc_size))
++                ok = 1;
++        }
+         if (!ok)
+         {
+             pthread_mutex_unlock( &rx.mutex );
+@@ -2456,6 +2467,13 @@ int MPEG2fixup::Start()
+                         else
+                             af_dlta_cnt[it.key()]++;
+                     }
++                    // Large diff. Assume a mismatch after 2 consec frames
++                    else if (++af_dlta_cnt[it.key()] >= 2)
++                    {
++                        ptsinc((uint64_t *)&origaPTS[it.key()],
++                               300 * tmpPTS);
++                        af_dlta_cnt[it.key()] = 0;
++                    }
+                     af->first()->pkt.pts = origaPTS[it.key()] / 300;
+                 }
+                 else if (tmpPTS > incPTS) //correct for small discrepancies
+-- 
+1.7.9.5
+

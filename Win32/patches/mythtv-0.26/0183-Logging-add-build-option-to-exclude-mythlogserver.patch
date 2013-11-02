@@ -1,0 +1,448 @@
+From c14e1ce68886cdd5695c3d4b63a68ce273691cc5 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 31 Jul 2013 16:35:51 +0100
+Subject: [PATCH 183/227] Logging: add build option to exclude mythlogserver
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/settings.pro                |    8 +++--
+ mythtv/configure                        |    4 +++
+ mythtv/external/Makefile                |    5 +++-
+ mythtv/libs/libmythbase/libmythbase.pro |   10 +++++--
+ mythtv/libs/libmythbase/logging.cpp     |   49 +++++++++++++++++++++++++++++--
+ mythtv/libs/libmythbase/logging.h       |    8 ++++-
+ mythtv/programs/programs.pro            |    3 +-
+ mythtv/settings.pro                     |   16 ++++++----
+ 8 files changed, 86 insertions(+), 17 deletions(-)
+
+diff --git a/mythplugins/settings.pro b/mythplugins/settings.pro
+index fdaeefa..a55b5b0 100644
+--- a/mythplugins/settings.pro
++++ b/mythplugins/settings.pro
+@@ -70,9 +70,11 @@ EXTRA_LIBS += $$LOCAL_LIBDIR_X11
+ EXTRA_LIBS += $$CONFIG_XV_LIBS
+ EXTRA_LIBS += $$CONFIG_XVMC_LIBS
+ EXTRA_LIBS += $$CONFIG_OPENGL_VSYNC_LIBS
+-EXTRA_LIBS += -lmythzmq
+-EXTRA_LIBS += -lmythnzmqt
+-EXTRA_LIBS += -lmythqjson
++using_logserver {
++    EXTRA_LIBS += -lmythzmq
++    EXTRA_LIBS += -lmythnzmqt
++    EXTRA_LIBS += -lmythqjson
++}
+ 
+ LIRC_LIBS = $$CONFIG_LIRC_LIBS
+ 
+diff --git a/mythtv/configure b/mythtv/configure
+index d8ea318..d7412dc 100755
+--- a/mythtv/configure
++++ b/mythtv/configure
+@@ -1536,6 +1536,7 @@ MYTHTV_CONFIG_LIST='
+     x11
+     xrandr
+     xv
++    logserver
+ '
+ 
+ MYTHTV_HAVE_LIST='
+@@ -2262,6 +2263,7 @@ enable xrandr
+ enable xv
+ disable indevs
+ disable sdl
++enable logserver
+ 
+ # mythtv paths
+ dvb_path_default="${sysroot}/usr/include"
+@@ -3492,6 +3494,7 @@ EOF
+         disable x11
+         disable qtdbus
+         disable libuuid
++        disable logserver
+         ###### Standard ffmpeg configure stuff follows:
+         disable ffserver
+         SLIBPREF="libmyth"
+@@ -5064,6 +5067,7 @@ echo "libcrypto                 ${libcrypto-no}"
+ echo "Frontend                  ${frontend-no}"
+ echo "Backend                   ${backend-no}"
+ echo "OpenGL ES 2.0             ${opengles-no}"
++#echo "Logserver                 ${logserver-no}"
+ echo
+ 
+ echo "# Bindings"
+diff --git a/mythtv/external/Makefile b/mythtv/external/Makefile
+index 0323f2a..da3c371 100644
+--- a/mythtv/external/Makefile
++++ b/mythtv/external/Makefile
+@@ -1,6 +1,9 @@
+ include ../config.mak
+ 
+-SUBDIRS = FFmpeg zeromq nzmqt qjson
++SUBDIRS = FFmpeg
++ifdef CONFIG_LOGSERVER
++    SUBDIRS += zeromq nzmqt qjson
++endif
+ 
+ SUBDIRS_ALL = $(addsuffix -all, ${SUBDIRS})
+ SUBDIRS_INSTALL = $(addsuffix -install, ${SUBDIRS})
+diff --git a/mythtv/libs/libmythbase/libmythbase.pro b/mythtv/libs/libmythbase/libmythbase.pro
+index d582984..e67f1f1 100644
+--- a/mythtv/libs/libmythbase/libmythbase.pro
++++ b/mythtv/libs/libmythbase/libmythbase.pro
+@@ -16,7 +16,7 @@ HEADERS += mythbaseexp.h mythdbcon.h mythdb.h mythdbparams.h oldsettings.h
+ HEADERS += verbosedefs.h mythversion.h compat.h mythconfig.h
+ HEADERS += mythobservable.h mythevent.h httpcomms.h mcodecs.h
+ HEADERS += mythtimer.h mythsignalingtimer.h mythdirs.h exitcodes.h
+-HEADERS += lcddevice.h mythstorage.h remotefile.h logging.h loggingserver.h
++HEADERS += lcddevice.h mythstorage.h remotefile.h logging.h
+ HEADERS += mythcorecontext.h mythsystem.h mythlocale.h storagegroup.h
+ HEADERS += mythcoreutil.h mythdownloadmanager.h mythtranslation.h
+ HEADERS += unzip.h unzip_p.h zipentry_p.h iso639.h iso3166.h mythmedia.h
+@@ -37,12 +37,18 @@ SOURCES += mythcorecontext.cpp mythsystem.cpp mythlocale.cpp storagegroup.cpp
+ SOURCES += mythcoreutil.cpp mythdownloadmanager.cpp mythtranslation.cpp
+ SOURCES += unzip.cpp iso639.cpp iso3166.cpp mythmedia.cpp mythmiscutil.cpp
+ SOURCES += mythhdd.cpp mythcdrom.cpp dbutil.cpp
+-SOURCES += mythhttppool.cpp mythhttphandler.cpp logging.cpp loggingserver.cpp
++SOURCES += mythhttppool.cpp mythhttphandler.cpp
++SOURCES += logging.cpp
+ SOURCES += referencecounter.cpp mythcommandlineparser.cpp
+ SOURCES += filesysteminfo.cpp hardwareprofile.cpp serverpool.cpp
+ SOURCES += plist.cpp signalhandling.cpp mythtimezone.cpp mythdate.cpp
+ 
+ win32:SOURCES += msocketdevice_win.cpp
++using_logserver {
++    SOURCES += loggingserver.cpp
++    HEADERS += loggingserver.h
++}
++
+ unix {
+     SOURCES += msocketdevice_unix.cpp system-unix.cpp
+     HEADERS += system-unix.h
+diff --git a/mythtv/libs/libmythbase/logging.cpp b/mythtv/libs/libmythbase/logging.cpp
+index 037cb42..24ebab5 100644
+--- a/mythtv/libs/libmythbase/logging.cpp
++++ b/mythtv/libs/libmythbase/logging.cpp
+@@ -17,7 +17,9 @@ using namespace std;
+ 
+ #include "mythlogging.h"
+ #include "logging.h"
++#if CONFIG_LOGSERVER
+ #include "loggingserver.h"
++#endif
+ #include "mythconfig.h"
+ #include "mythdb.h"
+ #include "mythdirs.h"
+@@ -57,12 +59,14 @@ extern "C" {
+ #include <mach/mach.h>
+ #endif
+ 
++#if CONFIG_LOGSERVER
+ // nzmqt
+ #include "nzmqt.hpp"
+ // QJson
+ #include "QJson/QObjectHelper"
+ #include "QJson/Serializer"
+ #include "QJson/Parser"
++#endif
+ 
+ static QMutex                  logQueueMutex;
+ static QQueue<LoggingItem *>   logQueue;
+@@ -181,6 +185,7 @@ LoggingItem::~LoggingItem()
+ 
+ QByteArray LoggingItem::toByteArray(void)
+ {
++#if CONFIG_LOGSERVER
+     QVariantMap variant = QJson::QObjectHelper::qobject2qvariant(this);
+     QJson::Serializer serializer;
+     QByteArray json = serializer.serialize(variant);
+@@ -188,6 +193,9 @@ QByteArray LoggingItem::toByteArray(void)
+     //cout << json.constData() << endl;
+ 
+     return json;
++#else
++    return QByteArray();
++#endif
+ }
+ 
+ /// \brief Get the name of the thread that produced the LoggingItem
+@@ -255,9 +263,11 @@ LoggerThread::LoggerThread(QString filename, bool progress, bool quiet,
+     m_aborted(false), m_initialWaiting(true),
+     m_filename(filename), m_progress(progress),
+     m_quiet(quiet), m_appname(QCoreApplication::applicationName()),
+-    m_tablename(table), m_facility(facility), m_pid(getpid()),
+-    m_zmqContext(NULL), m_zmqSocket(NULL), m_initialTimer(NULL), 
++    m_tablename(table), m_facility(facility), m_pid(getpid())
++#if CONFIG_LOGSERVER
++    , m_zmqContext(NULL), m_zmqSocket(NULL), m_initialTimer(NULL), 
+     m_heartbeatTimer(NULL)
++#endif
+ {
+     char *debug = getenv("VERBOSE_THREADS");
+     if (debug != NULL)
+@@ -266,7 +276,9 @@ LoggerThread::LoggerThread(QString filename, bool progress, bool quiet,
+             "Logging thread registration/deregistration enabled!");
+         debugRegistration = true;
+     }
++#if CONFIG_LOGSERVER
+     m_locallogs = (m_appname == MYTH_APPNAME_MYTHLOGSERVER);
++#endif
+ 
+     moveToThread(qthread());
+ }
+@@ -274,6 +286,7 @@ LoggerThread::LoggerThread(QString filename, bool progress, bool quiet,
+ /// \brief LoggerThread destructor.  Triggers the deletion of all loggers.
+ LoggerThread::~LoggerThread()
+ {
++#if CONFIG_LOGSERVER
+     if (m_initialTimer)
+     {
+         m_initialTimer->stop();
+@@ -285,6 +298,7 @@ LoggerThread::~LoggerThread()
+         m_heartbeatTimer->stop();
+         delete m_heartbeatTimer;
+     }
++#endif
+ 
+     stop();
+     wait();
+@@ -306,6 +320,8 @@ void LoggerThread::run(void)
+     LOG(VB_GENERAL, LOG_INFO, "Added logging to the console");
+ 
+     bool dieNow = false;
++#if CONFIG_LOGSERVER
++    if (!getenv("MYTH_LOGSERVER_DISABLE")) {
+     try
+     {
+         if (m_locallogs)
+@@ -368,6 +384,11 @@ void LoggerThread::run(void)
+         m_heartbeatTimer = new MythSignalingTimer(this, SLOT(checkHeartBeat()));
+         m_heartbeatTimer->start(1000);
+     }
++    } // if LogServerEnable
++#endif // def CONFIG_LOGSERVER
++
++    if (getenv("MYTH_LOGSERVER_SYNC"))
++        m_aborted = true;
+ 
+     QMutexLocker qLock(&logQueueMutex);
+ 
+@@ -389,7 +410,9 @@ void LoggerThread::run(void)
+         qLock.unlock();
+ 
+         fillItem(item);
++#if CONFIG_LOGSERVER
+         handleItem(item);
++#endif
+         logConsole(item);
+         item->DecrRef();
+ 
+@@ -402,6 +425,7 @@ void LoggerThread::run(void)
+     // thread tries to deregister, and we wait for it.
+     logThreadFinished = true;
+ 
++#if CONFIG_LOGSERVER
+     if (m_heartbeatTimer)
+     {
+         m_heartbeatTimer->stop();
+@@ -417,6 +441,7 @@ void LoggerThread::run(void)
+ 
+     if (!m_locallogs)
+         delete m_zmqContext;
++#endif
+ 
+     RunEpilog();
+ 
+@@ -426,6 +451,7 @@ void LoggerThread::run(void)
+     }
+ }
+ 
++#if CONFIG_LOGSERVER
+ /// \brief  Handles the initial startup timeout when waiting for the log server
+ ///         to show signs of life
+ void LoggerThread::initialTimeout(void)
+@@ -446,7 +472,9 @@ void LoggerThread::initialTimeout(void)
+ 
+     LOG(VB_GENERAL, LOG_INFO, "Added logging to mythlogserver at TCP:35327");
+ }
++#endif
+ 
++#if CONFIG_LOGSERVER
+ /// \brief  Handles heartbeat checking once a second.  If the server is not
+ ///         heard from for at least 5s, restart it
+ void LoggerThread::checkHeartBeat(void)
+@@ -470,14 +498,18 @@ void LoggerThread::checkHeartBeat(void)
+         launched = false;
+     }
+ }
++#endif
+ 
++#if CONFIG_LOGSERVER
+ /// \brief  Send a ping to the log server
+-void LoggerThread::pingLogServer(void)
++inline void LoggerThread::pingLogServer(void)
+ {
+     // cout << "pong" << endl;
+     m_zmqSocket->sendMessage(QByteArray(""));
+ }
++#endif
+ 
++#if CONFIG_LOGSERVER
+ /// \brief  Launches the logging server daemon
+ void LoggerThread::launchLogServer(void)
+ {
+@@ -497,7 +529,9 @@ void LoggerThread::launchLogServer(void)
+         ms.Wait(0);
+     }
+ }
++#endif
+ 
++#if CONFIG_LOGSERVER
+ /// \brief  Handles messages received back from mythlogserver via ZeroMQ.
+ ///         This is particularly used to receive the acknowledgement of the
+ ///         kInitializing message which contains the filename of the log to
+@@ -514,8 +548,10 @@ void LoggerThread::messageReceived(const QList<QByteArray> &msg)
+     loggingGetTimeStamp(&m_epoch, NULL);
+     pingLogServer();
+ }
++#endif
+ 
+ 
++#if CONFIG_LOGSERVER
+ /// \brief  Handles each LoggingItem, generally by handing it off to 
+ ///         mythlogserver via ZeroMQ.  There is a special case for
+ ///         thread registration and deregistration which are also included in
+@@ -583,6 +619,7 @@ void LoggerThread::handleItem(LoggingItem *item)
+             m_zmqSocket->sendMessage(item->toByteArray());
+     }
+ }
++#endif
+ 
+ /// \brief Process a log message, writing to the console
+ /// \param item LoggingItem containing the log message to process
+@@ -696,6 +733,7 @@ LoggingItem *LoggingItem::create(const char *_file,
+ 
+ LoggingItem *LoggingItem::create(QByteArray &buf)
+ {
++#if CONFIG_LOGSERVER
+     // Deserialize buffer
+     QJson::Parser parser;
+     QVariant variant = parser.parse(buf);
+@@ -704,6 +742,9 @@ LoggingItem *LoggingItem::create(QByteArray &buf)
+     QJson::QObjectHelper::qvariant2qobject(variant.toMap(), item);
+ 
+     return item;
++#else
++    return new LoggingItem;
++#endif
+ }
+ 
+ 
+@@ -758,7 +799,9 @@ void LogPrintLine( uint64_t mask, LogLevel_t level, const char *file, int line,
+         {
+             item = logQueue.dequeue();
+             qLock.unlock();
++#if CONFIG_LOGSERVER
+             logThread->handleItem(item);
++#endif
+             logThread->logConsole(item);
+             item->DecrRef();
+             qLock.relock();
+diff --git a/mythtv/libs/libmythbase/logging.h b/mythtv/libs/libmythbase/logging.h
+index be339ce..47be0c8 100644
+--- a/mythtv/libs/libmythbase/logging.h
++++ b/mythtv/libs/libmythbase/logging.h
+@@ -1,5 +1,6 @@
+ #ifndef LOGGING_H_
+ #define LOGGING_H_
++#include "mythconfig.h"
+ 
+ #include <QMutexLocker>
+ #include <QMutex>
+@@ -16,7 +17,9 @@
+ #include "mythsignalingtimer.h"
+ #include "mthread.h"
+ #include "referencecounter.h"
++#if CONFIG_LOGSERVER
+ #include "nzmqt.hpp"
++#endif
+ 
+ #define LOGLINE_MAX (2048-120)
+ 
+@@ -191,6 +194,7 @@ class LoggerThread : public QObject, public MThread
+     QString m_tablename;    ///< Cached table name for db logging
+     int m_facility;         ///< Cached syslog facility (or -1 to disable)
+     pid_t m_pid;            ///< Cached pid value
++#if CONFIG_LOGSERVER
+     bool m_locallogs;       ///< Are we logging locally (i.e. this is the
+                             ///  mythlogserver itself)
+     qlonglong m_epoch;      ///< Time last heard from the server (seconds)
+@@ -201,9 +205,10 @@ class LoggerThread : public QObject, public MThread
+ 
+     MythSignalingTimer *m_initialTimer; ///< Timer for the initial startup
+     MythSignalingTimer *m_heartbeatTimer;   ///< Timer for 1s heartbeats
+-
++#endif
+   protected:
+     bool logConsole(LoggingItem *item);
++#if CONFIG_LOGSERVER
+     void launchLogServer(void);
+     void pingLogServer(void);
+ 
+@@ -211,6 +216,7 @@ class LoggerThread : public QObject, public MThread
+     void messageReceived(const QList<QByteArray>&);
+     void checkHeartBeat(void);
+     void initialTimeout(void);
++#endif
+ };
+ 
+ #endif
+diff --git a/mythtv/programs/programs.pro b/mythtv/programs/programs.pro
+index d5cba01..d7b76b2 100644
+--- a/mythtv/programs/programs.pro
++++ b/mythtv/programs/programs.pro
+@@ -5,7 +5,8 @@ TEMPLATE = subdirs
+ # Directories
+ using_frontend {
+     SUBDIRS += mythavtest mythfrontend mythcommflag
+-    SUBDIRS += mythjobqueue mythlcdserver mythlogserver
++    SUBDIRS += mythjobqueue mythlcdserver
++    using_logserver: SUBDIRS += mythlogserver
+     SUBDIRS += mythwelcome mythshutdown mythutil
+     SUBDIRS += mythpreviewgen mythmediaserver mythccextractor
+     SUBDIRS += mythmtd
+diff --git a/mythtv/settings.pro b/mythtv/settings.pro
+index 3263ad9..0531182 100644
+--- a/mythtv/settings.pro
++++ b/mythtv/settings.pro
+@@ -84,9 +84,11 @@ contains(CONFIG_DARWIN, yes) {
+ }
+ 
+ INCLUDEPATH += $$unique(CONFIG_INCLUDEPATH)
+-INCLUDEPATH += $$SRC_PATH_BARE/external/zeromq/include
+-INCLUDEPATH += $$SRC_PATH_BARE/external/nzmqt/include/nzmqt
+-INCLUDEPATH += $$SRC_PATH_BARE/external/qjson/include
++using_logserver {
++    INCLUDEPATH += $$SRC_PATH_BARE/external/zeromq/include
++    INCLUDEPATH += $$SRC_PATH_BARE/external/nzmqt/include/nzmqt
++    INCLUDEPATH += $$SRC_PATH_BARE/external/qjson/include
++}
+ 
+ # remove warn_{on|off} from CONFIG since we set it in our CFLAGS
+ CONFIG -= warn_on warn_off
+@@ -159,8 +161,10 @@ EXTRA_LIBS += $$CONFIG_FIREWIRE_LIBS
+ EXTRA_LIBS += $$LOCAL_LIBDIR_OGL
+ EXTRA_LIBS += $$LOCAL_LIBDIR_X11
+ EXTRA_LIBS += $$CONFIG_OPENGL_LIBS
+-EXTRA_LIBS += -L$$SRC_PATH_BARE/external/zeromq/src/.libs -lmythzmq
+-EXTRA_LIBS += -L$$SRC_PATH_BARE/external/nzmqt/src -lmythnzmqt
+-EXTRA_LIBS += -L$$SRC_PATH_BARE/external/qjson/lib -lmythqjson
++using_logserver {
++    EXTRA_LIBS += -L$$SRC_PATH_BARE/external/zeromq/src/.libs -lmythzmq
++    EXTRA_LIBS += -L$$SRC_PATH_BARE/external/nzmqt/src -lmythnzmqt
++    EXTRA_LIBS += -L$$SRC_PATH_BARE/external/qjson/lib -lmythqjson
++}
+ 
+ macx:using_firewire:using_backend:EXTRA_LIBS += -F$${CONFIG_MAC_AVC} -framework AVCVideoServices
+-- 
+1.7.9.5
+

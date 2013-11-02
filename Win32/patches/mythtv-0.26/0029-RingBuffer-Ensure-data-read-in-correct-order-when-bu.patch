@@ -1,0 +1,51 @@
+From e451e1e02c5d0f2a8a7eb3d322490acd3328e715 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 25 Jul 2013 18:19:24 +0100
+Subject: [PATCH 029/227] RingBuffer: Ensure data read in correct order when
+ buffer paused
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/ringbuffer.cpp |   11 +++++------
+ 1 file changed, 5 insertions(+), 6 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/ringbuffer.cpp b/mythtv/libs/libmythtv/ringbuffer.cpp
+index 9aa3798..32b041f 100644
+--- a/mythtv/libs/libmythtv/ringbuffer.cpp
++++ b/mythtv/libs/libmythtv/ringbuffer.cpp
+@@ -1117,10 +1117,9 @@ bool RingBuffer::WaitForAvail(int count)
+     MythTimer t;
+     t.start();
+     wanttoread = count;
+-    while ((avail < count) && !stopreads &&
+-           !request_pause && !commserror && readaheadrunning)
++    while (avail < count && !commserror && readaheadrunning)
+     {
+-        if (ateof)
++        if (ateof || stopreads || request_pause)
+         {
+             count = avail;
+             break;
+@@ -1256,7 +1255,7 @@ int RingBuffer::ReadPriv(void *buf, int count, bool peek)
+         return -1;
+     }
+ 
+-    if (request_pause || stopreads || !readaheadrunning || (ignorereadpos>=0))
++    if (!readaheadrunning || (ignorereadpos>=0) || stopreads || request_pause)
+     {
+         rwlock.unlock();
+         rwlock.lockForWrite();
+@@ -1265,8 +1264,8 @@ int RingBuffer::ReadPriv(void *buf, int count, bool peek)
+         // If the read ahead thread was started while we
+         // didn't hold the lock, we proceed with a normal
+         // read from the buffer, otherwise we read directly.
+-        if (request_pause || stopreads ||
+-            !readaheadrunning || (ignorereadpos >= 0))
++        if (!readaheadrunning || (ignorereadpos >= 0) ||
++            ((stopreads || request_pause) && !ReadBufAvail()) )
+         {
+             LOG(VB_FILE, LOG_DEBUG, LOC + loc_desc + " -- direct read");
+             int ret = ReadDirect(buf, count, peek);
+-- 
+1.7.9.5
+

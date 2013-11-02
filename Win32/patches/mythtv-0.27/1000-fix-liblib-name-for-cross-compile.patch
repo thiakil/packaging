@@ -1,0 +1,15 @@
+diff --git a/mythtv/libs/libs-targetfix.pro b/mythtv/libs/libs-targetfix.pro
+index bb1889d..ecd9e0e 100644
+--- a/mythtv/libs/libs-targetfix.pro
++++ b/mythtv/libs/libs-targetfix.pro
+@@ -8,7 +8,9 @@ mingw {
+         #
+         # So that our dependency targets work between SUBDIRS, override:
+         #
+-        TARGET = lib$${TARGET}
++        !win32-g++linux {
++          TARGET = lib$${TARGET}
++        }
+ 
+ 
+         # Windows doesn't have a nice variable like LD_LIBRARY_PATH,

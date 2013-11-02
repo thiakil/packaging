@@ -1,0 +1,37 @@
+From d8df56429c04e4306c90c37777aef2ae0ad6e60f Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 30 Sep 2012 18:07:41 +0200
+Subject: [PATCH 119/124] ALSA: Fix set buffer time for French TNT-HD
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/audio/audiooutputalsa.cpp |    5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/audio/audiooutputalsa.cpp b/mythtv/libs/libmyth/audio/audiooutputalsa.cpp
+index 5c6c202..ce0821e 100644
+--- a/mythtv/libs/libmyth/audio/audiooutputalsa.cpp
++++ b/mythtv/libs/libmyth/audio/audiooutputalsa.cpp
+@@ -793,8 +793,9 @@ int AudioOutputALSA::SetParameters(snd_pcm_t *handle, snd_pcm_format_t format,
+ 
+     /* set the buffer time */
+     uint original_buffer_time = buffer_time;
++    int dir;
+     err = snd_pcm_hw_params_set_buffer_time_near(handle, params,
+-                                                 &buffer_time, NULL);
++                                                 &buffer_time, &dir);
+     CHECKERR(QString("Unable to set buffer time %1").arg(buffer_time));
+ 
+     /* See if we need to increase the prealloc'd buffer size
+@@ -810,7 +811,7 @@ int AudioOutputALSA::SetParameters(snd_pcm_t *handle, snd_pcm_format_t format,
+ 
+     /* set the period time */
+     err = snd_pcm_hw_params_set_periods_near(handle, params,
+-                                             &period_time, NULL);
++                                             &period_time, &dir);
+     CHECKERR(QString("Unable to set period time %1").arg(period_time));
+     VBAUDIO(QString("Period time = %1 periods").arg(period_time));
+ 
+-- 
+1.7.9.5
+

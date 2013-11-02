@@ -1,0 +1,98 @@
+From 5fd8e87aa777fc5c21947e9c6c10e418991724c1 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 5 Aug 2011 11:31:08 +0200
+Subject: [PATCH 039/124] freemheg: Fix error handling during Launch
+
+If a Launch fails then either:
+- a NULL dereference can occur
+- or the MHEG engine can be left without an executing program.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythfreemheg/Engine.cpp |   40 +++++++++++++++++++++-----------
+ 1 file changed, 26 insertions(+), 14 deletions(-)
+
+diff --git a/mythtv/libs/libmythfreemheg/Engine.cpp b/mythtv/libs/libmythfreemheg/Engine.cpp
+index 175c7c0..955889f 100644
+--- a/mythtv/libs/libmythfreemheg/Engine.cpp
++++ b/mythtv/libs/libmythfreemheg/Engine.cpp
+@@ -285,6 +285,23 @@ bool MHEngine::Launch(const MHObjectRef &target, bool fIsSpawn)
+         return false;
+     }
+ 
++    MHApplication *pProgram = (MHApplication*)ParseProgram(text);
++    if (! pProgram)
++    {
++        MHLOG(MHLogWarning, "Empty application");
++        return false;
++    }
++    if (! pProgram->m_fIsApp)
++    {
++        MHLOG(MHLogWarning, "Expected an application");
++        delete pProgram;
++        return false;
++    }
++    if ((__mhlogoptions & MHLogScenes) && __mhlogStream != 0)   // Print it so we know what's going on.
++    {
++        pProgram->PrintMe(__mhlogStream, 0);
++    }
++
+     // Clear the action queue of anything pending.
+     m_ActionStack.clear();
+ 
+@@ -313,18 +330,6 @@ bool MHEngine::Launch(const MHObjectRef &target, bool fIsSpawn)
+             }
+         }
+ 
+-        MHApplication *pProgram = (MHApplication *)ParseProgram(text);
+-
+-        if ((__mhlogoptions & MHLogScenes) && __mhlogStream != 0)   // Print it so we know what's going on.
+-        {
+-            pProgram->PrintMe(__mhlogStream, 0);
+-        }
+-
+-        if (! pProgram->m_fIsApp)
+-        {
+-            MHERROR("Expected an application");
+-        }
+-
+         // Save the path we use for this app.
+         pProgram->m_Path = csPath; // Record the path
+         int nPos = pProgram->m_Path.lastIndexOf('/');
+@@ -430,8 +435,12 @@ void MHEngine::TransitionToScene(const MHObjectRef &target)
+     // Parse and run the file.
+     MHGroup *pProgram = ParseProgram(text);
+ 
++    if (!pProgram )
++        MHERROR("Empty scene");
++
+     if (pProgram->m_fIsApp)
+     {
++        delete pProgram;
+         MHERROR("Expected a scene");
+     }
+ 
+@@ -983,7 +992,9 @@ void MHEngine::RequestExternalContent(MHIngredient *pRequester)
+             // If the content is not recognized catch the exception and continue
+             try
+             {
+-                pRequester->ContentArrived((const unsigned char *)text.data(), text.size(), this);
++                pRequester->ContentArrived(
++                    reinterpret_cast< const unsigned char * >(text.constData()),
++                    text.size(), this);
+             }
+             catch (char const *)
+             {}
+@@ -1057,7 +1068,8 @@ void MHEngine::CheckContentRequests()
+                 try
+                 {
+                     pContent->m_pRequester->ContentArrived(
+-                        (const unsigned char *)text.data(), text.size(), this);
++                        reinterpret_cast< const unsigned char * >(text.constData()),
++                        text.size(), this);
+                 }
+                 catch (char const *)
+                 {}
+-- 
+1.7.9.5
+

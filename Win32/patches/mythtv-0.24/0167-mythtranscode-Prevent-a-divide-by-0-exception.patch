@@ -1,0 +1,35 @@
+From 0ed6963fe5011ea95bbff67595457b80ce2ae372 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 12 Feb 2013 17:34:12 +0000
+Subject: [PATCH 167/285] mythtranscode: Prevent a divide by 0 exception
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythtranscode/transcode.cpp |    4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/programs/mythtranscode/transcode.cpp b/mythtv/programs/mythtranscode/transcode.cpp
+index 9a11437..3ebbf7a 100755
+--- a/mythtv/programs/mythtranscode/transcode.cpp
++++ b/mythtv/programs/mythtranscode/transcode.cpp
+@@ -37,6 +37,7 @@ class AudioReencodeBuffer : public AudioOutput
+ {
+  public:
+     AudioReencodeBuffer(AudioFormat audio_format, int audio_channels)
++    : bits(0), eff_audiorate(0), last_audiotime(0)
+     {
+         Reset();
+         const AudioSettings settings(audio_format, audio_channels, 0, 0, false);
+@@ -108,7 +109,8 @@ class AudioReencodeBuffer : public AudioOutput
+         audiobuffer_len += frames * bytes_per_frame;
+ 
+         // last_audiotime is at the end of the sample
+-        last_audiotime = timecode + frames * 1000 / eff_audiorate;
++        last_audiotime = timecode + (eff_audiorate ?
++            (frames * 1000) / eff_audiorate : 0);
+ 
+         ab[ab_count].time = last_audiotime;
+         ab_count++;
+-- 
+1.7.9.5
+

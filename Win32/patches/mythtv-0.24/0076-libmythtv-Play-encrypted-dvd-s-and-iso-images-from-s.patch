@@ -1,0 +1,664 @@
+From 80f1905cc6f9645b1e4e09000f6c174f34d28cc1 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 26 Nov 2011 17:58:38 +0100
+Subject: [PATCH 076/285] libmythtv: Play encrypted dvd's and iso images from
+ storage groups
+
+This change enables the backend to use libdvdcss to decrypt dvd's and iso
+images before sending the blocks over the myth protocol to the frontend.
+
+This replaces the current POSIX file read in RingBuffer with a class like
+DVDRingBufferPriv that uses libdvdread to decrypt the raw blocks.
+
+The real heart of the change is in creating a list of blocks that might need
+decrypting and then in safe_read() lookup the blocks requested in that list
+and decrypt them if necessary.  Unfortunately the lookup is necessary since
+if a block is unencrypted, like ifo files, then the decryption operation
+corrupts the data.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythdvdnav/dvdread/dvd_input.c  |   10 +-
+ mythtv/libs/libmythdvdnav/dvdread/dvd_input.h  |    3 +-
+ mythtv/libs/libmythdvdnav/dvdread/dvd_reader.c |   10 +-
+ mythtv/libs/libmythtv/RingBuffer.cpp           |   68 ++++++-
+ mythtv/libs/libmythtv/RingBuffer.h             |    2 +
+ mythtv/libs/libmythtv/dvdstream.cpp            |  240 ++++++++++++++++++++++++
+ mythtv/libs/libmythtv/dvdstream.h              |   50 +++++
+ mythtv/libs/libmythtv/libmythtv.pro            |    4 +
+ 8 files changed, 373 insertions(+), 14 deletions(-)
+ create mode 100644 mythtv/libs/libmythtv/dvdstream.cpp
+ create mode 100644 mythtv/libs/libmythtv/dvdstream.h
+
+diff --git a/mythtv/libs/libmythdvdnav/dvdread/dvd_input.c b/mythtv/libs/libmythdvdnav/dvdread/dvd_input.c
+index e964c33..c38dcf3 100644
+--- a/mythtv/libs/libmythdvdnav/dvdread/dvd_input.c
++++ b/mythtv/libs/libmythdvdnav/dvdread/dvd_input.c
+@@ -33,7 +33,7 @@
+ /* The function pointers that is the exported interface of this file. */
+ dvd_input_t (*dvdinput_open)  (const char *);
+ int         (*dvdinput_close) (dvd_input_t);
+-int         (*dvdinput_seek)  (dvd_input_t, int);
++int         (*dvdinput_seek)  (dvd_input_t, int, int);
+ int         (*dvdinput_title) (dvd_input_t, int);
+ int         (*dvdinput_read)  (dvd_input_t, void *, int, int);
+ char *      (*dvdinput_error) (dvd_input_t);
+@@ -116,10 +116,9 @@ static char *css_error(dvd_input_t dev)
+ /**
+  * seek into the device.
+  */
+-static int css_seek(dvd_input_t dev, int blocks)
++static int css_seek(dvd_input_t dev, int blocks, int flags)
+ {
+-  /* DVDINPUT_NOFLAGS should match the DVDCSS_NOFLAGS value. */
+-  return DVDcss_seek(dev->dvdcss, blocks, DVDINPUT_NOFLAGS);
++  return DVDcss_seek(dev->dvdcss, blocks, flags);
+ }
+ 
+ /**
+@@ -196,9 +195,10 @@ static char *file_error(dvd_input_t dev)
+ /**
+  * seek into the device.
+  */
+-static int file_seek(dvd_input_t dev, int blocks)
++static int file_seek(dvd_input_t dev, int blocks, int flags)
+ {
+   off_t pos;
++  (void)flags;
+ 
+   pos = mythfile_seek(dev->fd, (off_t)blocks * (off_t)DVD_VIDEO_LB_LEN, SEEK_SET);
+   if(pos < 0) {
+diff --git a/mythtv/libs/libmythdvdnav/dvdread/dvd_input.h b/mythtv/libs/libmythdvdnav/dvdread/dvd_input.h
+index 208512e..73b0c95 100644
+--- a/mythtv/libs/libmythdvdnav/dvdread/dvd_input.h
++++ b/mythtv/libs/libmythdvdnav/dvdread/dvd_input.h
+@@ -28,6 +28,7 @@
+ #define DVDINPUT_NOFLAGS         0
+ 
+ #define DVDINPUT_READ_DECRYPT    (1 << 0)
++#define DVDCSS_SEEK_KEY          (1 << 1)
+ 
+ typedef struct dvd_input_s *dvd_input_t;
+ 
+@@ -50,7 +51,7 @@ typedef struct dvd_input_s *dvd_input_t;
+  */
+ extern dvd_input_t (*dvdinput_open)  (const char *);
+ extern int         (*dvdinput_close) (dvd_input_t);
+-extern int         (*dvdinput_seek)  (dvd_input_t, int);
++extern int         (*dvdinput_seek)  (dvd_input_t, int, int);
+ extern int         (*dvdinput_title) (dvd_input_t, int);
+ extern int         (*dvdinput_read)  (dvd_input_t, void *, int, int);
+ extern char *      (*dvdinput_error) (dvd_input_t);
+diff --git a/mythtv/libs/libmythdvdnav/dvdread/dvd_reader.c b/mythtv/libs/libmythdvdnav/dvdread/dvd_reader.c
+index fa10a8e..edde42b 100644
+--- a/mythtv/libs/libmythdvdnav/dvdread/dvd_reader.c
++++ b/mythtv/libs/libmythdvdnav/dvdread/dvd_reader.c
+@@ -1117,14 +1117,14 @@ int UDFReadBlocksRaw( dvd_reader_t *device, uint32_t lb_number,
+     return 0;
+   }
+ 
+-  ret = dvdinput_seek( device->dev, (int) lb_number );
++  ret = dvdinput_seek( device->dev, (int) lb_number, encrypted & DVDCSS_SEEK_KEY );
+   if( ret != (int) lb_number ) {
+     fprintf( stderr, "libdvdread: Can't seek to block %u\n", lb_number );
+     return 0;
+   }
+ 
+   ret = dvdinput_read( device->dev, (char *) data,
+-                       (int) block_count, encrypted );
++                       (int) block_count, encrypted & DVDINPUT_READ_DECRYPT );
+   return ret;
+ }
+ 
+@@ -1162,7 +1162,7 @@ static int DVDReadBlocksPath( dvd_file_t *dvd_file, unsigned int offset,
+ 
+     if( offset < dvd_file->title_sizes[ i ] ) {
+       if( ( offset + block_count ) <= dvd_file->title_sizes[ i ] ) {
+-        off = dvdinput_seek( dvd_file->title_devs[ i ], (int)offset );
++        off = dvdinput_seek( dvd_file->title_devs[ i ], (int)offset, DVDINPUT_NOFLAGS );
+         if( off < 0 || off != (int)offset ) {
+           fprintf( stderr, "libdvdread: Can't seek to block %d\n",
+                    offset );
+@@ -1177,7 +1177,7 @@ static int DVDReadBlocksPath( dvd_file_t *dvd_file, unsigned int offset,
+          * (This is only true if you try and read >1GB at a time) */
+ 
+         /* Read part 1 */
+-        off = dvdinput_seek( dvd_file->title_devs[ i ], (int)offset );
++        off = dvdinput_seek( dvd_file->title_devs[ i ], (int)offset, DVDINPUT_NOFLAGS );
+         if( off < 0 || off != (int)offset ) {
+           fprintf( stderr, "libdvdread: Can't seek to block %d\n",
+                    offset );
+@@ -1194,7 +1194,7 @@ static int DVDReadBlocksPath( dvd_file_t *dvd_file, unsigned int offset,
+           return ret;
+ 
+         /* Read part 2 */
+-        off = dvdinput_seek( dvd_file->title_devs[ i + 1 ], 0 );
++        off = dvdinput_seek( dvd_file->title_devs[ i + 1 ], 0, DVDINPUT_NOFLAGS );
+         if( off < 0 || off != 0 ) {
+           fprintf( stderr, "libdvdread: Can't seek to block %d\n",
+                    0 );
+diff --git a/mythtv/libs/libmythtv/RingBuffer.cpp b/mythtv/libs/libmythtv/RingBuffer.cpp
+index 0c483af..8d4a371 100644
+--- a/mythtv/libs/libmythtv/RingBuffer.cpp
++++ b/mythtv/libs/libmythtv/RingBuffer.cpp
+@@ -31,6 +31,7 @@ using namespace std;
+ #ifdef USING_MHEG
+ #include "netstream.h"
+ #endif
++#include "dvdstream.h"
+ #include "util.h"
+ #include "compat.h"
+ 
+@@ -141,6 +142,7 @@ RingBuffer::RingBuffer(const QString &lfilename,
+ #ifdef USING_MHEG
+       m_stream(NULL),
+ #endif
++      m_dvdStream(NULL),
+       oldfile(false),           livetvchain(NULL),
+       ignoreliveeof(false),     readAdjust(0)
+ {
+@@ -314,6 +316,8 @@ void RingBuffer::OpenFile(const QString &lfilename, uint retry_ms)
+     delete m_stream;
+     m_stream = NULL;
+ #endif
++    delete m_dvdStream;
++    m_dvdStream = NULL;
+ 
+     if (fd2 >= 0)
+     {
+@@ -322,6 +326,7 @@ void RingBuffer::OpenFile(const QString &lfilename, uint retry_ms)
+     }
+ 
+     bool is_local = false;
++    bool is_dvdimg = false;
+     bool is_dvd = false;
+     (void) is_dvd; // not used when frontend is disabled.
+     bool is_bd = false;
+@@ -347,10 +352,29 @@ void RingBuffer::OpenFile(const QString &lfilename, uint retry_ms)
+         }
+     }
+ 
+-    if ((filename.left(1) == "/") ||
+-        (QFile::exists(filename)))
++    QFileInfo fileinfo(filename);
++    if (fileinfo.isAbsolute() || fileinfo.exists())
++    {
+         is_local = true;
+-
++        if (!streamOnly && !writemode)
++        {
++            if (lower.endsWith(".img") || lower.endsWith(".iso"))
++            {
++                is_local = false;
++                is_dvdimg = true;
++                VERBOSE(VB_PLAYBACK, "OpenFile() DVD image at " + filename);
++                m_dvdStream = new DVDStream(filename);
++            }
++            else if (lower.endsWith(".vob") && filename.contains("/VIDEO_TS/"))
++            {
++                is_local = false;
++                is_dvdimg = true;
++                startreadahead = false;
++                VERBOSE(VB_PLAYBACK, "OpenFile() DVD VOB at " + filename);
++                m_dvdStream = new DVDStream(filename);
++            }
++        }
++    }
+ #ifdef USING_FRONTEND
+     else if ((!streamOnly) &&
+              ((lower.startsWith("dvd:")) || is_dvd ||
+@@ -490,6 +514,10 @@ void RingBuffer::OpenFile(const QString &lfilename, uint retry_ms)
+                 .arg(openAttempts).arg(openTimer.elapsed()));
+ 
+     }
++    else if (is_dvdimg)
++    {
++        readblocksize = DVD_BLOCK_SIZE * 62;
++    }
+ #ifdef USING_FRONTEND
+     else if (is_dvd)
+     {
+@@ -569,6 +597,9 @@ void RingBuffer::OpenFile(const QString &lfilename, uint retry_ms)
+     // streams (e.g. radio @ 64Kbps) such that fill_min bytes are received
+     // in a reasonable time period to enable decoders to peek the first few KB
+     // to determine type & settings.
++    if (is_dvdimg)
++        rawbitrate = 8000;
++    else
+ #ifdef USING_FRONTEND
+     if (is_dvd || is_bd)
+         rawbitrate = 8000;
+@@ -598,6 +629,8 @@ bool RingBuffer::IsOpen(void) const
+     if (bdPriv)
+         return bdPriv->IsOpen();
+ #endif // !USING_FRONTEND
++    if (m_dvdStream)
++        return m_dvdStream->IsOpen();
+ #ifdef USING_MHEG
+     if (m_stream)
+         return m_stream->IsOpen();
+@@ -637,6 +670,7 @@ RingBuffer::~RingBuffer(void)
+ #ifdef USING_MHEG
+     delete m_stream;
+ #endif
++    delete m_dvdStream;
+ 
+     // this only runs if thread is terminated
+     delete [] readAheadBuffer;
+@@ -1304,6 +1338,11 @@ void RingBuffer::run(void)
+                 read_return = safe_read(
+                     remotefile, readAheadBuffer + rbwposcopy, totfree);
+             }
++            else if (m_dvdStream)
++            {
++                read_return = m_dvdStream->safe_read(
++                    readAheadBuffer + rbwposcopy, totfree);
++            }
+ #ifdef USING_FRONTEND
+             else if (dvdPriv)
+             {
+@@ -1563,6 +1602,8 @@ int RingBuffer::ReadDirect(void *buf, int count, bool peek)
+     int ret;
+     if (remotefile)
+         ret = safe_read(remotefile, buf, count);
++    else if (m_dvdStream)
++        ret = m_dvdStream->safe_read(buf, count);
+ #ifdef USING_FRONTEND
+     else if (dvdPriv)
+         ret = dvdPriv->safe_read(buf, count);
+@@ -1603,6 +1644,9 @@ int RingBuffer::ReadDirect(void *buf, int count, bool peek)
+ 
+     if (peek && ret > 0)
+     {
++        if (m_dvdStream)
++            m_dvdStream->Seek(old_pos);
++        else
+ #ifdef USING_MHEG
+         if (m_stream)
+             m_stream->Seek(old_pos);
+@@ -2103,6 +2147,19 @@ long long RingBuffer::Seek(long long pos, int whence, bool has_lock)
+         if (ret<0)
+             errno = EINVAL;
+     }
++    else if (m_dvdStream)
++    {
++        if (SEEK_END == whence)
++        {
++            errno = EINVAL;
++            ret = -1;
++        }
++        else
++        {
++            m_dvdStream->Seek(new_pos);
++            ret = new_pos;
++        }
++    }
+ #ifdef USING_FRONTEND
+     else if ((dvdPriv || bdPriv) && (SEEK_END == whence))
+     {
+@@ -2291,6 +2348,8 @@ long long RingBuffer::GetReadPosition(void) const
+     rwlock.lockForRead();
+     poslock.lockForRead();
+     long long ret = readpos;
++    if (m_dvdStream)
++        ret = m_dvdStream->GetReadPosition();
+ #ifdef USING_FRONTEND
+     if (dvdPriv)
+         ret = dvdPriv->GetReadPosition();
+@@ -2325,6 +2384,9 @@ long long RingBuffer::GetRealFileSize(void) const
+ {
+     rwlock.lockForRead();
+     long long ret = -1;
++    if (m_dvdStream)
++        ret = m_dvdStream->GetSize();
++    else
+ #ifdef USING_FRONTEND
+     if (dvdPriv)
+         ret = dvdPriv->GetTotalReadPosition();
+diff --git a/mythtv/libs/libmythtv/RingBuffer.h b/mythtv/libs/libmythtv/RingBuffer.h
+index abe9f58..9ffe4c1 100644
+--- a/mythtv/libs/libmythtv/RingBuffer.h
++++ b/mythtv/libs/libmythtv/RingBuffer.h
+@@ -22,6 +22,7 @@ class ThreadedFileWriter;
+ class DVDRingBufferPriv;
+ class BDRingBufferPriv;
+ class NetStream;
++class DVDStream;
+ class LiveTVChain;
+ 
+ class MPUBLIC RingBuffer : protected QThread
+@@ -198,6 +199,7 @@ class MPUBLIC RingBuffer : protected QThread
+     DVDRingBufferPriv *dvdPriv; // NOT protected by a lock
+     BDRingBufferPriv  *bdPriv;  // NOT protected by a lock
+     NetStream         *m_stream;
++    DVDStream         *m_dvdStream;
+ 
+     bool oldfile;                 // protected by rwlock
+ 
+diff --git a/mythtv/libs/libmythtv/dvdstream.cpp b/mythtv/libs/libmythtv/dvdstream.cpp
+new file mode 100644
+index 0000000..5f9a953
+--- /dev/null
++++ b/mythtv/libs/libmythtv/dvdstream.cpp
+@@ -0,0 +1,240 @@
++/* DVD stream
++ * Copyright 2011 Lawrence Rust <lvr at softsystem dot co dot uk>
++ */
++#include "dvdstream.h"
++
++#include <stdio.h>
++
++#include <QMutexLocker>
++#include <QtAlgorithms>
++
++#include "dvd_reader.h"
++#include "dvd_udf.h"    // for UDFFindFile
++extern "C" {
++#include "dvd_input.h"  // for DVDINPUT_READ_DECRYPT & DVDCSS_SEEK_KEY
++}
++
++#include "mythcontext.h" // for VERBOSE
++
++
++// A range of block numbers
++class DVDStream::BlockRange
++{
++    uint32_t start, end;
++    int title;
++
++public:
++    BlockRange(uint32_t b, uint32_t n, int t) : start(b), end(b+n), title(t) { }
++
++    bool operator < (const BlockRange& rhs) const { return end <= rhs.start; }
++
++    uint32_t Start() const { return start; }
++    uint32_t End() const { return end; }
++    int Title() const { return title; }
++};
++
++
++// Private but located in/shared with dvd_reader.c
++extern "C" int UDFReadBlocksRaw( dvd_reader_t *device, uint32_t lb_number,
++                             size_t block_count, unsigned char *data,
++                             int encrypted );
++
++
++// Roundup bytes to DVD blocks
++inline uint32_t Len2Blocks(uint32_t len)
++{
++    return (len + (DVD_VIDEO_LB_LEN - 1)) / DVD_VIDEO_LB_LEN;
++}
++
++
++DVDStream::DVDStream(const QString &filename)
++: m_name(filename), m_reader(0), m_start(0), m_pos(0), m_title(-1)
++{
++    const QString root = filename.section("/VIDEO_TS/", 0, 0);
++    const QString path = filename.section(root, 1);
++
++    m_reader = DVDOpen(qPrintable(root));
++    if (!m_reader)
++    {
++        VERBOSE(VB_IMPORTANT, QString("DVDStream DVDOpen(%1) failed").arg(root));
++    }
++    else if (!path.isEmpty())
++    {
++        // Locate the start block of the requested title
++        uint32_t len;
++        m_start = UDFFindFile(m_reader, const_cast<char*>(qPrintable(path)), &len);
++        if (m_start == 0)
++        {
++            VERBOSE(VB_IMPORTANT, QString("DVDStream(%1) UDFFindFile(%2) failed").arg(root).arg(path));
++            DVDClose(m_reader);
++            m_reader = 0;
++        }
++        else
++        {
++            m_list.append(BlockRange(0, Len2Blocks(len), 0));
++        }
++    }
++    else
++    {
++        // Create a list of the possibly encrypted files
++        uint32_t len, start;
++
++        // Root menu
++        char name[64] = "VIDEO_TS/VIDEO_TS.VOB";
++        start = UDFFindFile(m_reader, name, &len);
++        if( start != 0 && len != 0 )
++            m_list.append(BlockRange(start, Len2Blocks(len), 0));
++
++        const int kTitles = 100;
++        for ( int title = 1; title < kTitles; ++title)
++        {
++            // Menu
++            snprintf(name, sizeof name, "/VIDEO_TS/VTS_%02d_0.VOB", title);
++            start = UDFFindFile(m_reader, name, &len);
++            if( start != 0 && len != 0 )
++                m_list.append(BlockRange(start, Len2Blocks(len), title));
++
++            for ( int part = 1; part < 10; ++part)
++            {
++                // A/V track
++                snprintf(name, sizeof name, "/VIDEO_TS/VTS_%02d_%d.VOB", title, part);
++                start = UDFFindFile(m_reader, name, &len);
++                if( start != 0 && len != 0 )
++                    m_list.append(BlockRange(start, Len2Blocks(len), title + part * kTitles));
++            }
++        }
++
++        qSort( m_list);
++
++        // Open the root menu so that CSS keys are generated now
++        dvd_file_t *file = DVDOpenFile(m_reader, 0, DVD_READ_MENU_VOBS);
++        if (file)
++            DVDCloseFile(file);
++        else
++            VERBOSE(VB_IMPORTANT, "DVDStream DVDOpenFile(VOBS_1) failed");
++    }
++}
++
++DVDStream::~DVDStream()
++{
++    if (m_reader)
++        DVDClose(m_reader);
++}
++
++bool DVDStream::IsOpen() const
++{
++    return m_reader != 0;
++}
++
++int DVDStream::safe_read(void *data, unsigned size)
++{
++    uint32_t lb = size / DVD_VIDEO_LB_LEN;
++    if (lb < 1)
++    {
++        VERBOSE(VB_IMPORTANT, "DVDStream::safe_read too small");
++        return -1;
++    }
++
++    if (!m_reader)
++        return -1;
++
++    QMutexLocker locker(&m_mutex);
++    int ret = 0;
++
++    // Are any blocks in the range encrypted?
++    list_t::const_iterator it = qBinaryFind(m_list, BlockRange(m_pos, lb, -1));
++    uint32_t b = it == m_list.end() ? lb : m_pos < it->Start() ? it->Start() - m_pos : 0;
++    if (b)
++    {
++        // Read the beginning unencrypted blocks
++        ret = UDFReadBlocksRaw(m_reader, m_pos, b, (unsigned char*)data, DVDINPUT_NOFLAGS);
++        if (ret == -1)
++        {
++            VERBOSE(VB_PLAYBACK, QString("DVDStream(%1)::safe_read @%2 error").
++                arg(m_name).arg(m_pos));
++            return -1;
++        }
++
++        m_pos += ret;
++        lb -= ret;
++        if (it == m_list.end())
++            return ret * DVD_VIDEO_LB_LEN;
++
++        data = (unsigned char*)data + ret * DVD_VIDEO_LB_LEN;
++    }
++
++    b = it->End() - m_pos;
++    if (b > lb)
++        b = lb;
++
++    // Request new key if change in title
++    int flags = DVDINPUT_READ_DECRYPT;
++    if (it->Title() != m_title)
++    {
++        m_title = it->Title();
++        flags |= DVDCSS_SEEK_KEY;
++    }
++
++    // Read the encrypted blocks
++    int ret2 = UDFReadBlocksRaw(m_reader, m_pos + m_start, b, (unsigned char*)data, flags);
++    if (ret2 == -1)
++    {
++        VERBOSE(VB_PLAYBACK, QString("DVDStream(%1)::safe_read @%2 error").
++            arg(m_name).arg(m_pos));
++        m_title = -1;
++        return -1;
++    }
++
++    m_pos += ret2;
++    ret += ret2;
++    lb -= ret2;
++    data = (unsigned char*)data + ret2 * DVD_VIDEO_LB_LEN;
++
++    if (lb > 0 && m_start == 0)
++    {
++        // Read the last unencrypted blocks
++        ret2 = UDFReadBlocksRaw(m_reader, m_pos, lb, (unsigned char*)data, DVDINPUT_NOFLAGS);
++        if (ret2 == -1)
++        {
++            VERBOSE(VB_PLAYBACK, QString("DVDStream(%1)::safe_read @%2 error").
++                arg(m_name).arg(m_pos));
++            return -1;
++        }
++
++        m_pos += ret2;
++        ret += ret2;;
++    }
++
++    return ret * DVD_VIDEO_LB_LEN;
++}
++
++qlonglong DVDStream::Seek(qlonglong pos)
++{
++    if (!m_reader)
++        return -1;
++
++    uint32_t lb = pos / DVD_VIDEO_LB_LEN;
++    if ((qlonglong)lb * DVD_VIDEO_LB_LEN != pos)
++    {
++        VERBOSE(VB_IMPORTANT, "DVDStream::Seek not block aligned");
++        return -1;
++    }
++
++    QMutexLocker locker(&m_mutex);
++    m_pos = lb;
++    return pos;
++}
++
++qlonglong DVDStream::GetReadPosition() const
++{
++    QMutexLocker locker(&m_mutex);
++    return m_pos * DVD_VIDEO_LB_LEN;
++}
++
++qlonglong DVDStream::GetSize() const
++{
++    VERBOSE(VB_IMPORTANT, "DVDStream::GetSize not implemented");
++    return -1;
++}
++
++// End of dvdstream,.cpp
+diff --git a/mythtv/libs/libmythtv/dvdstream.h b/mythtv/libs/libmythtv/dvdstream.h
+new file mode 100644
+index 0000000..d2a499e
+--- /dev/null
++++ b/mythtv/libs/libmythtv/dvdstream.h
+@@ -0,0 +1,50 @@
++/* DVD stream
++ * Copyright 2011 Lawrence Rust <lvr at softsystem dot co dot uk>
++ */
++#ifndef DVDSTREAM_H
++#define DVDSTREAM_H
++
++#include <stdint.h>
++
++#include <QString>
++#include <QMutex>
++#include <QList>
++
++typedef struct dvd_reader_s dvd_reader_t;
++
++
++/**
++ * Stream content from a DVD image file
++ */
++class DVDStream
++{
++    Q_DISABLE_COPY(DVDStream)
++
++public:
++    DVDStream(const QString&);
++    virtual ~DVDStream();
++
++public:
++    // RingBuffer interface
++    bool IsOpen() const;
++    int safe_read(void *data, unsigned size);
++    qlonglong Seek(qlonglong);
++    qlonglong GetReadPosition() const;
++    qlonglong GetSize() const;
++
++    // Implementation
++private:
++    const QString m_name;
++    dvd_reader_t *m_reader;
++    uint32_t m_start;
++
++    class BlockRange;
++    typedef QList<BlockRange> list_t;
++    list_t m_list;          // List of possibly encryoted block ranges
++
++    mutable QMutex m_mutex; // Protects r/w access to the following data
++    uint32_t m_pos;         // Current read position (blocks)
++    int m_title;            // Current title
++};
++
++#endif /* ndef DVDSTREAM_H */
+diff --git a/mythtv/libs/libmythtv/libmythtv.pro b/mythtv/libs/libmythtv/libmythtv.pro
+index 2d61006..07a3ae3 100644
+--- a/mythtv/libs/libmythtv/libmythtv.pro
++++ b/mythtv/libs/libmythtv/libmythtv.pro
+@@ -23,6 +23,7 @@ DEPENDPATH  += .
+ DEPENDPATH  += ../libmyth
+ DEPENDPATH  += ../libmythdb ../libmythhdhomerun
+ DEPENDPATH  += ../libmythdvdnav/
++DEPENDPATH  += ../libmythdvdnav/dvdread # for dvd_reader.h & dvd_input.h
+ DEPENDPATH  += ../libmythbluray/
+ DEPENDPATH  += ./dvbdev ./mpeg ./iptv ./channelscan
+ DEPENDPATH  += ../libmythlivemedia/BasicUsageEnvironment/include
+@@ -248,6 +249,9 @@ SOURCES += dtvconfparser.cpp        dtvconfparserhelpers.cpp
+ HEADERS += channelscan/scaninfo.h   channelscan/channelimporter.h
+ SOURCES += channelscan/scaninfo.cpp channelscan/channelimporter.cpp
+ 
++HEADERS += dvdstream.h
++SOURCES += dvdstream.cpp
++
+ using_frontend {
+     # Recording profile stuff
+     HEADERS += profilegroup.h
+-- 
+1.7.9.5
+

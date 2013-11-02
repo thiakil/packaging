@@ -1,0 +1,49 @@
+From 6976f3ef73449c9b8acc8716f66dcf3fcd4b960d Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 1 Feb 2013 21:16:05 +0000
+Subject: [PATCH 114/227] mythgallery: Fix whitescreen when starting recusive
+ slideshow from a directory
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/mythgallery/mythgallery/imageview.cpp |   19 ++++++++++++-------
+ 1 file changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/mythplugins/mythgallery/mythgallery/imageview.cpp b/mythplugins/mythgallery/mythgallery/imageview.cpp
+index 858a11c..902c8fc 100644
+--- a/mythplugins/mythgallery/mythgallery/imageview.cpp
++++ b/mythplugins/mythgallery/mythgallery/imageview.cpp
+@@ -75,18 +75,23 @@ ImageView::ImageView(const ThumbList &itemList,
+     if (m_pos < m_itemList.size())
+         origItem = m_itemList.at(m_pos);
+ 
+-    // FIXME this looks wrong
+-    //remove all dirs from m_itemList;
+-    ThumbItem *item;
+-    for (int x = 0; x < m_itemList.size(); x++)
++    // Load pictures from all directories if requested
++    for (int x = 0; recurse && x < m_itemList.size(); ++x)
+     {
+-        item = m_itemList.at(x);
++        ThumbItem *item = m_itemList.at(x);
+         if (item->IsDir())
+-        {
+-            if (recurse)
+                 GalleryUtil::LoadDirectory(m_itemList, item->GetPath(),
+                                            sortorder, recurse, NULL, NULL);
++    }
++
++    //remove all dirs from m_itemList;
++    for (int x = 0; x < m_itemList.size(); ++x)
++    {
++        ThumbItem *item = m_itemList.at(x);
++        if (item->IsDir())
++        {
+             m_itemList.takeAt(x);
++            --x;
+         }
+     }
+ 
+-- 
+1.7.9.5
+

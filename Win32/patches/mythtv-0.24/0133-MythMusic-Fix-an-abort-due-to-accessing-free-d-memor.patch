@@ -1,0 +1,82 @@
+From e07a2a8cdd3d03bc0baff6af270e66ffef1c6504 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 26 Jun 2012 15:49:09 +0200
+Subject: [PATCH 133/285] MythMusic: Fix an abort due to accessing free'd
+ memory
+
+When creating. editing or deleting a playlist an abort can occur
+in Track::deleteYourWidget by accessing my_widget if it has been deleted
+by its parent.
+
+This patch adds a callback to Track::WidgetDeleted when the widget
+is deleted and so prevents stale data.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/mythmusic/mythmusic/playlist.cpp      |    6 ++++++
+ mythplugins/mythmusic/mythmusic/playlist.h        |    1 +
+ mythplugins/mythmusic/mythmusic/treecheckitem.cpp |    6 ++++++
+ mythplugins/mythmusic/mythmusic/treecheckitem.h   |    1 +
+ 4 files changed, 14 insertions(+)
+
+diff --git a/mythplugins/mythmusic/mythmusic/playlist.cpp b/mythplugins/mythmusic/mythmusic/playlist.cpp
+index e2e8dde..0dccc26 100644
+--- a/mythplugins/mythmusic/mythmusic/playlist.cpp
++++ b/mythplugins/mythmusic/mythmusic/playlist.cpp
+@@ -77,6 +77,12 @@ void Track::deleteYourWidget()
+     }
+ }
+ 
++void Track::WidgetDeleted()
++{
++    my_widget = NULL;
++}
++
++
+ void Track::moveUpDown(bool flag)
+ {
+     parent->moveTrackUpDown(flag, this);
+diff --git a/mythplugins/mythmusic/mythmusic/playlist.h b/mythplugins/mythmusic/mythmusic/playlist.h
+index 8b3c3a3..a8c0ca2 100644
+--- a/mythplugins/mythmusic/mythmusic/playlist.h
++++ b/mythplugins/mythmusic/mythmusic/playlist.h
+@@ -59,6 +59,7 @@ class Track
+     int  getValue(){return index_value;}
+ 
+     void deleteYourWidget();
++    void WidgetDeleted();
+     void deleteYourself();
+     void moveUpDown(bool flag);
+ 
+diff --git a/mythplugins/mythmusic/mythmusic/treecheckitem.cpp b/mythplugins/mythmusic/mythmusic/treecheckitem.cpp
+index 085abea..46b902d 100644
+--- a/mythplugins/mythmusic/mythmusic/treecheckitem.cpp
++++ b/mythplugins/mythmusic/mythmusic/treecheckitem.cpp
+@@ -193,6 +193,12 @@ PlaylistTrack::PlaylistTrack(UIListGenericTree *parent, const QString &title)
+         m_image = pixmap;
+ }
+ 
++PlaylistTrack::~PlaylistTrack()
++{
++    if (ptr_to_owner)
++        ptr_to_owner->WidgetDeleted();
++}
++
+ void PlaylistTrack::userSelectedMe(void)
+ {
+ }
+diff --git a/mythplugins/mythmusic/mythmusic/treecheckitem.h b/mythplugins/mythmusic/mythmusic/treecheckitem.h
+index fad1535..a9060e8 100644
+--- a/mythplugins/mythmusic/mythmusic/treecheckitem.h
++++ b/mythplugins/mythmusic/mythmusic/treecheckitem.h
+@@ -72,6 +72,7 @@ class PlaylistTrack : public PlaylistItem
+ {
+   public:
+     PlaylistTrack(UIListGenericTree *parent, const QString &title);
++    virtual ~PlaylistTrack();
+ 
+     void setOwner(Track *owner);
+     void userSelectedMe();
+-- 
+1.7.9.5
+

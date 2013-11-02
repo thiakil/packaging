@@ -1,0 +1,92 @@
+From f398964bfc933e5ddeb3cda5b455d03806869090 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 15 Mar 2011 12:53:24 +0100
+Subject: [PATCH 085/207] mytharchive: enable compilation for Windows
+
+Ticket URL: <http://code.mythtv.org/trac/ticket/9379>
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/mytharchive/mytharchive/main.cpp       |    2 ++
+ mythplugins/mytharchive/mytharchive/mythburn.cpp   |    1 -
+ mythplugins/mytharchive/mytharchivehelper/main.cpp |    5 ++++-
+ .../mytharchive/mytharchivehelper/pxsup2dast.c     |    4 ++++
+ 4 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/mythplugins/mytharchive/mytharchive/main.cpp b/mythplugins/mytharchive/mytharchive/main.cpp
+index aececd5..e6ae052 100644
+--- a/mythplugins/mytharchive/mytharchive/main.cpp
++++ b/mythplugins/mytharchive/mytharchive/main.cpp
+@@ -56,6 +56,7 @@ static bool checkProcess(const QString &lockFile)
+         return true;
+     }
+ 
++#ifndef USING_MINGW
+     QString line(file.readLine(100));
+ 
+     pid_t pid = line.toInt(&bOK);
+@@ -75,6 +76,7 @@ static bool checkProcess(const QString &lockFile)
+         if (errno == ESRCH)
+             return false;
+     }
++#endif
+ 
+     return true;
+ }
+diff --git a/mythplugins/mytharchive/mytharchive/mythburn.cpp b/mythplugins/mytharchive/mytharchive/mythburn.cpp
+index d7fe978..10980c9 100644
+--- a/mythplugins/mytharchive/mytharchive/mythburn.cpp
++++ b/mythplugins/mytharchive/mytharchive/mythburn.cpp
+@@ -4,7 +4,6 @@
+ #include <unistd.h>
+ #include <iostream>
+ #include <cstdlib>
+-#include <sys/wait.h>  // for WIFEXITED and WEXITSTATUS
+ 
+ // qt
+ #include <QDir>
+diff --git a/mythplugins/mytharchive/mytharchivehelper/main.cpp b/mythplugins/mytharchive/mytharchivehelper/main.cpp
+index c7fb239..92c8c2a 100644
+--- a/mythplugins/mytharchive/mytharchivehelper/main.cpp
++++ b/mythplugins/mytharchive/mytharchivehelper/main.cpp
+@@ -26,9 +26,12 @@
+ 
+ #include <iostream>
+ #include <stdint.h>
++#ifndef USING_MINGW
+ #include <sys/wait.h>  // for WIFEXITED and WEXITSTATUS
++#endif
+ #include <unistd.h>
+ #include <cstdlib>
++#include <cstring>
+ 
+ #include <mythconfig.h>
+ #if CONFIG_DARWIN or defined(__FreeBSD__)
+@@ -2276,7 +2279,7 @@ static int isRemote(QString filename)
+     return 1;
+ }
+ 
+-class MPUBLIC MythArchiveHelperCommandLineParser : public MythCommandLineParser
++class MythArchiveHelperCommandLineParser : public MythCommandLineParser
+ {
+   public:
+     MythArchiveHelperCommandLineParser();
+diff --git a/mythplugins/mytharchive/mytharchivehelper/pxsup2dast.c b/mythplugins/mytharchive/mytharchivehelper/pxsup2dast.c
+index d3a5905..e9a5c7e 100644
+--- a/mythplugins/mytharchive/mytharchivehelper/pxsup2dast.c
++++ b/mythplugins/mytharchive/mytharchivehelper/pxsup2dast.c
+@@ -256,7 +256,11 @@ static void xfseek0(FILE * stream, long offset)
+ 
+ static void xmkdir(const char * path, int mode) 
+ {
++#ifdef USING_MINGW
++    if (mkdir(path) < 0)
++#else
+     if (mkdir(path, mode) < 0)
++#endif
+         exc_throw(MiscError, "mkdir(%s, 0%o) failure:", path, mode);
+ }
+ 
+-- 
+1.7.9.5
+

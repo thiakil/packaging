@@ -1,0 +1,124 @@
+From da12bf6cf7aaaa74350bf3ef1e50d5bd19ce0d2e Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 6 Aug 2012 16:28:48 +0200
+Subject: [PATCH 014/124] ringbuffer: Add hysteresis to readahead
+
+Avoid audio underrun and rapid play/wait cycling in http video streams.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/ringbuffer.cpp |   37 +++++++++++++++++++++++-----------
+ mythtv/libs/libmythtv/ringbuffer.h   |    2 ++
+ 2 files changed, 27 insertions(+), 12 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/ringbuffer.cpp b/mythtv/libs/libmythtv/ringbuffer.cpp
+index 7d826fb7..be8790c 100644
+--- a/mythtv/libs/libmythtv/ringbuffer.cpp
++++ b/mythtv/libs/libmythtv/ringbuffer.cpp
+@@ -450,6 +450,18 @@ int RingBuffer::ReadBufAvail(void) const
+     return ret;
+ }
+ 
++inline int RingBuffer::ReadBufUsed() const
++{
++    return (bufferSize - 1) - ReadBufFree();
++}
++
++inline bool RingBuffer::ReadsAllowed() const
++{
++    return ateof || setswitchtonext || commserror ||
++        // Ensure some hysteresis around fill_min
++        ReadBufUsed() >= (readsallowed ? 1 : fill_min);
++}
++
+ /** \fn RingBuffer::ResetReadAhead(long long)
+  *  \brief Restart the read-ahead thread at the 'newinternal' position.
+  *
+@@ -893,13 +905,9 @@ void RingBuffer::run(void)
+             }
+         }
+ 
+-        int used = bufferSize - ReadBufFree();
+-
+         bool reads_were_allowed = readsallowed;
+ 
+-        if ((0 == read_return) || (numfailures > 5) ||
+-            (readsallowed != (used >= fill_min || ateof ||
+-                              setswitchtonext || commserror)))
++        if (0 == read_return || numfailures > 5 || ReadsAllowed() != readsallowed)
+         {
+             // If readpos changes while the lock is released
+             // we should not handle the 0 read_return now.
+@@ -910,8 +918,14 @@ void RingBuffer::run(void)
+ 
+             commserror |= (numfailures > 5);
+ 
+-            readsallowed = used >= fill_min || ateof ||
+-                setswitchtonext || commserror;
++            bool bReadsAllowed = ReadsAllowed();
++            if (readsallowed != bReadsAllowed)
++            {
++                readsallowed = bReadsAllowed;
++                LOG(VB_FILE, LOG_INFO, LOC + (bReadsAllowed ?
++                    QString("Reads allowed: %1 bytes available").arg(ReadBufUsed()) :
++                    QString("Rebuffering %1..%2").arg(ReadBufUsed()).arg(fill_min)) );
++            }
+ 
+             if (0 == read_return && old_readpos == readpos)
+             {
+@@ -934,13 +948,12 @@ void RingBuffer::run(void)
+ 
+             rwlock.unlock();
+             rwlock.lockForRead();
+-            used = bufferSize - ReadBufFree();
+         }
+ 
+         LOG(VB_FILE, LOG_DEBUG, LOC + "@ end of read ahead loop");
+ 
+         if (!readsallowed || commserror || ateof || setswitchtonext ||
+-            (wanttoread <= used && wanttoread > 0))
++            (wanttoread <= ReadBufUsed() && wanttoread > 0))
+         {
+             // To give other threads a good chance to handle these
+             // conditions, even if they are only requesting a read lock
+@@ -948,13 +961,13 @@ void RingBuffer::run(void)
+             generalWait.wakeAll();
+             rwlock.unlock();
+             usleep(5 * 1000);
+-            rwlock.lockForRead();            
++            rwlock.lockForRead();
+         }
+         else
+         {
+             // yield if we have nothing to do...
+             if (!request_pause && reads_were_allowed &&
+-                (used >= fill_threshold || ateof || setswitchtonext))
++                (ReadBufUsed() >= fill_threshold || ateof || setswitchtonext || ignoreliveeof))
+             {
+                 generalWait.wait(&rwlock, 50);
+             }
+@@ -964,7 +977,7 @@ void RingBuffer::run(void)
+                 generalWait.wakeAll();
+                 rwlock.unlock();
+                 usleep(5 * 1000);
+-                rwlock.lockForRead();            
++                rwlock.lockForRead();
+             }
+         }
+     }
+diff --git a/mythtv/libs/libmythtv/ringbuffer.h b/mythtv/libs/libmythtv/ringbuffer.h
+index f8556d5..edca2ef 100644
+--- a/mythtv/libs/libmythtv/ringbuffer.h
++++ b/mythtv/libs/libmythtv/ringbuffer.h
+@@ -173,6 +173,8 @@ class MTV_PUBLIC RingBuffer : protected MThread
+ 
+     int ReadBufFree(void) const;
+     int ReadBufAvail(void) const;
++    int ReadBufUsed() const;
++    bool ReadsAllowed() const;
+ 
+     void ResetReadAhead(long long newinternal);
+     void KillReadAheadThread(void);
+-- 
+1.7.9.5
+

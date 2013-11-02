@@ -1,0 +1,323 @@
+From 6558897870659c20274df0847ff259226258b2ec Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 26 Jun 2013 20:56:10 +0100
+Subject: [PATCH 237/285] MHEG: Interaction channel uses SSL certificate from
+ the DSMCC carousel
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mhegic.cpp    |    9 +++--
+ mythtv/libs/libmythtv/mhegic.h      |    5 ++-
+ mythtv/libs/libmythtv/mhi.cpp       |   67 +++++++++++++++++++++++++++++---
+ mythtv/libs/libmythtv/mhi.h         |    2 +
+ mythtv/libs/libmythtv/netstream.cpp |   73 ++++++++++++++++++++++++++++++++---
+ mythtv/libs/libmythtv/netstream.h   |    4 +-
+ 6 files changed, 141 insertions(+), 19 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mhegic.cpp b/mythtv/libs/libmythtv/mhegic.cpp
+index d269a7c..2eee3cf 100644
+--- a/mythtv/libs/libmythtv/mhegic.cpp
++++ b/mythtv/libs/libmythtv/mhegic.cpp
+@@ -67,7 +67,7 @@ static inline bool isCached(const QString& csPath)
+ }
+ 
+ // Is a file ready to read?
+-bool MHInteractionChannel::CheckFile(const QString& csPath)
++bool MHInteractionChannel::CheckFile(const QString& csPath, const QByteArray &cert)
+ {
+     QMutexLocker locker(&m_mutex);
+ 
+@@ -85,7 +85,7 @@ bool MHInteractionChannel::CheckFile(const QString& csPath)
+ 
+     // Queue a request
+     VERBOSE(VB_MHEG|VB_EXTRA, LOC + QString("CheckFile queue %1").arg(csPath));
+-    QScopedPointer< NetStream > p(new NetStream(csPath));
++    QScopedPointer< NetStream > p(new NetStream(csPath, NetStream::kPreferCache, cert));
+     if (!p || !p->IsOpen())
+     {
+         VERBOSE(VB_MHEG, LOC + QString("CheckFile failed %1").arg(csPath) );
+@@ -100,7 +100,8 @@ bool MHInteractionChannel::CheckFile(const QString& csPath)
+ 
+ // Read a file. -1= error, 0= OK, 1= not ready
+ MHInteractionChannel::EResult
+-MHInteractionChannel::GetFile(const QString &csPath, QByteArray &data)
++MHInteractionChannel::GetFile(const QString &csPath, QByteArray &data,
++        const QByteArray &cert /*=QByteArray()*/)
+ {
+     QMutexLocker locker(&m_mutex);
+ 
+@@ -144,7 +145,7 @@ MHInteractionChannel::GetFile(const QString &csPath, QByteArray &data)
+ 
+     // Queue a download
+     VERBOSE(VB_MHEG|VB_EXTRA, LOC + QString("GetFile queue %1").arg(csPath) );
+-    p.reset(new NetStream(csPath));
++    p.reset(new NetStream(csPath, NetStream::kPreferCache, cert));
+     if (!p || !p->IsOpen())
+     {
+         VERBOSE(VB_MHEG, LOC + QString("GetFile failed %1").arg(csPath) );
+diff --git a/mythtv/libs/libmythtv/mhegic.h b/mythtv/libs/libmythtv/mhegic.h
+index fcad95f..c9caf63 100644
+--- a/mythtv/libs/libmythtv/mhegic.h
++++ b/mythtv/libs/libmythtv/mhegic.h
+@@ -30,10 +30,11 @@ public:
+     // Operations
+ public:
+     // Is a file ready to read?
+-    bool CheckFile(const QString &url);
++    bool CheckFile(const QString &url, const QByteArray &cert = QByteArray());
+     // Read a file
+     enum EResult { kError = -1, kSuccess = 0, kPending };
+-    EResult GetFile(const QString &url, QByteArray &data);
++    EResult GetFile(const QString &url, QByteArray &data,
++                    const QByteArray &cert = QByteArray() );
+ 
+     // Implementation
+ private slots:
+diff --git a/mythtv/libs/libmythtv/mhi.cpp b/mythtv/libs/libmythtv/mhi.cpp
+index ed0ef84..e456cd6 100644
+--- a/mythtv/libs/libmythtv/mhi.cpp
++++ b/mythtv/libs/libmythtv/mhi.cpp
+@@ -366,9 +366,13 @@ bool MHIContext::CheckCarouselObject(QString objectPath)
+ {
+     if (objectPath.startsWith("http:") || objectPath.startsWith("https:"))
+     {
+-        // TODO verify access to server in carousel file auth.servers
+-        // TODO use TLS cert from carousel auth.tls.<x>
+-        return m_ic.CheckFile(objectPath);
++        QByteArray cert;
++
++        // Verify access to server
++        if (!CheckAccess(objectPath, cert))
++            return false;
++
++        return m_ic.CheckFile(objectPath, cert);
+     }
+ 
+     QStringList path = objectPath.split(QChar('/'), QString::SkipEmptyParts);
+@@ -378,11 +382,64 @@ bool MHIContext::CheckCarouselObject(QString objectPath)
+     return res == 0; // It's available now.
+ }
+ 
++bool MHIContext::GetDSMCCObject(const QString &objectPath, QByteArray &result)
++{
++    QStringList path = objectPath.split(QChar('/'), QString::SkipEmptyParts);
++    QMutexLocker locker(&m_dsmccLock);
++    int res = m_dsmcc->GetDSMCCObject(path, result);
++    return (res == 0);
++}
++
++bool MHIContext::CheckAccess(const QString &objectPath, QByteArray &cert)
++{
++    cert.clear();
++
++    // Verify access to server
++    QByteArray servers;
++    if (!GetDSMCCObject("/auth.servers", servers))
++    {
++        VERBOSE(VB_MHEG, QString(
++            "[mhi] CheckAccess(%1) No auth.servers").arg(objectPath) );
++        return false;
++    }
++
++    QByteArray host = QUrl(objectPath).host().toLocal8Bit();
++    if (!servers.contains(host))
++    {
++        VERBOSE(VB_MHEG, QString("[mhi] CheckAccess(%1) Host not known")
++            .arg(objectPath) );
++        VERBOSE(VB_MHEG|VB_EXTRA, QString("[mhi] Permitted servers: %1")
++            .arg(servers.constData()) );
++
++        // BUG: https://securegate.iplayer.bbc.co.uk is not listed
++        if (!objectPath.startsWith("https:"))
++            return false;
++    }
++
++    if (!objectPath.startsWith("https:"))
++        return true;
++
++    // Use TLS cert from carousel file auth.tls.<x>
++    if (!GetDSMCCObject("/auth.tls.1", cert))
++        return false;
++
++    // The cert has a 5 byte header: 16b cert_count + 24b cert_len
++    cert = cert.mid(5);
++    return true;
++}
++
+ // Called by the engine to request data from the carousel.
+ // Caller must hold m_engineLock
+ bool MHIContext::GetCarouselData(QString objectPath, QByteArray &result)
+ {
++    QByteArray cert;
+     bool const isIC = objectPath.startsWith("http:") || objectPath.startsWith("https:");
++    if (isIC)
++    {
++        // Verify access to server
++        if (!CheckAccess(objectPath, cert))
++            return false;
++    }
+ 
+     // Get the path components.  The string will normally begin with "//"
+     // since this is an absolute path but that will be removed by split.
+@@ -397,9 +454,7 @@ bool MHIContext::GetCarouselData(QString objectPath, QByteArray &result)
+     {
+         if (isIC)
+         {
+-            // TODO verify access to server in carousel file auth.servers
+-            // TODO use TLS cert from carousel file auth.tls.<x>
+-            switch (m_ic.GetFile(objectPath, result))
++            switch (m_ic.GetFile(objectPath, result, cert))
+             {
+             case MHInteractionChannel::kSuccess:
+                 if (bReported)
+diff --git a/mythtv/libs/libmythtv/mhi.h b/mythtv/libs/libmythtv/mhi.h
+index 4fb8ced..724aeb0 100644
+--- a/mythtv/libs/libmythtv/mhi.h
++++ b/mythtv/libs/libmythtv/mhi.h
+@@ -171,6 +171,8 @@ class MHIContext : public MHContext
+     void ClearDisplay(void);
+     void ClearQueue(void);
+     bool LoadChannelCache();
++    bool GetDSMCCObject(const QString &objectPath, QByteArray &result);
++    bool CheckAccess(const QString &objectPath, QByteArray &cert);
+ 
+     InteractiveTV   *m_parent;
+ 
+diff --git a/mythtv/libs/libmythtv/netstream.cpp b/mythtv/libs/libmythtv/netstream.cpp
+index 1d127d4..d461e8e 100644
+--- a/mythtv/libs/libmythtv/netstream.cpp
++++ b/mythtv/libs/libmythtv/netstream.cpp
+@@ -14,9 +14,13 @@ using std::getenv;
+ #include <QNetworkReply>
+ #include <QNetworkProxy>
+ #include <QNetworkDiskCache>
++#ifndef QT_NO_OPENSSL
+ #include <QSslConfiguration>
+ #include <QSslError>
+ #include <QSslSocket>
++#include <QSslKey>
++#endif
++#include <QFile>
+ #include <QUrl>
+ #include <QThread>
+ #include <QMutexLocker>
+@@ -88,14 +92,16 @@ public:
+ /**
+  * Network streaming request
+  */
+-NetStream::NetStream(const QUrl &url, EMode mode /*= kPreferCache*/) :
++NetStream::NetStream(const QUrl &url, EMode mode /*= kPreferCache*/,
++        const QByteArray &cert) :
+     m_id(s_nRequest.fetchAndAddRelaxed(1)),
+     m_state(kClosed),
+     m_pending(0),
+     m_reply(0),
+     m_nRedirections(0),
+     m_size(-1),
+-    m_pos(0)
++    m_pos(0),
++    m_cert(cert)
+ {
+     setObjectName("NetStream " + url.toString());
+ 
+@@ -186,16 +192,71 @@ bool NetStream::Request(const QUrl& url)
+         m_request.setRawHeader("Range", QString("bytes=%1-").arg(m_pos).toAscii());
+ 
+ #ifndef QT_NO_OPENSSL
+-#if 1 // The BBC use a self certified cert so don't verify it
+     if (m_request.url().scheme() == "https")
+     {
+-        // TODO use cert from carousel auth.tls.<x>
+         QSslConfiguration ssl(QSslConfiguration::defaultConfiguration());
+-        ssl.setPeerVerifyMode(QSslSocket::VerifyNone);
++
++        QList<QSslCertificate> clist;
++        if (!m_cert.isEmpty())
++        {
++            clist = QSslCertificate::fromData(m_cert, QSsl::Der);
++            if (clist.isEmpty())
++                VERBOSE(VB_IMPORTANT, LOC_ERR + QString("Invalid certificate: %1")
++                    .arg(m_cert.toPercentEncoding().constData()) );
++        }
++
++        if (clist.isEmpty())
++            // The BBC servers use a self certified cert so don't verify it
++            ssl.setPeerVerifyMode(QSslSocket::VerifyNone);
++        else
++            ssl.setCaCertificates(clist);
++
++        // We need to provide a client certificate for the BBC,  See:
++        // openssl s_client -state -prexit -connect securegate.iplayer.bbc.co.uk:443
++        // for a list of accepted certificates
++        QString fname = gCoreContext->GetSetting("MhegClientCert", "");
++        if (!fname.isEmpty())
++        {
++            QFile f(QFile::exists(fname) ? fname : GetShareDir() + fname);
++            if (f.open(QIODevice::ReadOnly))
++            {
++                QSslCertificate cert(&f, QSsl::Pem);
++                if (!cert.isNull())
++                    ssl.setLocalCertificate(cert);
++                else
++                    VERBOSE(VB_IMPORTANT, LOC_ERR +
++                        QString("'%1' is an invalid certificate").arg(f.fileName()) );
++            }
++            else
++                VERBOSE(VB_IMPORTANT, LOC_ERR +
++                    QString("Opening client certificate '%1': %2")
++                    .arg(f.fileName()).arg(f.errorString()) );
++
++            // Get the private key
++            fname = gCoreContext->GetSetting("MhegClientKey", "");
++            if (!fname.isEmpty())
++            {
++                QFile f(QFile::exists(fname) ? fname : GetShareDir() + fname);
++                if (f.open(QIODevice::ReadOnly))
++                {
++                    QSslKey key(&f, QSsl::Rsa, QSsl::Pem, QSsl::PrivateKey,
++                        gCoreContext->GetSetting("MhegClientKeyPass", "").toAscii());
++                    if (!key.isNull())
++                        ssl.setPrivateKey(key);
++                    else
++                        VERBOSE(VB_IMPORTANT, LOC_ERR +
++                            QString("'%1' is an invalid key").arg(f.fileName()) );
++                }
++                else
++                    VERBOSE(VB_IMPORTANT, LOC_ERR +
++                        QString("Opening private key '%1': %2")
++                        .arg(f.fileName()).arg(f.errorString()) );
++            }
++        }
++
+         m_request.setSslConfiguration(ssl);
+     }
+ #endif
+-#endif
+ 
+     VERBOSE(VB_FILE, LOC + QString("(%1) Request %2 bytes=%3- from %4")
+         .arg(m_id).arg(m_request.url().toString())
+diff --git a/mythtv/libs/libmythtv/netstream.h b/mythtv/libs/libmythtv/netstream.h
+index b505f22..5dc6ad6 100644
+--- a/mythtv/libs/libmythtv/netstream.h
++++ b/mythtv/libs/libmythtv/netstream.h
+@@ -34,7 +34,8 @@ class NetStream : public QObject
+ 
+ public:
+     enum EMode { kNeverCache, kPreferCache, kAlwaysCache };
+-    NetStream(const QUrl &, EMode mode = kPreferCache);
++    NetStream(const QUrl &, EMode mode = kPreferCache,
++              const QByteArray &cert = QByteArray());
+     virtual ~NetStream();
+ 
+ public:
+@@ -98,6 +99,7 @@ private:
+     int m_nRedirections;
+     qlonglong m_size;
+     qlonglong m_pos;
++    QByteArray m_cert;
+     QWaitCondition m_ready;
+     QWaitCondition m_finished;
+ };
+-- 
+1.7.9.5
+

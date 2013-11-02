@@ -1,0 +1,68 @@
+From 6d1070410f9f9961edda75b40b8ce92cd593e6c5 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 30 Sep 2013 19:45:03 +0100
+Subject: [PATCH 193/207] Mythmusic: Prevent a segv after scanning for music
+
+If scan for music is selected twice in succession than the 2nd run
+causes a segv.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/mythmusic/mythmusic/main.cpp |   24 ++++++++++++------------
+ 1 file changed, 12 insertions(+), 12 deletions(-)
+
+diff --git a/mythplugins/mythmusic/mythmusic/main.cpp b/mythplugins/mythmusic/mythmusic/main.cpp
+index 9bff699..7652dd7 100644
+--- a/mythplugins/mythmusic/mythmusic/main.cpp
++++ b/mythplugins/mythmusic/mythmusic/main.cpp
+@@ -89,9 +89,9 @@ static void loadMusic()
+     // can choose "Setup" option from the menu to force it.
+     if (!musicDir.isEmpty() && !musicdata_exists)
+     {
+-        FileScanner *fscan = new FileScanner();
+-        fscan->SearchDir(musicDir);
+-        delete fscan;
++        LOG(VB_GENERAL, LOG_INFO, QString("Scanning '%1' for music files")
++            .arg(musicDir) );
++        FileScanner().SearchDir(musicDir);
+     }
+ 
+     MythScreenStack *popupStack = GetMythMainWindow()->GetStack("popup stack");
+@@ -224,11 +224,7 @@ static void runScan(void)
+        return;
+     }
+ 
+-    LOG(VB_GENERAL, LOG_INFO, QString("Scanning '%1' for music files").arg(getMusicDirectory()));
+-
+-    FileScanner *fscan = new FileScanner();
+-    QString musicDir = getMusicDirectory();
+-    fscan->SearchDir(musicDir);
++    gPlayer->stop(true);
+ 
+     // save anything that may have changed
+     if (gMusicData->all_music && gMusicData->all_music->cleanOutThreads())
+@@ -240,13 +236,17 @@ static void runScan(void)
+     }
+ 
+     // force a complete reload of the tracks and playlists
+-    gPlayer->stop(true);
++    delete gPlayer;
++    gPlayer = new MusicPlayer(NULL);
+     delete gMusicData;
+-
+     gMusicData = new MusicData;
+-    loadMusic();
+ 
+-    delete fscan;
++    QString musicDir = getMusicDirectory();
++    LOG(VB_GENERAL, LOG_INFO, QString("Scanning '%1' for music files")
++        .arg(musicDir) );
++    FileScanner().SearchDir(musicDir);
++
++    loadMusic();
+ }
+ 
+ static void startImport(void)
+-- 
+1.7.9.5
+

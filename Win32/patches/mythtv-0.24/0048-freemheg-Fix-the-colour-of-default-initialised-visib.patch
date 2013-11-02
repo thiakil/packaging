@@ -1,0 +1,41 @@
+From 9df38a2c9157f8db49ae5a2e9767c388be032064 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 18 Jul 2011 20:27:07 +0200
+Subject: [PATCH 048/285] freemheg: Fix the colour of default initialised
+ visible elements
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythfreemheg/Visible.cpp |   16 +++++++++-------
+ 1 file changed, 9 insertions(+), 7 deletions(-)
+
+diff --git a/mythtv/libs/libmythfreemheg/Visible.cpp b/mythtv/libs/libmythfreemheg/Visible.cpp
+index 19d4662..bf70613 100644
+--- a/mythtv/libs/libmythfreemheg/Visible.cpp
++++ b/mythtv/libs/libmythfreemheg/Visible.cpp
+@@ -129,13 +129,15 @@ void MHVisible::Deactivation(MHEngine *engine)
+ MHRgba MHVisible::GetColour(const MHColour &colour)
+ {
+     int red = 0, green = 0, blue = 0, alpha = 0;
+-    int cSize = colour.m_ColStr.Size();
+-    if (cSize != 4) MHLOG(MHLogWarning, QString("Colour string has length %1 not 4.").arg(cSize));
+-    // Just in case the length is short we handle those properly.
+-    if (cSize > 0) red = colour.m_ColStr.GetAt(0);
+-    if (cSize > 1) green = colour.m_ColStr.GetAt(1);
+-    if (cSize > 2) blue = colour.m_ColStr.GetAt(2);
+-    if (cSize > 3) alpha = 255 - colour.m_ColStr.GetAt(3); // Convert transparency to alpha
++    if (colour.IsSet()) {
++        int cSize = colour.m_ColStr.Size();
++        if (cSize != 4) MHLOG(MHLogWarning, QString("WARN Colour string has length %1 not 4.").arg(cSize));
++        // Just in case the length is short we handle those properly.
++        if (cSize > 0) red = colour.m_ColStr.GetAt(0);
++        if (cSize > 1) green = colour.m_ColStr.GetAt(1);
++        if (cSize > 2) blue = colour.m_ColStr.GetAt(2);
++        if (cSize > 3) alpha = 255 - colour.m_ColStr.GetAt(3); // Convert transparency to alpha
++    }
+     return MHRgba(red, green, blue, alpha);
+ }
+ 
+-- 
+1.7.9.5
+

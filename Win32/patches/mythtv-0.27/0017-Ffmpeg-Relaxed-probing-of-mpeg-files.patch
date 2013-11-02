@@ -1,0 +1,35 @@
+From 79d969043d23ad9f622ddb455c2faaeb829842dd Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 7 Aug 2012 15:46:05 +0200
+Subject: [PATCH 017/207] Ffmpeg: Relaxed probing of mpeg files
+
+Relax the condition for reporting a medium score detection of mpeg files.
+
+This is required to detect mpg files from 2003/4 cameras in mythvideo
+or mythgallery.  If not mpeg and mp3 probes report the same score
+which cause av_probe_input_format2 to ignore both.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/external/FFmpeg/libavformat/mpeg.c |    4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/external/FFmpeg/libavformat/mpeg.c b/mythtv/external/FFmpeg/libavformat/mpeg.c
+index 1b96324..d39d674 100644
+--- a/mythtv/external/FFmpeg/libavformat/mpeg.c
++++ b/mythtv/external/FFmpeg/libavformat/mpeg.c
+@@ -92,9 +92,9 @@ static int mpegps_probe(AVProbeData *p)
+         score= AVPROBE_SCORE_MAX/4;
+ 
+     if(sys>invalid && sys*9 <= pspack*10)
+-        return (audio > 12 || vid > 3 || pspack > 2) ? AVPROBE_SCORE_MAX/2+2 : AVPROBE_SCORE_MAX/4; // +1 for .mpg
++        return (audio > 12 || vid > 3 || pspack >= 2) ? AVPROBE_SCORE_MAX/2+2 : AVPROBE_SCORE_MAX/4; // +1 for .mpg
+     if(pspack > invalid && (priv1+vid+audio)*10 >= pspack*9)
+-        return pspack > 2 ? AVPROBE_SCORE_MAX/2+2 : AVPROBE_SCORE_MAX/4; // +1 for .mpg
++        return pspack >= 2 ? AVPROBE_SCORE_MAX/2+2 : AVPROBE_SCORE_MAX/4; // +1 for .mpg
+     if((!!vid ^ !!audio) && (audio > 4 || vid > 1) && !sys && !pspack && p->buf_size>2048 && vid + audio > invalid) /* PES stream */
+         return (audio > 12 || vid > 3 + 2*invalid) ? AVPROBE_SCORE_MAX/2+2 : AVPROBE_SCORE_MAX/4;
+ 
+-- 
+1.7.9.5
+

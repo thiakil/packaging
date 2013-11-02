@@ -1,0 +1,77 @@
+From f45de03e7963d36fab2937f6a40f8e885877dc9e Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 14 Jul 2012 17:47:52 +0200
+Subject: [PATCH 104/124] libmythtv: Prevent a SEGV in the EIT scanner thread
+
+I have occasionally seen core dumps from the backend as follows:
+Program terminated with signal 11, Segmentation fault.
+(gdb) bt
+0  0xb4123387 in QMutex::lock() () from /usr/lib/libQtCore.so.4
+1  0xb73ea1b1 in QMutexLocker (this=0x0, name=..., requestType=4096)
+    at /usr/include/qt4/QtCore/qmutex.h:102
+2  TVRec::SetChannel (this=0x0, name=..., requestType=4096) at tv_rec.cpp:3170
+3  0xb739c8dd in EITScanner::RunEventLoop (this=0x9e2aaf0)
+    at eitscanner.cpp:142
+4  0xb739d32e in EITThread::run (this=0x9e2ab00) at eitscanner.cpp:30
+5  0xb4127da2 in ?? () from /usr/lib/libQtCore.so.4
+6  0xb50e2e99 in start_thread () from /lib/i386-linux-gnu/libpthread.so.0
+7  0xb3f089ee in clone () from /lib/i386-linux-gnu/libc.so.6
+
+Which is caused by a race condition between RunEventLoop and StopActiveScan
+which share the activeScan and rec member variables.  If the rec
+variable is set to NULL after RunEventLoop has found activeScan true
+then TVRec::SetChannel can be called with this=0.  See also #10541
+
+This patch marks both these variables as volatile and takes a copy of rec
+before calling TVRec::SetChannel.
+
+NB this bug also affects v0.25 but v0.26-pre appears to be fixed by
+commit a1d90159.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/eitscanner.cpp |    5 +++--
+ mythtv/libs/libmythtv/eitscanner.h   |    4 ++--
+ 2 files changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/eitscanner.cpp b/mythtv/libs/libmythtv/eitscanner.cpp
+index 6135e08..37aad2c 100644
+--- a/mythtv/libs/libmythtv/eitscanner.cpp
++++ b/mythtv/libs/libmythtv/eitscanner.cpp
+@@ -116,7 +116,8 @@ void EITScanner::run(void)
+             RescheduleRecordings();
+         }
+ 
+-        if (activeScan && (QDateTime::currentDateTime() > activeScanNextTrig))
++        TVRec *tvrec = activeScan ? rec : 0;
++        if (tvrec && (QDateTime::currentDateTime() > activeScanNextTrig))
+         {
+             // if there have been any new events, tell scheduler to run.
+             if (eitCount)
+@@ -133,7 +134,7 @@ void EITScanner::run(void)
+             if (!(*activeScanNextChan).isEmpty())
+             {
+                 eitHelper->WriteEITCache();
+-                rec->SetChannel(*activeScanNextChan, TVRec::kFlagEITScan);
++                tvrec->SetChannel(*activeScanNextChan, TVRec::kFlagEITScan);
+                 LOG(VB_EIT, LOG_INFO,
+                     LOC_ID + QString("Now looking for EIT data on "
+                                      "multiplex of channel %1")
+diff --git a/mythtv/libs/libmythtv/eitscanner.h b/mythtv/libs/libmythtv/eitscanner.h
+index 36dd4d9..883a5b3 100644
+--- a/mythtv/libs/libmythtv/eitscanner.h
++++ b/mythtv/libs/libmythtv/eitscanner.h
+@@ -57,8 +57,8 @@ class EITScanner : public QRunnable
+     bool             exitThread;
+     QWaitCondition   exitThreadCond;
+ 
+-    TVRec           *rec;
+-    bool             activeScan;
++    TVRec * volatile rec;
++    bool volatile    activeScan;
+     QDateTime        activeScanNextTrig;
+     uint             activeScanTrigTime;
+     QStringList      activeScanChannels;
+-- 
+1.7.9.5
+

@@ -1,0 +1,38 @@
+From ada9b2d46179259183b56db56a09e40ce449649b Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 8 Jun 2012 16:38:05 +0200
+Subject: [PATCH 123/285] libmythtv: MHEG ignores TEXTEXIT if no onscreen to
+ allow Esc key binding
+
+When browsing the MHEG service it is common to use the back button to
+return to the previous page.  On many RCs this key sends Esc.
+If the Back button (Esc) key is bound to TEXTEXIT then it isn't possible
+to exit LiveTV because MHEG grabs the key.
+
+This patch ignores TEXTEXIT key presses when there's nothing on screen
+which allows the key to be passed on to TV playback and allow normal exit.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mhi.cpp |    5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/mhi.cpp b/mythtv/libs/libmythtv/mhi.cpp
+index b07cda7..153a08f 100644
+--- a/mythtv/libs/libmythtv/mhi.cpp
++++ b/mythtv/libs/libmythtv/mhi.cpp
+@@ -545,7 +545,10 @@ bool MHIContext::OfferKey(QString key)
+     { QMutexLocker locker(&m_keyLock);
+     m_keyQueue.enqueue(action);}
+     m_engine_wait.wakeAll();
+-    return true;
++    // Accept the key except 'exit' (16) in 'always available' (3) state.
++    // This allows re-use of Esc as TEXTEXIT for RC's with a single backup button
++    // But if the MHEG app is hung the user can press esc twice to exit TV
++    return action != 16 || (m_keyProfile != 3 && m_keyQueue.size() < 2);
+ }
+ 
+ // Called from MythPlayer::VideoStart and MythPlayer::ReinitOSD
+-- 
+1.7.9.5
+

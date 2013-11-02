@@ -1,0 +1,27 @@
+From e48a4a005fd409b5dd945d6146eedc79b0c486fc Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 22 Jun 2013 15:05:27 +0100
+Subject: [PATCH 048/207] Player: Fix ugly 4:3 green square shown when
+ starting liveTV
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 2c11108..65ec599 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -2056,7 +2056,7 @@ void MythPlayer::RefreshPauseFrame(void)
+ {
+     if (needNewPauseFrame)
+     {
+-        if (videoOutput->ValidVideoFrames())
++        if (isDummy || videoOutput->ValidVideoFrames())
+         {
+             videoOutput->UpdatePauseFrame(disp_timecode);
+             needNewPauseFrame = false;
+-- 
+1.7.9.5
+

@@ -1,0 +1,42 @@
+From 198341c3ae437ca4a47377bf655bd9e495703b48 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 29 Jun 2013 15:09:05 +0100
+Subject: [PATCH 241/285] AFD: Reduce time spent parsing http streams
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |    8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index a152d16..99e2dea 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -937,9 +937,15 @@ int AvFormatDecoder::OpenFile(RingBuffer *rbuffer, bool novideo,
+         return -1;
+     }
+ 
++    bool isStream = ringBuffer->GetFilename().startsWith("http");
+     int ret = -1;
+     {
+         QMutexLocker locker(avcodeclock);
++#ifdef FF_FDEBUG_TS
++        if (VERBOSE_LEVEL_CHECK(VB_LIBAV|VB_TIMESTAMP))
++            ic->debug |= FF_FDEBUG_TS;
++#endif
++        if (isStream) ic->probesize = 256*1024;
+         ret = av_find_stream_info(ic);
+     }
+     if (ringBuffer->isDVD())
+@@ -963,7 +969,7 @@ int AvFormatDecoder::OpenFile(RingBuffer *rbuffer, bool novideo,
+ 
+     fmt->flags &= ~AVFMT_NOFILE;
+ 
+-    if (!ringBuffer->isDVD() && !ringBuffer->isBD() && !livetv)
++    if (!ringBuffer->isDVD() && !ringBuffer->isBD() && !livetv && !isStream)
+     {
+         av_estimate_timings(ic, 0);
+         // generate timings based on the video stream to avoid bogus ffmpeg
+-- 
+1.7.9.5
+

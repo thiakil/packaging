@@ -1,0 +1,32 @@
+From b02a3fbfaaaf2a9220a3d76b671faa690063e319 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 7 Mar 2012 15:45:56 +0100
+Subject: [PATCH 098/285] TV: Fix race condition when changing channels with
+ browse mode
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/tv_play.cpp |    6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/tv_play.cpp b/mythtv/libs/libmythtv/tv_play.cpp
+index 72515a7..303f92b 100644
+--- a/mythtv/libs/libmythtv/tv_play.cpp
++++ b/mythtv/libs/libmythtv/tv_play.cpp
+@@ -2790,8 +2790,12 @@ void TV::timerEvent(QTimerEvent *te)
+         {
+             OSD *osd = GetOSDLock(actx);
+             if (osd && !osd->IsWindowVisible("osd_input"))
++            {
++                ReturnOSDLock(actx, osd);
+                 CommitQueuedInput(actx);
+-            ReturnOSDLock(actx, osd);
++            }
++            else
++                ReturnOSDLock(actx, osd);
+         }
+         ReturnPlayerLock(actx);
+ 
+-- 
+1.7.9.5
+

@@ -1,0 +1,122 @@
+From ccc4436d652d8368b1ae4cf4f7af6be2a542e651 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 24 Jun 2011 18:35:08 +0200
+Subject: [PATCH 045/285] mheg: Use a shared mutex to control access to
+ QWaitCondition
+
+This prevents spurious hangs in the mheg code when waiting for an absent file
+to arrive.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mhi.cpp |   29 ++++++++++++++---------------
+ mythtv/libs/libmythtv/mhi.h   |    1 +
+ 2 files changed, 15 insertions(+), 15 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mhi.cpp b/mythtv/libs/libmythtv/mhi.cpp
+index a71abc2..a4fe3c3 100644
+--- a/mythtv/libs/libmythtv/mhi.cpp
++++ b/mythtv/libs/libmythtv/mhi.cpp
+@@ -146,7 +146,8 @@ void MHIContext::StopEngine()
+         while (!m_stopped)
+         {
+             m_stop = true;
+-            m_engine_wait.wakeAll();
++            {QMutexLocker locker(&m_engineLock);
++            m_engine_wait.wakeAll();}
+             usleep(1000);
+         }
+         pthread_join(m_engineThread, NULL);
+@@ -234,11 +235,6 @@ void *MHIContext::StartMHEGEngine(void *param)
+ 
+ void MHIContext::RunMHEGEngine(void)
+ {
+-    // Qt4 requires a QMutex as a parameter...
+-    // not sure if this is the best solution.  Mutex Must be locked before wait.
+-    QMutex mutex;
+-    mutex.lock();
+-
+     while (!m_stop)
+     {
+         int toWait;
+@@ -268,7 +264,8 @@ void MHIContext::RunMHEGEngine(void)
+         if (toWait > 1000 || toWait <= 0)
+             toWait = 1000;
+ 
+-        m_engine_wait.wait(&mutex, toWait);
++        QMutexLocker locker(&m_engineLock);
++        m_engine_wait.wait(&m_engineLock, toWait);
+     }
+ }
+ 
+@@ -309,10 +306,11 @@ void MHIContext::QueueDSMCCPacket(
+         return;
+ 
+     memcpy(dataCopy, data, length*sizeof(unsigned char));
+-    QMutexLocker locker(&m_dsmccLock);
++    {QMutexLocker locker(&m_dsmccLock);
+     m_dsmccQueue.enqueue(new DSMCCPacket(dataCopy,     length,
+                                          componentTag, carouselId,
+-                                         dataBroadcastId));
++                                         dataBroadcastId));}
++    QMutexLocker locker(&m_engineLock);
+     m_engine_wait.wakeAll();
+ }
+ 
+@@ -333,7 +331,10 @@ void MHIContext::SetNetBootInfo(const unsigned char *data, uint length)
+     if (m_lastNbiVersion == NBI_VERSION_UNSET)
+         m_lastNbiVersion = data[0];
+     else
++    {
++        QMutexLocker locker(&m_engineLock);
+         m_engine_wait.wakeAll();
++    }
+ }
+ 
+ void MHIContext::NetworkBootRequested(void)
+@@ -380,11 +381,6 @@ bool MHIContext::GetCarouselData(QString objectPath, QByteArray &result)
+     // same thread this is safe.  Otherwise we need to make a deep copy of
+     // the result.
+ 
+-    // Qt4 requires a QMutex as a parameter...
+-    // not sure if this is the best solution.  Mutex Must be locked before wait.
+-    QMutex mutex;
+-    mutex.lock();
+-
+     while (!m_stop)
+     {
+         int res = m_dsmcc->GetDSMCCObject(path, result);
+@@ -397,7 +393,8 @@ bool MHIContext::GetCarouselData(QString objectPath, QByteArray &result)
+         // some more packets.  We should eventually find out if this item is
+         // present.
+         ProcessDSMCCQueue();
+-        m_engine_wait.wait(&mutex, 1000);
++        QMutexLocker locker(&m_engineLock);
++        m_engine_wait.wait(&m_engineLock, 1000);
+     }
+     return false; // Stop has been set.  Say the object isn't present.
+ }
+@@ -475,6 +472,8 @@ bool MHIContext::OfferKey(QString key)
+         m_keyQueue.enqueue(action);
+         VERBOSE(VB_IMPORTANT, "Adding MHEG key "<<key<<":"<<action
+                 <<":"<<m_keyQueue.size());
++        locker.unlock();
++        QMutexLocker locker2(&m_engineLock);
+         m_engine_wait.wakeAll();
+         return true;
+     }
+diff --git a/mythtv/libs/libmythtv/mhi.h b/mythtv/libs/libmythtv/mhi.h
+index 63bae67..3920ae3 100644
+--- a/mythtv/libs/libmythtv/mhi.h
++++ b/mythtv/libs/libmythtv/mhi.h
+@@ -159,6 +159,7 @@ class MHIContext : public MHContext
+     MHEG            *m_engine; // Pointer to the MHEG engine
+ 
+     QWaitCondition   m_engine_wait;
++    QMutex           m_engineLock;
+     bool             m_stop;
+     bool             m_stopped;
+     QMutex           m_display_lock;
+-- 
+1.7.9.5
+

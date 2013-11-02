@@ -1,0 +1,26 @@
+From f081e22af29c35545ccd04ef40bf1bd50a7a426f Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 6 Oct 2012 18:25:30 +0200
+Subject: [PATCH 013/202] ffmpeg: install x264 presets
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/external/FFmpeg/Makefile |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/external/FFmpeg/Makefile b/mythtv/external/FFmpeg/Makefile
+index d89f09c..77d0a55 100644
+--- a/mythtv/external/FFmpeg/Makefile
++++ b/mythtv/external/FFmpeg/Makefile
+@@ -129,7 +129,7 @@ version.h .version:
+ -include .version
+ 
+ ifdef PROGS
+-install: install-mythprogs
++install: install-mythprogs install-data
+ endif
+ 
+ install: install-libs install-headers
+-- 
+1.7.9.5
+

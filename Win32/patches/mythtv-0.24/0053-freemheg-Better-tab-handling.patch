@@ -1,0 +1,124 @@
+From ce8870832bcc57f017bb27207b85e44e24616692 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 18 Jul 2011 20:46:06 +0200
+Subject: [PATCH 053/285] freemheg: Better tab handling
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythfreemheg/Text.cpp |   37 +++++++++++++++++++++++++---------
+ 1 file changed, 27 insertions(+), 10 deletions(-)
+
+diff --git a/mythtv/libs/libmythfreemheg/Text.cpp b/mythtv/libs/libmythfreemheg/Text.cpp
+index 995c12a..fbce463 100644
+--- a/mythtv/libs/libmythfreemheg/Text.cpp
++++ b/mythtv/libs/libmythfreemheg/Text.cpp
+@@ -98,7 +98,7 @@ void MHText::Initialise(MHParseNode *p, MHEngine *engine)
+     m_fNeedsRedraw = true;
+ }
+ 
+-static const char *rchJustification[] =
++static const char * const rchJustification[] =
+ {
+     "start", // 1
+     "end",
+@@ -115,7 +115,7 @@ int MHText::GetJustification(const char *str)
+     return 0;
+ }
+ 
+-static const char *rchlineOrientation[] =
++static const char * const rchlineOrientation[] =
+ {
+     "vertical", // 1
+     "horizontal"
+@@ -129,7 +129,7 @@ int MHText::GetLineOrientation(const char *str)
+     return 0;
+ }
+ 
+-static const char *rchStartCorner[] =
++static const char * const rchStartCorner[] =
+ {
+     "upper-left", // 1
+     "upper-right",
+@@ -204,7 +204,7 @@ void MHText::CreateContent(const unsigned char *p, int s, MHEngine *engine)
+     m_Content.Copy(MHOctetString((const char *)p, s));
+     engine->Redraw(GetVisibleArea()); // Have to redraw if the content has changed.
+     m_fNeedsRedraw = true;
+-//  fprintf(fd, "Text content is now "); m_Content.PrintMe(0); fprintf(fd, "\n");
++//  FILE *fd=stdout; fprintf(fd, "Text content is now "); m_Content.PrintMe(fd, 0); fprintf(fd, "\n");
+ }
+ 
+ void MHText::SetTextColour(const MHColour &colour, MHEngine *engine)
+@@ -320,6 +320,16 @@ MHTextLine::~MHTextLine()
+ 
+ // Tabs are set every 56 points (45 pixels).
+ #define TABSTOP 45
++static inline int Tabs(int nXpos, int nTabCount)
++{
++    int nNextTab = nXpos;
++    if (nTabCount-- > 0)
++    {
++        nNextTab += TABSTOP - nXpos % TABSTOP;
++        nNextTab += nTabCount * TABSTOP;
++    }
++    return nNextTab;
++}
+ 
+ // I attempted to use QSimpleRichText but that does not give sufficient fine control over
+ // the layout.  UK MHEG specifies the use of the Tiresias font and broadcasters appear to
+@@ -346,16 +356,21 @@ void MHText::Redraw()
+     m_ColourStack.Push(textColour);
+     pCurrItem->m_Colour = textColour;
+ 
++//  FILE *fd=stdout; fprintf(fd, "Redraw Text "); m_Content.PrintMe(fd, 0); fprintf(fd, "\n");
+     int i = 0;
+     while (i < m_Content.Size()) {
+         unsigned char ch = m_Content.GetAt(i++);
+ 
+-        if (ch == '\t') { // Tab - start a new item if we have any text in the existing one.
+-            if (pCurrItem->m_Text.Size() != 0) { pCurrItem = pCurrItem->NewItem(); pCurrLine->m_Items.Append(pCurrItem); }
+-            pCurrItem->m_nTabCount++;
++        if (ch == 0x09) { // Tab - start a new item if we have any text in the existing one.
++            if (pCurrItem->m_Text.Size() != 0) {
++                pCurrItem = pCurrItem->NewItem();
++                pCurrLine->m_Items.Append(pCurrItem);
++            }
++            if (m_HorizJ == Start)
++                pCurrItem->m_nTabCount++;
+         }
+ 
+-        else if (ch == '\r') { // CR - line break.
++        else if (ch == 0x0d) { // CR - line break.
+             // TODO: Two CRs next to one another are treated as </P> rather than <BR><BR>
+             // This should also include the sequence CRLFCRLF.
+             pCurrLine = new MHTextLine;
+@@ -402,7 +417,9 @@ void MHText::Redraw()
+                         pCurrItem->m_Colour = m_ColourStack.Top();
+                     }
+                 }
++                else MHLOG(MHLogWarning, QString("Unknown text escape code 0x%1").arg(code,2,16));
+             }
++            else MHLOG(MHLogWarning, QString("Unknown text escape code 0x%1").arg(code,2,16));
+         }
+ 
+         else if (ch <= 0x1f) {
+@@ -430,7 +447,7 @@ void MHText::Redraw()
+         for (int j = 0; j < pLine->m_Items.Size(); j++) {
+             MHTextItem *pItem = pLine->m_Items.GetAt(j);
+             // Set any tabs.
+-            for (int k = 0; k < pItem->m_nTabCount; k++) pLine->m_nLineWidth += TABSTOP - pLine->m_nLineWidth % TABSTOP;
++            pLine->m_nLineWidth = Tabs(pLine->m_nLineWidth, pItem->m_nTabCount);
+ 
+             if (pItem->m_Unicode.isEmpty()) { // Convert UTF-8 to Unicode.
+                 int s = pItem->m_Text.Size();
+@@ -503,7 +520,7 @@ void MHText::Redraw()
+         for (int j = 0; j < pLine->m_Items.Size(); j++) {
+             MHTextItem *pItem = pLine->m_Items.GetAt(j);
+             // Tab across if necessary.
+-            for (int k = 0; k < pItem->m_nTabCount; k++) xOffset += TABSTOP - xOffset % TABSTOP;
++            xOffset = Tabs(xOffset, pItem->m_nTabCount);
+ 
+             if (! pItem->m_Unicode.isEmpty()) { // We may have blank lines.
+                 m_pDisplay->AddText(xOffset, yOffset + (pLine->m_nLineHeight + lineSpace)/2 - pLine->m_nDescent,
+-- 
+1.7.9.5
+

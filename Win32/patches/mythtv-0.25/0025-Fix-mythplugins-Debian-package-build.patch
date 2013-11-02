@@ -1,0 +1,67 @@
+From 3d8dac15697c2766277f5ad140548c3029801d5f Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 1 Apr 2011 10:48:08 +0200
+Subject: [PATCH 025/124] Fix mythplugins Debian package build
+
+---
+ .../mytharchive/mytharchive/mytharchive.pro        |   16 ++++++++--------
+ mythplugins/targetdep.pro                          |    2 +-
+ 2 files changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/mythplugins/mytharchive/mytharchive/mytharchive.pro b/mythplugins/mytharchive/mytharchive/mytharchive.pro
+index 57a50c9..b6f89d6 100644
+--- a/mythplugins/mytharchive/mytharchive/mytharchive.pro
++++ b/mythplugins/mytharchive/mytharchive/mytharchive.pro
+@@ -33,28 +33,28 @@ SOURCES += dbcheck.cpp archiveutil.cpp selectdestination.cpp
+ SOURCES += mythburn.cpp themeselector.cpp editmetadata.cpp thumbfinder.cpp
+ SOURCES += exportnative.cpp importnative.cpp
+ 
+-burnuifiles.path = $${SYSROOT}$${PREFIX}/share/mythtv/themes/default
++burnuifiles.path = $${PREFIX}/share/mythtv/themes/default
+ burnuifiles.files = mythburn-ui.xml
+ 
+-scriptfiles.path = $${SYSROOT}$${PREFIX}/share/mythtv/mytharchive/scripts
++scriptfiles.path = $${PREFIX}/share/mythtv/mytharchive/scripts
+ scriptfiles.files = ../mythburn/scripts/*
+ 
+-introfiles.path = $${SYSROOT}$${PREFIX}/share/mythtv/mytharchive/intro
++introfiles.path = $${PREFIX}/share/mythtv/mytharchive/intro
+ introfiles.files = ../mythburn/intro/*.mpg
+ 
+-musicfiles.path = $${SYSROOT}$${PREFIX}/share/mythtv/mytharchive/music
++musicfiles.path = $${PREFIX}/share/mythtv/mytharchive/music
+ musicfiles.files = ../mythburn/music/*.ac3
+ 
+-imagefiles.path = $${SYSROOT}$${PREFIX}/share/mythtv/mytharchive/images
++imagefiles.path = $${PREFIX}/share/mythtv/mytharchive/images
+ imagefiles.files = ../mythburn/images/*.png
+ 
+-themefiles.path = $${SYSROOT}$${PREFIX}/share/mythtv/mytharchive/themes
++themefiles.path = $${PREFIX}/share/mythtv/mytharchive/themes
+ themefiles.files = ../mythburn/themes/*
+ 
+-profilefiles.path = $${SYSROOT}$${PREFIX}/share/mythtv/mytharchive/encoder_profiles
++profilefiles.path = $${PREFIX}/share/mythtv/mytharchive/encoder_profiles
+ profilefiles.files = ../mythburn/encoder_profiles/*.xml
+ 
+-nativeuifiles.path = $${SYSROOT}$${PREFIX}/share/mythtv/themes/default
++nativeuifiles.path = $${PREFIX}/share/mythtv/themes/default
+ nativeuifiles.files = mythnative-ui.xml
+ 
+ INSTALLS +=  scriptfiles introfiles themefiles imagefiles musicfiles
+diff --git a/mythplugins/targetdep.pro b/mythplugins/targetdep.pro
+index 55f714b..1a447f0 100644
+--- a/mythplugins/targetdep.pro
++++ b/mythplugins/targetdep.pro
+@@ -10,7 +10,7 @@ MYTH_SHLIB_EXT=$${LIBVERSION}.$${QMAKE_EXTENSION_SHLIB}
+ MYTH_LIB_EXT  =$${LIBVERSION}.$${QMAKE_EXTENSION_LIB}
+ 
+ 
+-DEPLIBS = $${LIBDIR}
++DEPLIBS = $${SYSROOT}$${LIBDIR}
+ 
+ # On Windows, dlls were installed with exes:
+ mingw : DEPLIBS = $${PREFIX}/bin
+-- 
+1.7.9.5
+

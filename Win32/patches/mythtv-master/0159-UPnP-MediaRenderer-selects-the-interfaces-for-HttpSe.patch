@@ -1,0 +1,76 @@
+From 81336e4711b1ded4fa9594574918e3b14832d74f Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 10 Aug 2013 15:02:24 +0100
+Subject: [PATCH 159/202] UPnP: MediaRenderer selects the interfaces for
+ HttpServer to listen on
+
+At present the HttpServer listens on the interfaces found by
+ServerPool::DefaultListen.  This isn't necessarily the sanme as that
+advertised by the UPnP manager in UPnp::g_IPAddrList.
+
+This patch slighly modifies the initialisation order in MediaRenderer's
+ctor and explicitly passes the list of UPnP interfaces to
+HttpServer::listen.
+
+Without this if a BE and FE are setup on the same host and the BE IPv4
+address is 127.0.0.1 then the FE's UPnP MediaRenderer is not accessible
+as it too listens only on 127.0.0.1
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythfrontend/mediarenderer.cpp |   28 ++++++++++++------------
+ 1 file changed, 14 insertions(+), 14 deletions(-)
+
+diff --git a/mythtv/programs/mythfrontend/mediarenderer.cpp b/mythtv/programs/mythfrontend/mediarenderer.cpp
+index a009108..fb96688 100644
+--- a/mythtv/programs/mythfrontend/mediarenderer.cpp
++++ b/mythtv/programs/mythfrontend/mediarenderer.cpp
+@@ -220,19 +220,24 @@ MediaRenderer::MediaRenderer(): m_pUPnpCMGR(NULL)
+     if (!m_pHttpServer)
+         return;
+ 
+-    if (!m_pHttpServer->listen(nPort))
+-    {
+-        LOG(VB_GENERAL, LOG_ERR, "MediaRenderer::HttpServer Create Error");
+-        delete m_pHttpServer;
+-        m_pHttpServer = NULL;
+-        return;
+-    }
+-
+     // ----------------------------------------------------------------------
+     // Initialize UPnp Stack
+     // ----------------------------------------------------------------------
+ 
+-    if (Initialize( nPort, m_pHttpServer ))
++    if (!Initialize( nPort, m_pHttpServer ))
++    {
++        LOG(VB_GENERAL, LOG_ERR,
++            "MediaRenderer::Unable to Initialize UPnp Stack");
++        delete m_pHttpServer;
++        m_pHttpServer = NULL;
++    }
++    else if (!m_pHttpServer->listen(UPnp::g_IPAddrList, nPort))
++    {
++        LOG(VB_GENERAL, LOG_ERR, "MediaRenderer::HttpServer listen Error");
++        delete m_pHttpServer;
++        m_pHttpServer = NULL;
++    }
++    else
+     {
+         // ------------------------------------------------------------------
+         // Create device Description
+@@ -321,11 +326,6 @@ MediaRenderer::MediaRenderer(): m_pUPnpCMGR(NULL)
+         // other frontends
+         SSDP::Instance()->PerformSearch("ssdp:all");
+     }
+-    else
+-    {
+-        LOG(VB_GENERAL, LOG_ERR,
+-            "MediaRenderer::Unable to Initialize UPnp Stack");
+-    }
+ 
+     LOG(VB_UPNP, LOG_INFO, "MediaRenderer::End");
+ }
+-- 
+1.7.9.5
+

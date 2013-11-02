@@ -1,0 +1,157 @@
+From 4af5facbc181aad24a44ff323da5008ff70fe401 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 5 Jun 2013 19:11:21 +0100
+Subject: [PATCH 214/285] SimpleDBStorage: Where possible use Get/SetSetting
+ to speed frontend startup
+
+Load() and Store() make single un-cached dbase calls which can be slow
+on remote frontends.  Get/SetSetting are cached so use them when the
+table name is 'settings'.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythdb/mythcorecontext.h |    2 ++
+ mythtv/libs/libmythdb/mythdb.cpp        |   11 ++++++
+ mythtv/libs/libmythdb/mythdb.h          |    1 +
+ mythtv/libs/libmythdb/mythstorage.cpp   |   57 +++++++++++++++++++++++++++----
+ 4 files changed, 65 insertions(+), 6 deletions(-)
+
+diff --git a/mythtv/libs/libmythdb/mythcorecontext.h b/mythtv/libs/libmythdb/mythcorecontext.h
+index db7d750..de250f4 100644
+--- a/mythtv/libs/libmythdb/mythcorecontext.h
++++ b/mythtv/libs/libmythdb/mythcorecontext.h
+@@ -153,6 +153,8 @@ class MPUBLIC MythCoreContext : public MythObservable, public MythSocketCBs
+     void ClearSettingsCache(const QString &myKey = QString(""));
+     void ActivateSettingsCache(bool activate = true);
+     void OverrideSettingForSession(const QString &key, const QString &value);
++    bool IsOverrideSettingForSession(const QString &key)
++        { return GetDB()->IsOverrideSettingForSession(key); }
+ 
+     void addPrivRequest(MythPrivRequest::Type t, void *data);
+     void waitPrivRequest() const;
+diff --git a/mythtv/libs/libmythdb/mythdb.cpp b/mythtv/libs/libmythdb/mythdb.cpp
+index 793fb9e..cf66486 100644
+--- a/mythtv/libs/libmythdb/mythdb.cpp
++++ b/mythtv/libs/libmythdb/mythdb.cpp
+@@ -863,6 +863,17 @@ void MythDB::OverrideSettingForSession(
+     d->settingsCacheLock.unlock();
+ }
+ 
++bool MythDB::IsOverrideSettingForSession(const QString &key) const
++{
++    QString mk = key.toLower();
++
++    d->settingsCacheLock.lockForRead();
++    SettingsMap::iterator oit = d->overriddenSettings.find(mk);
++    bool bOverridden = (oit != d->overriddenSettings.end());
++    d->settingsCacheLock.unlock();
++    return bOverridden;
++}
++
+ static void clear(
+     SettingsMap &cache, SettingsMap &overrides, const QString &myKey)
+ {
+diff --git a/mythtv/libs/libmythdb/mythdb.h b/mythtv/libs/libmythdb/mythdb.h
+index 997387f..3f484af 100644
+--- a/mythtv/libs/libmythdb/mythdb.h
++++ b/mythtv/libs/libmythdb/mythdb.h
+@@ -36,6 +36,7 @@ class MPUBLIC MythDB
+     void ClearSettingsCache(const QString &key = QString());
+     void ActivateSettingsCache(bool activate = true);
+     void OverrideSettingForSession(const QString &key, const QString &newValue);
++    bool IsOverrideSettingForSession(const QString &key) const;
+ 
+     void SaveSetting(const QString &key, int newValue);
+     void SaveSetting(const QString &key, const QString &newValue);
+diff --git a/mythtv/libs/libmythdb/mythstorage.cpp b/mythtv/libs/libmythdb/mythstorage.cpp
+index d53e8f7..a845f10 100644
+--- a/mythtv/libs/libmythdb/mythstorage.cpp
++++ b/mythtv/libs/libmythdb/mythstorage.cpp
+@@ -3,15 +3,46 @@
+ // Myth headers
+ #include "mythstorage.h"
+ #include "mythdb.h"
++#include "mythcorecontext.h"
++#include "mythverbose.h"
++
++const char kUnset[] = "<unset_value>";
+ 
+ void SimpleDBStorage::Load(void)
+ {
+-    MSqlQuery query(MSqlQuery::InitCon());
+     MSqlBindings bindings;
++    QString const where = GetWhereClause(bindings);
++    QString const table = GetTableName();
++    QString const column = GetColumnName();
++
++    // Use the dbase settings cache if possible
++    if (table == "settings" && column == "data" && bindings.contains(":WHEREVALUE") )
++    {
++        QString value = bindings.value(":WHEREVALUE").toString();
++        QString data = !bindings.contains(":WHEREHOSTNAME") ?
++            gCoreContext->GetSetting(value, kUnset) :
++            gCoreContext->GetSettingOnHost(value,
++                bindings.value(":WHEREHOSTNAME").toString(), kUnset);
++        if (data != kUnset)
++        {
++            initval = gCoreContext->IsOverrideSettingForSession(value) ? kUnset: data;
++            user->SetDBValue(data);
++        }
++        else
++        {
++            VERBOSE(VB_GENERAL, QString(
++                "SimpleDBStorage WARN: %1 has no saved setting. Using default '%2'")
++                    .arg(value).arg(user->GetDBValue()) );
++            initval = kUnset; // Force save
++        }
++        return;
++    }
++
++    MSqlQuery query(MSqlQuery::InitCon());
+     query.prepare(
+-        "SELECT " + GetColumnName() +
+-        "  FROM " + GetTableName() +
+-        " WHERE " + GetWhereClause(bindings));
++        "SELECT " + column +
++        "  FROM " + table +
++        " WHERE " + where);
+     query.bindValues(bindings);
+ 
+     if (!query.exec() || !query.isActive())
+@@ -34,9 +65,23 @@ void SimpleDBStorage::Save(QString _table)
+     if (!IsSaveRequired())
+         return;
+ 
++    // Use the dbase settings cache if possible
+     MSqlBindings bindings;
++    QString const where = GetWhereClause(bindings);
++
++    if (_table == "settings" && bindings.contains(":WHEREVALUE") )
++    {
++        QString value = bindings.value(":WHEREVALUE").toString();
++        if (bindings.contains(":WHEREHOSTNAME"))
++            gCoreContext->SaveSettingOnHost(value,
++                user->GetDBValue(), bindings.value(":WHEREHOSTNAME").toString());
++        else
++            gCoreContext->SaveSettingOnHost(value, user->GetDBValue(), "");
++        return;
++    }
++
+     QString querystr = QString("SELECT * FROM " + _table + " WHERE "
+-                               + GetWhereClause(bindings) + ';');
++                               + where + ';');
+ 
+     MSqlQuery query(MSqlQuery::InitCon());
+     query.prepare(querystr);
+@@ -101,7 +146,7 @@ bool SimpleDBStorage::IsSaveRequired(void) const
+ 
+ void SimpleDBStorage::SetSaveRequired(void)
+ {
+-    initval.clear();
++    initval = kUnset;
+ }
+ 
+ //////////////////////////////////////////////////////////////////////
+-- 
+1.7.9.5
+

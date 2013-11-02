@@ -1,0 +1,32 @@
+From 2887c22636754327b98da8df888f98d71beed0a7 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 31 Jul 2013 18:44:45 +0100
+Subject: [PATCH 154/202] AO: Avoid SEGV in GetAudioDeviceConfig if OpenDevice
+ returns 0
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/audio/audiooutput.cpp |    7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/audio/audiooutput.cpp b/mythtv/libs/libmyth/audio/audiooutput.cpp
+index 596dea8..2ba6a94 100644
+--- a/mythtv/libs/libmyth/audio/audiooutput.cpp
++++ b/mythtv/libs/libmyth/audio/audiooutput.cpp
+@@ -283,8 +283,11 @@ AudioOutput::AudioDeviceConfig* AudioOutput::GetAudioDeviceConfig(
+     AudioOutput::AudioDeviceConfig *adc;
+ 
+     AudioOutput *ao = OpenAudio(name, QString::null, willsuspendpa);
+-    aosettings = *(ao->GetOutputSettingsCleaned());
+-    delete ao;
++    if (ao)
++    {
++        aosettings = *(ao->GetOutputSettingsCleaned());
++        delete ao;
++    }
+ 
+     if (aosettings.IsInvalid())
+     {
+-- 
+1.7.9.5
+

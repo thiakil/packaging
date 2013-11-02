@@ -1,0 +1,89 @@
+From 5312071197a8e3fb0b62356c063947a3e584a22c Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 6 Aug 2012 16:10:48 +0200
+Subject: [PATCH 012/124] ringbuffer: Read returns available data for low bit
+ rate streams.
+
+For a low bit rate stream WaitFailAvail returns the bytes available
+after waiting 100mS even if it's less than that requested.  This
+avoids audio only and MHEG interaction streams from stalling.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/ringbuffer.cpp |   53 +++++++++++++++-------------------
+ 1 file changed, 23 insertions(+), 30 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/ringbuffer.cpp b/mythtv/libs/libmythtv/ringbuffer.cpp
+index 1ba26f6..b2a870f 100644
+--- a/mythtv/libs/libmythtv/ringbuffer.cpp
++++ b/mythtv/libs/libmythtv/ringbuffer.cpp
+@@ -1061,43 +1061,36 @@ bool RingBuffer::WaitForAvail(int count)
+ 
+     MythTimer t;
+     t.start();
++    wanttoread = count;
+     while ((avail < count) && !stopreads &&
+            !request_pause && !commserror && readaheadrunning)
+     {
+-        wanttoread = count;
+-        generalWait.wait(&rwlock, 250);
+-        avail = ReadBufAvail();
+-
+-        if (ateof && avail < count)
++        if (ateof)
++        {
+             count = avail;
++            break;
++        }
+ 
+-        if (avail < count)
++        uint elapsed = t.elapsed();
++        if (elapsed >= 10000)
+         {
+-            int elapsed = t.elapsed();
+-            if (elapsed > 500 && low_buffers && avail >= fill_min)
+-                count = avail;
+-            else if  (((elapsed > 250) && (elapsed < 500))  ||
+-                     ((elapsed >  500) && (elapsed < 750))  ||
+-                     ((elapsed > 1000) && (elapsed < 1250)) ||
+-                     ((elapsed > 2000) && (elapsed < 2250)) ||
+-                     ((elapsed > 4000) && (elapsed < 4250)) ||
+-                     ((elapsed > 8000) && (elapsed < 8250)) ||
+-                     ((elapsed > 9000)))
+-            {
+-                LOG(VB_GENERAL, LOG_INFO, LOC + "Waited " +
+-                    QString("%1").arg((elapsed / 250) * 0.25f, 3, 'f', 1) +
+-                    " seconds for data \n\t\t\tto become available..." +
+-                    QString(" %2 < %3") .arg(avail).arg(count));
+-            }
+-
+-            if (elapsed > 16000)
+-            {
+-                LOG(VB_GENERAL, LOG_ERR, LOC + "Waited " +
+-                    QString("%1").arg(elapsed/1000) +
+-                    " seconds for data, aborting.");
+-                return false;
+-            }
++            LOG(VB_GENERAL, LOG_ERR, LOC +
++                QString("Timed out waiting for data available (wanted=%1, avail=%2)")
++                .arg(count).arg(avail) );
++            break;
+         }
++        else if (elapsed >= 100 && avail && low_buffers)
++        {
++            LOG(VB_GENERAL, LOG_INFO, LOC +
++                QString("Waited %1 mS for %2 bytes (wanted %3)")
++                .arg(elapsed).arg(avail).arg(count) );
++            count = avail;
++            generalWait.wakeAll();
++            break;
++        }
++
++        generalWait.wait(&rwlock, 100);
++        avail = ReadBufAvail();
+     }
+ 
+     wanttoread = 0;
+-- 
+1.7.9.5
+

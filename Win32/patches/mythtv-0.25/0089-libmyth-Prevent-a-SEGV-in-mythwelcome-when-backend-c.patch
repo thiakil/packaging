@@ -1,0 +1,48 @@
+From a94d25766777b427d707a2870afb0604d53ea480 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 3 Jun 2012 12:23:12 +0200
+Subject: [PATCH 089/124] libmyth: Prevent a SEGV in mythwelcome when backend
+ connection reestablished
+
+Mythwelcome can suffer a SEGV if it receives a CONNECTION_RESTABLISHED
+MythEvent which races with a user close event.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/mythcontext.cpp |   11 ++++-------
+ 1 file changed, 4 insertions(+), 7 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/mythcontext.cpp b/mythtv/libs/libmyth/mythcontext.cpp
+index 0b8f1dc..12acaf6 100644
+--- a/mythtv/libs/libmyth/mythcontext.cpp
++++ b/mythtv/libs/libmyth/mythcontext.cpp
+@@ -84,10 +84,8 @@ class MythContextPrivate : public QObject
+ 
+     void ShowConnectionFailurePopup(bool persistent);
+     void HideConnectionFailurePopup(void);
+-    void ConnectFailurePopupClosed(void);
+ 
+     void ShowVersionMismatchPopup(uint remoteVersion);
+-    void VersionMismatchPopupClosed(void);
+ 
+   public:
+     MythContext *parent;
+@@ -981,11 +979,10 @@ void MythContextPrivate::ShowConnectionFailurePopup(bool persistent)
+ 
+ void MythContextPrivate::HideConnectionFailurePopup(void)
+ {
+-    if (MBEconnectPopup)
+-    {
+-        MBEconnectPopup->Close();
+-        MBEconnectPopup = NULL;
+-    }
++    MythConfirmationDialog *dlg = this->MBEconnectPopup;
++    this->MBEconnectPopup = NULL;
++    if (dlg)
++        dlg->Close();
+ }
+ 
+ void MythContextPrivate::ShowVersionMismatchPopup(uint remote_version)
+-- 
+1.7.9.5
+

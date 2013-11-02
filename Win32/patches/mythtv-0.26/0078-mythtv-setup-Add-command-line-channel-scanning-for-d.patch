@@ -1,0 +1,192 @@
+From f8e6c29f359fee1d3c005a67ef6dd3b6787f3d4d Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 5 Dec 2011 20:17:20 +0100
+Subject: [PATCH 078/227] mythtv-setup: Add command line channel scanning for
+ dvb-s/s2
+
+This enables an external program to re-scan dvb-s channels using
+the mythtv-setup command line scanner.  Typical usage is:
+
+mythtv-setup --scan dvbs-qpsk-gb 7 DVBInput --scan-non-interactive
+
+Initial frequency tables for dvb-s/s2 in the UK and France are provided.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../libs/libmythtv/channelscan/channelscanner.cpp  |   62 +++++++++++++++++++-
+ mythtv/libs/libmythtv/frequencytables.cpp          |   22 +++++++
+ mythtv/libs/libmythtv/frequencytables.h            |   14 +++++
+ mythtv/programs/mythtv-setup/main.cpp              |   14 +++--
+ 4 files changed, 105 insertions(+), 7 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/channelscan/channelscanner.cpp b/mythtv/libs/libmythtv/channelscan/channelscanner.cpp
+index e0e89df..1a5529a 100644
+--- a/mythtv/libs/libmythtv/channelscan/channelscanner.cpp
++++ b/mythtv/libs/libmythtv/channelscan/channelscanner.cpp
+@@ -161,7 +161,67 @@ void ChannelScanner::Scan(
+     {
+         LOG(VB_CHANSCAN, LOG_INFO, LOC + "ScanTransports()");
+ 
+-        ok = sigmonScanner->ScanTransportsStartingOn(sourceid, startChan);
++        QMap<QString,QString> start(startChan);
++        if (start.isEmpty())
++        {
++            freq_table_list_t flist = get_matching_freq_tables(freq_std, mod, tbl);
++            if (flist.size() > 0)
++            {
++                const FrequencyTable *ft = flist[0];
++
++                if (ScanTypeSetting::NITAddScan_DVBT == scantype)
++                {
++                    start["std"]            = "dvb";
++                    start["type"]           = "OFDM";
++                    start["frequency"]      = QString::number(ft->frequencyStart);
++                    start["inversion"]      = ft->inversion.toString();
++                    start["bandwidth"]      = ft->bandwidth.toString();
++                    start["coderate_hp"]    = ft->coderate_hp.toString();
++                    start["coderate_lp"]    = ft->coderate_lp.toString();
++                    start["modulation"]     = ft->modulation.toString();
++                    start["constellation"]  = ft->constellation.toString();
++                    start["trans_mode"]     = ft->trans_mode.toString();
++                    start["guard_interval"] = ft->guard_interval.toString();
++                    start["hierarchy"]      = ft->hierarchy.toString();
++                }
++                else if (ScanTypeSetting::NITAddScan_DVBS == scantype)
++                {
++                    start["std"]        = "dvb";
++                    start["type"]       = "QPSK";
++                    start["modulation"] = ft->modulation.toString();
++                    start["frequency"]  = QString::number(ft->frequencyStart);
++                    start["inversion"]  = ft->inversion.toString();
++                    start["symbolrate"] = QString::number(ft->symbol_rate);
++                    start["fec"]        = ft->fec_inner.toString();
++                    start["polarity"]   = ft->polarity.toString();
++                }
++                else if (ScanTypeSetting::NITAddScan_DVBS2 == scantype)
++                {
++                    start["std"]        = "dvb";
++                    start["type"]       = "DVB_S2";
++                    start["modulation"] = ft->modulation.toString();
++                    start["frequency"]  = QString::number(ft->frequencyStart);
++                    start["inversion"]  = ft->inversion.toString();
++                    start["symbolrate"] = QString::number(ft->symbol_rate);
++                    start["fec"]        = ft->fec_inner.toString();
++                    start["polarity"]   = ft->polarity.toString();
++                    start["mod_sys"]    = DTVModulationSystem(DTVModulationSystem::kModulationSystem_DVBS2).toString();
++                    start["rolloff"]    = DTVRollOff().toString();
++                }
++                else if (ScanTypeSetting::NITAddScan_DVBC == scantype)
++                {
++                    start["std"]        = "dvb";
++                    start["type"]       = "QAM";
++                    start["modulation"] = ft->modulation.toString();
++                    start["frequency"]  = QString::number(ft->frequencyStart);
++                    start["inversion"]  = ft->inversion.toString();
++                    start["symbolrate"] = QString::number(ft->symbol_rate);
++                    start["fec"]        = ft->fec_inner.toString();
++                }
++            }
++        }
++
++        ok = sigmonScanner->ScanTransportsStartingOn(sourceid, start);
+     }
+     else if (ScanTypeSetting::FullTransportScan == scantype)
+     {
+diff --git a/mythtv/libs/libmythtv/frequencytables.cpp b/mythtv/libs/libmythtv/frequencytables.cpp
+index d633b4e..acbb89a 100644
+--- a/mythtv/libs/libmythtv/frequencytables.cpp
++++ b/mythtv/libs/libmythtv/frequencytables.cpp
+@@ -303,6 +303,28 @@ int get_closest_freqid(
+ 
+ static void init_freq_tables(freq_table_map_t &fmap)
+ {
++    // United Kingdom DVB-S
++    fmap["dvbs_qpsk_gb0"] = new FrequencyTable(
++        10714000, "Astra 1N/2A/2B/2D & Eurobird 1 at 28.2E",
++        DTVModulation::kModulationQPSK,
++        22000000, DTVCodeRate::kFEC_5_6, DTVPolarity::kPolarityHorizontal);
++
++    fmap["dvbs2_8psk_gb0"] = new FrequencyTable(
++        10714000, "Astra 1N/2A/2B/2D & Eurobird 1 at 28.2E",
++        DTVModulation::kModulationQPSK,
++        22000000, DTVCodeRate::kFEC_5_6, DTVPolarity::kPolarityHorizontal);
++
++    // France DVB-S
++    fmap["dvbs_qpsk_fr0"] = new FrequencyTable(
++        11591000, "Atlantic Bird 3 at 5.0W",
++        DTVModulation::kModulationQPSK,
++        20000000, DTVCodeRate::kFEC_2_3, DTVPolarity::kPolarityHorizontal);
++
++    fmap["dvbs_qpsk_fr1"] = new FrequencyTable(
++        11798000, "Astra 1H at 19.2E",
++        DTVModulation::kModulationQPSK,
++        27500000, DTVCodeRate::kFEC_3_4, DTVPolarity::kPolarityVertical);
++
+     // United Kingdom
+     fmap["dvbt_ofdm_gb0"] = new FrequencyTable(
+         474000000, 850000000, 8000000, "Channel %1", 21,
+diff --git a/mythtv/libs/libmythtv/frequencytables.h b/mythtv/libs/libmythtv/frequencytables.h
+index 4ea77f1..71deee5 100644
+--- a/mythtv/libs/libmythtv/frequencytables.h
++++ b/mythtv/libs/libmythtv/frequencytables.h
+@@ -93,6 +93,19 @@ class FrequencyTable
+           offset1(_offset1),               offset2(_offset2),
+           symbol_rate(_symbol_rate),       fec_inner(_fec_inner) { ; }
+ 
++    FrequencyTable(uint64_t                _frequencyStart,
++                   QString                 _name_format,
++                   DTVModulation           _modulation,
++                   uint                    _symbol_rate,
++                   DTVCodeRate             _fec_inner,
++                   DTVPolarity             _polarity)
++        : name_format(_name_format),       name_offset(0),
++          frequencyStart(_frequencyStart), frequencyEnd(_frequencyStart),
++          frequencyStep(0),                modulation(_modulation),
++          offset1(0),                      offset2(0),
++          symbol_rate(_symbol_rate),       fec_inner(_fec_inner),
++          polarity(_polarity) { }
++
+     virtual ~FrequencyTable() { ; }
+ 
+     // Common Stuff
+@@ -118,6 +131,7 @@ class FrequencyTable
+     // DVB-C/DVB-S stuff
+     uint              symbol_rate;
+     DTVCodeRate       fec_inner;
++    DTVPolarity       polarity;
+ };
+ 
+ /**
+diff --git a/mythtv/programs/mythtv-setup/main.cpp b/mythtv/programs/mythtv-setup/main.cpp
+index 5efea94..b5304f8 100644
+--- a/mythtv/programs/mythtv-setup/main.cpp
++++ b/mythtv/programs/mythtv-setup/main.cpp
+@@ -452,17 +452,19 @@ int main(int argc, char *argv[])
+         {
+             ChannelScannerCLI scanner(doScanSaveOnly, scanInteractive);
+             scanner.Scan(
+-                (freq_std=="atsc") ?
+-                ScanTypeSetting::FullScan_ATSC :
+-                ((freq_std=="dvbt") ?
+-                 ScanTypeSetting::FullScan_DVBT :
+-                 ScanTypeSetting::FullScan_ATSC),
++                (freq_std=="atsc") ? ScanTypeSetting::FullScan_ATSC :
++                (freq_std=="dvbt") ? ScanTypeSetting::FullScan_DVBT :
++                (freq_std=="dvbc") ? ScanTypeSetting::FullScan_DVBC :
++                (freq_std=="dvbs") ? ScanTypeSetting::NITAddScan_DVBS :
++                (freq_std=="dvbs2") ? ScanTypeSetting::NITAddScan_DVBS2 :
++                (freq_std=="ts") ? ScanTypeSetting::FullTransportScan :
++                ScanTypeSetting::FullScan_ATSC,
+                 /* cardid    */ scanCardId,
+                 /* inputname */ scanInputName,
+                 /* sourceid  */ sourceid,
+                 /* ignore signal timeout */ false,
+                 /* follow_nit */            true,
+-                /* test decryption */       true,
++                /* test decryption */       !scanFTAOnly,
+                 scanFTAOnly,
+                 scanServiceRequirements,
+                 // stuff needed for particular scans
+-- 
+1.7.9.5
+

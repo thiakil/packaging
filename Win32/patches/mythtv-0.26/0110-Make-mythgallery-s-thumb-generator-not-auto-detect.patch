@@ -1,0 +1,36 @@
+From 6b7b1c8aeb5c6fc83679965e518112f9d6d45194 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 30 Jan 2011 12:32:47 -0800
+Subject: [PATCH 110/227] Make mythgallery's thumb generator not auto-detect
+
+The QImageReader autodetection seems to be overkill for what we need here.  By
+turning this off, only registered image extensions will be tried.  This will
+significantly speed up scanning directories with mixed content in them.
+
+Hopefully, this will not adversely affect "normal" directories of only images.
+
+Fixes #9523
+
+Signed-off-by: Gavin Hurlbut <ghurlbut@mythtv.org>
+(cherry picked from commit d1ab62dc3dee829e75dd649b36adc875ca06643a)
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../mythgallery/mythgallery/thumbgenerator.cpp     |    1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/mythplugins/mythgallery/mythgallery/thumbgenerator.cpp b/mythplugins/mythgallery/mythgallery/thumbgenerator.cpp
+index 70b74a5..171547b 100644
+--- a/mythplugins/mythgallery/mythgallery/thumbgenerator.cpp
++++ b/mythplugins/mythgallery/mythgallery/thumbgenerator.cpp
+@@ -249,6 +249,7 @@ void ThumbGenerator::loadDir(QImage& image, const QFileInfo& fi)
+     {
+         const QFileInfo *f = &(*it);
+         QImageReader testread(f->absoluteFilePath());
++        testread.setAutoDetectImageFormat(false);
+         if (testread.canRead())
+         {
+             loadFile(image, *f);
+-- 
+1.7.9.5
+

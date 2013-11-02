@@ -1,0 +1,62 @@
+From c5bd9fcfcd4075f25eda5cf6dea60a27c1de47ce Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 7 Jul 2013 16:47:08 +0100
+Subject: [PATCH 148/207] TV: liveTVChain improved log detail
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/livetvchain.cpp |   23 ++++++++++-------------
+ 1 file changed, 10 insertions(+), 13 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/livetvchain.cpp b/mythtv/libs/libmythtv/livetvchain.cpp
+index 37c5761..14cdb07 100644
+--- a/mythtv/libs/libmythtv/livetvchain.cpp
++++ b/mythtv/libs/libmythtv/livetvchain.cpp
+@@ -473,6 +473,15 @@ ProgramInfo *LiveTVChain::GetSwitchProgram(bool &discont, bool &newtype,
+     return pginfo;
+ }
+ 
++static QString toString(const LiveTVChainEntry &v)
++{
++    return QString("%1: %2 (%3 to %4)%5")
++        .arg(v.cardtype,6).arg(v.chanid,4)
++        .arg(v.starttime.time().toString())
++        .arg(v.endtime.time().toString())
++        .arg(v.discontinuity?" discontinuous":" continuous");
++}
++
+ /** \fn LiveTVChain::SwitchTo(int)
+  *  \brief Sets the recording to switch to.
+  *  \param num Index of recording to switch to, -1 for last recording.
+@@ -499,11 +508,8 @@ void LiveTVChain::SwitchTo(int num)
+     {
+         LiveTVChainEntry e;
+         GetEntryAt(num, e);
+-        QString msg = QString("%1_%2")
+-            .arg(e.chanid)
+-            .arg(MythDate::toString(e.starttime, MythDate::kFilename));
+         LOG(VB_PLAYBACK, LOG_DEBUG,
+-            LOC + QString("Entry@%1: '%2')").arg(num).arg(msg));
++            LOC + QString("Entry@%1: %2").arg(num).arg(::toString(e)) );
+     }
+ }
+ 
+@@ -595,15 +601,6 @@ void LiveTVChain::DelHostSocket(MythSocket *sock)
+     m_inUseSocks.removeAll(sock);
+ }
+ 
+-static QString toString(const LiveTVChainEntry &v)
+-{
+-    return QString("%1: %2 (%3 to %4)%5")
+-        .arg(v.cardtype,6).arg(v.chanid,4)
+-        .arg(v.starttime.time().toString())
+-        .arg(v.endtime.time().toString())
+-        .arg(v.discontinuity?" discontinuous":"");
+-}
+-
+ QString LiveTVChain::toString() const
+ {
+     QMutexLocker lock(&m_lock);
+-- 
+1.7.9.5
+

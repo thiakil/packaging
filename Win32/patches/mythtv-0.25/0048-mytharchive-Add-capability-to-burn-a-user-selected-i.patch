@@ -1,0 +1,734 @@
+From 759d067f657e6b27432c1aab59f0f8af4498f273 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 2 Dec 2011 14:52:29 +0100
+Subject: [PATCH 048/124] mytharchive: Add capability to burn a user selected
+ iso image.
+
+This provides the reciprocal method to DVD ripping that was re-introduced
+by the MythVideo ripper/mtd patch.
+
+DVD image files are identified by an iso, img or bin suffix.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../mytharchive/mytharchive/isoselector.cpp        |  241 ++++++++++++++++++++
+ mythplugins/mytharchive/mytharchive/isoselector.h  |   61 +++++
+ mythplugins/mytharchive/mytharchive/main.cpp       |   30 +++
+ .../mytharchive/mytharchive/mytharchive.pro        |    2 +
+ mythplugins/mytharchive/mytharchivehelper/main.cpp |   56 ++++-
+ .../theme/default-wide/mythnative-ui.xml           |   91 ++++++++
+ .../mytharchive/theme/default/mythnative-ui.xml    |   93 ++++++++
+ .../mytharchive/theme/menus/archiveutils.xml       |    5 +
+ 8 files changed, 578 insertions(+), 1 deletion(-)
+ create mode 100644 mythplugins/mytharchive/mytharchive/isoselector.cpp
+ create mode 100644 mythplugins/mytharchive/mytharchive/isoselector.h
+
+diff --git a/mythplugins/mytharchive/mytharchive/isoselector.cpp b/mythplugins/mytharchive/mytharchive/isoselector.cpp
+new file mode 100644
+index 0000000..46d8c9f
+--- /dev/null
++++ b/mythplugins/mytharchive/mytharchive/isoselector.cpp
+@@ -0,0 +1,241 @@
++#include "isoselector.h"
++
++// Qt
++#include <QApplication>
++#include <QDir>
++#include <QFileInfo>
++#include <QStringList>
++
++// Myth
++#include <mythcontext.h>
++#include <mythdbcon.h>
++#include <mythuihelper.h>
++#include <mythmainwindow.h>
++#include <mythuitext.h>
++#include <mythuitextedit.h>
++#include <mythuibutton.h>
++#include <mythuibuttonlist.h>
++#include <mythdialogbox.h>
++#include "mythlogging.h"
++
++// mytharchive
++#include "archiveutil.h"
++#include "logviewer.h"
++
++
++// Constants
++#ifdef USING_MINGW
++# define kszPathSep ";"
++#else
++# define kszPathSep ":"
++#endif
++
++#define kszIsoDir "MythArchiveIsoDir"
++
++
++////////////////////////////////////////////////////////////////
++
++IsoFileSelector::IsoFileSelector(MythScreenStack *parent)
++:   FileSelector(parent, NULL, FSTYPE_FILE, "", "*.iso *.bin *.img"),
++    m_nextButton(0), m_prevButton(0), m_sizeText(0)
++{
++    QStringList videodirs = gCoreContext->GetSetting("VideoStartupDir").
++                split(kszPathSep, QString::SkipEmptyParts);
++    QString def = videodirs.size() ? videodirs[0] : "/";
++    m_curDirectory = gCoreContext->GetSetting(kszIsoDir, def);;
++}
++
++IsoFileSelector::~IsoFileSelector()
++{
++    gCoreContext->SaveSetting(kszIsoDir, m_curDirectory);
++}
++
++bool IsoFileSelector::Create(void)
++{
++    // Load the theme for this screen
++    if (!LoadWindowFromXML("mythnative-ui.xml", "imagefile_selector", this))
++        return false;
++
++    bool err = false;
++    UIUtilW::Assign(this, m_titleText, "title");
++    UIUtilE::Assign(this, m_fileButtonList, "filelist", &err);
++    UIUtilE::Assign(this, m_locationEdit, "location_edit", &err);
++    UIUtilE::Assign(this, m_backButton, "back_button", &err);
++    UIUtilE::Assign(this, m_homeButton, "home_button", &err);
++    UIUtilE::Assign(this, m_nextButton, "next_button", &err);
++    UIUtilE::Assign(this, m_prevButton, "prev_button", &err);
++    UIUtilE::Assign(this, m_cancelButton, "cancel_button", &err);
++
++    UIUtilE::Assign(this, m_sizeText, "size_text", &err);
++
++    if (err)
++    {
++        LOG(VB_GENERAL, LOG_ERR, "Cannot load screen 'imagefile_selector'");
++        return false;
++    }
++
++    if (m_titleText)
++        m_titleText->SetText(tr("Find File To Burn to DVD"));
++
++    connect(m_nextButton, SIGNAL(Clicked()), this, SLOT(nextPressed()));
++    connect(m_cancelButton, SIGNAL(Clicked()), this, SLOT(cancelPressed()));
++    connect(m_prevButton, SIGNAL(Clicked()), this, SLOT(prevPressed()));
++
++    connect(m_locationEdit, SIGNAL(LosingFocus()),
++            this, SLOT(locationEditLostFocus()));
++    m_locationEdit->SetText(m_curDirectory);
++
++    connect(m_backButton, SIGNAL(Clicked()), this, SLOT(backPressed()));
++    connect(m_homeButton, SIGNAL(Clicked()), this, SLOT(homePressed()));
++
++    connect(m_fileButtonList, SIGNAL(itemSelected(MythUIButtonListItem *)),
++            this, SLOT(itemSelected(MythUIButtonListItem *)));
++
++    connect(m_fileButtonList, SIGNAL(itemClicked(MythUIButtonListItem *)),
++            this, SLOT(itemClicked(MythUIButtonListItem *)));
++
++    BuildFocusList();
++
++    SetFocusWidget(m_fileButtonList);
++
++    updateSelectedList();
++    updateFileList();
++
++    return true;
++}
++
++void IsoFileSelector::itemSelected(MythUIButtonListItem *item)
++{
++    m_isoFile = "";
++    m_sizeText->SetText("");
++
++    if (!item)
++        return;
++
++    FileData *fileData = qVariantValue<FileData*>(item->GetData());
++    if (!fileData)
++        return;
++
++    if (fileData->directory)
++        return;
++
++    m_sizeText->SetText(QString::number(fileData->size));
++
++    m_isoFile = m_curDirectory + "/" + fileData->filename;
++}
++
++void IsoFileSelector::nextPressed()
++{
++    if (m_isoFile == "")
++    {
++        ShowOkPopup(tr("The selected item is not a valid ISO image!"));
++    }
++    else
++    {
++        IsoBurnMenu* burn = new IsoBurnMenu(m_isoFile);
++        burn->start();
++        Close();
++    }
++}
++
++void IsoFileSelector::prevPressed()
++{
++    Close();
++}
++
++void IsoFileSelector::cancelPressed()
++{
++    Close();
++}
++
++
++////////////////////////////////////////////////////////////////
++
++IsoBurnMenu::IsoBurnMenu(const QString &filename)
++: QObject(NULL), m_filename(filename)
++{
++    setObjectName("IsoBurnMenu");
++}
++
++IsoBurnMenu::~IsoBurnMenu()
++{
++}
++
++void IsoBurnMenu::start()
++{
++    // ask the user what type of disk to burn to
++    QString title = QObject::tr("Burn DVD");
++    QString msg   = QObject::tr("\nPlace a blank DVD in the"
++                                " drive and select an option below.");
++    MythScreenStack *mainStack = GetMythMainWindow()->GetMainStack();
++    MythDialogBox   *menuPopup = new MythDialogBox(title, msg, mainStack,
++                                                   "actionmenu", true);
++
++    if (menuPopup->Create())
++        mainStack->AddScreen(menuPopup);
++
++    menuPopup->SetReturnEvent(this, "action");
++
++    menuPopup->AddButton(QObject::tr("Burn DVD"));
++    menuPopup->AddButton(QObject::tr("Burn DVD Rewritable"));
++    menuPopup->AddButton(QObject::tr("Burn DVD Rewritable (Force Erase)"));
++    menuPopup->AddButton(QObject::tr("Cancel"));
++}
++
++void IsoBurnMenu::customEvent(QEvent *event)
++{
++    if (event->type() == DialogCompletionEvent::kEventType)
++    {
++        DialogCompletionEvent *dce = (DialogCompletionEvent*)(event);
++        if (dce->GetId() == "action")
++        {
++            doBurn(dce->GetResult());
++            deleteLater();
++        }
++    }
++}
++
++void IsoBurnMenu::doBurn(int mode)
++{
++    if (mode < 0 || mode > 2)
++        return;
++
++    QString tempDir = getTempDirectory(true);
++    if (tempDir == "")
++        return;
++
++    QDir dir(tempDir);
++    if (!dir.exists("logs"))
++        dir.mkdir("logs");
++
++    QString logDir = tempDir + "logs";
++
++    // truncate existing progress.log
++    QFile logFile(logDir + "/progress.log");
++    if (logFile.exists())
++        logFile.resize(0);
++    else if (logFile.open(QIODevice::WriteOnly))
++        logFile.close();
++
++    // remove cancel flag file if present
++    if (QFile::exists(logDir + "/mythburncancel.lck"))
++        QFile::remove(logDir + "/mythburncancel.lck");
++
++    QString sArchiveFormat = QString::number(mode);
++    bool bEraseDVDRW = mode == 2;
++
++    QString commandline = "mytharchivehelper --burniso --mediatype " + sArchiveFormat +
++                  (bEraseDVDRW ? " --erasedvdrw" : "") + " --infile " + m_filename;
++    commandline += " > "  + logDir + "/progress.log 2>&1 &";
++    int state = system(qPrintable(commandline));
++
++    if (state != 0)
++    {
++        showWarningDialog(QObject::tr("It was not possible to run "
++                                      "mytharchivehelper to burn the DVD."));
++        return;
++    }
++
++    // now show the log viewer
++    showLogViewer();
++}
+diff --git a/mythplugins/mytharchive/mytharchive/isoselector.h b/mythplugins/mytharchive/mytharchive/isoselector.h
+new file mode 100644
+index 0000000..4e96acd
+--- /dev/null
++++ b/mythplugins/mytharchive/mytharchive/isoselector.h
+@@ -0,0 +1,61 @@
++#ifndef ISOSELECTOR_H
++#define ISOSELECTOR_H
++
++// qt
++#include <QString>
++
++// myth
++#include <mythscreentype.h>
++
++// mytharchive
++#include "fileselector.h"
++
++
++class MythUIText;
++class MythUIButton;
++class MythUIButtonList;
++class MythUIButtonListItem;
++
++class IsoFileSelector : public FileSelector
++{
++    Q_OBJECT
++
++  public:
++    IsoFileSelector(MythScreenStack *parent);
++    ~IsoFileSelector();
++
++    bool Create();
++
++  private slots:
++    void nextPressed();
++    void prevPressed();
++    void cancelPressed();
++    void itemSelected(MythUIButtonListItem *item);
++
++  private:
++    QString       m_isoFile;
++
++    MythUIButton *m_nextButton;
++    MythUIButton *m_prevButton;
++    MythUIText   *m_sizeText;
++};
++
++
++class IsoBurnMenu : public QObject
++{
++    Q_OBJECT
++
++  public:
++    IsoBurnMenu(const QString& filename);
++    ~IsoBurnMenu();
++
++    void start();
++
++  private:
++    void customEvent(QEvent *event);
++    void doBurn(int mode);
++
++    const QString m_filename;
++};
++
++#endif // ndef ISOSELECTOR_H
+diff --git a/mythplugins/mytharchive/mytharchive/main.cpp b/mythplugins/mytharchive/mytharchive/main.cpp
+index 0d87c3d..1aaf6ca 100644
+--- a/mythplugins/mytharchive/mytharchive/main.cpp
++++ b/mythplugins/mytharchive/mytharchive/main.cpp
+@@ -38,6 +38,7 @@ using namespace std;
+ #include "selectdestination.h"
+ #include "exportnative.h"
+ #include "importnative.h"
++#include "isoselector.h"
+ #include "mythburn.h"
+ 
+ // return true if the process belonging to the lock file is still running
+@@ -250,6 +251,31 @@ static void runBurnDVD(void)
+     menu->start();
+ }
+ 
++static void runBurnISO(void)
++{
++    QString tempDir = getTempDirectory(true);
++    if (tempDir == "")
++        return;
++
++    checkTempDirectory();
++
++    QString logDir = tempDir + "logs";
++    if (checkLockFile(logDir + "/mythburn.lck"))
++    {
++        // a job is already running so just show the log viewer
++        showLogViewer();
++        return;
++    }
++
++    // show the find iso screen
++    MythScreenStack *mainStack = GetMythMainWindow()->GetMainStack();
++    IsoFileSelector *selector = new IsoFileSelector(mainStack);
++    if (selector->Create())
++        mainStack->AddScreen(selector);
++    else
++        delete selector;
++}
++
+ static void ArchiveCallback(void *data, QString &selection)
+ {
+     (void) data;
+@@ -270,6 +296,8 @@ static void ArchiveCallback(void *data, QString &selection)
+         runTestDVD();
+     else if (sel == "archive_burn_dvd")
+         runBurnDVD();
++    else if (sel == "archive_burn_iso")
++        runBurnISO();
+ }
+ 
+ static int runMenu(QString which_menu)
+@@ -313,6 +341,8 @@ static void initKeys(void)
+         "", "", runTestDVD);
+     REG_JUMP(QT_TRANSLATE_NOOP("MythControls", "Burn DVD"),
+         "", "", runBurnDVD);
++    REG_JUMP(QT_TRANSLATE_NOOP("MythControls", "Burn ISO"),
++        "", "", runBurnISO);
+ }
+ 
+ int mythplugin_init(const char *libversion)
+diff --git a/mythplugins/mytharchive/mytharchive/mytharchive.pro b/mythplugins/mytharchive/mytharchive/mytharchive.pro
+index b6f89d6..03c6d9d 100644
+--- a/mythplugins/mytharchive/mytharchive/mytharchive.pro
++++ b/mythplugins/mytharchive/mytharchive/mytharchive.pro
+@@ -26,12 +26,14 @@ HEADERS += recordingselector.h videoselector.h dbcheck.h
+ HEADERS += archiveutil.h selectdestination.h
+ HEADERS += mythburn.h themeselector.h editmetadata.h thumbfinder.h
+ HEADERS += exportnative.h importnative.h
++HEADERS += isoselector.h
+ 
+ SOURCES += main.cpp archivesettings.cpp logviewer.cpp
+ SOURCES += fileselector.cpp recordingselector.cpp videoselector.cpp
+ SOURCES += dbcheck.cpp archiveutil.cpp selectdestination.cpp
+ SOURCES += mythburn.cpp themeselector.cpp editmetadata.cpp thumbfinder.cpp
+ SOURCES += exportnative.cpp importnative.cpp
++SOURCES += isoselector.cpp
+ 
+ burnuifiles.path = $${PREFIX}/share/mythtv/themes/default
+ burnuifiles.files = mythburn-ui.xml
+diff --git a/mythplugins/mytharchive/mytharchivehelper/main.cpp b/mythplugins/mytharchive/mytharchivehelper/main.cpp
+index 7f8fb36..5883323 100644
+--- a/mythplugins/mytharchive/mytharchivehelper/main.cpp
++++ b/mythplugins/mytharchive/mytharchivehelper/main.cpp
+@@ -317,6 +317,53 @@ static int doBurnDVD(int mediaType, bool bEraseDVDRW, bool nativeFormat)
+     return res;
+ }
+ 
++static int burnISOImage(int mediaType, bool bEraseDVDRW, QString const &isoFile)
++{
++    QString dvdDrive = gCoreContext->GetSetting("MythArchiveDVDLocation",
++                                            "/dev/dvd");
++    LOG(VB_JOBQUEUE, LOG_INFO, "Burning ISO image file to " + dvdDrive);
++
++    QString command = gCoreContext->GetSetting("MythArchiveGrowisofsCmd",
++                                           "growisofs");
++
++    int driveSpeed = gCoreContext->GetNumSetting("MythArchiveDriveSpeed");
++    if (driveSpeed)
++        command += " -speed=" + QString::number(driveSpeed);
++
++    if (mediaType == AD_DVD_RW && bEraseDVDRW == true)
++        command += " -dvd-compat -use-the-force-luke -Z " + dvdDrive + "=" + isoFile;
++    else
++        command += " -dvd-compat -Z " + dvdDrive + "=" + isoFile;
++
++    int res = system(qPrintable(command));
++#ifndef USING_MINGW
++    if (WIFEXITED(res))
++        res = WEXITSTATUS(res);
++#endif
++    if (res == 0)
++        LOG(VB_JOBQUEUE, LOG_INFO, "Finished burning ISO image");
++    else
++        LOG(VB_JOBQUEUE, LOG_INFO,
++                QString("ERROR: Failed while running growisofs. Result: %1")
++                .arg(res));
++
++    return res;
++}
++
++static int doBurnIso(int mediaType, bool bEraseDVDRW, QString &isoFile)
++{
++    gCoreContext->SaveSetting("MythArchiveLastRunStart",
++        QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm"));
++    gCoreContext->SaveSetting("MythArchiveLastRunStatus", "Running");
++
++    int res = burnISOImage(mediaType, bEraseDVDRW, isoFile);
++
++    gCoreContext->SaveSetting("MythArchiveLastRunEnd",
++        QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm"));
++    gCoreContext->SaveSetting("MythArchiveLastRunStatus", "Success");
++    return res;
++}
++
+ int NativeArchive::doNativeArchive(const QString &jobFile)
+ {
+     QString tempDir = getTempDirectory();
+@@ -2603,6 +2650,10 @@ void MythArchiveHelperCommandLineParser::LoadArguments(void)
+             "burndvd", false,
+             "Burn a created DVD to a blank disc\n"
+             "Optional: --mediatype, --erasedvdrw, --nativeformat", "");
++    add(QStringList( QStringList() << "-B" << "--burniso" ),
++            "burniso", false,
++            "Burn a an ISO image to a blank disc\n"
++            "Optional: --mediatype, --erasedvdrw", "");
+     add("--mediatype", "mediatype", 0,
+             "Type of media to burn\n"
+             "Used with: --burndvd\n"
+@@ -2682,6 +2733,7 @@ int main(int argc, char **argv)
+     bool bGetFileInfo     = cmdline.toBool("getfileinfo");
+     bool bIsRemote        = cmdline.toBool("isremote");
+     bool bDoBurn          = cmdline.toBool("burndvd");
++    bool bDoBurnIso       = cmdline.toBool("burniso");
+     bool bEraseDVDRW      = cmdline.toBool("erasedvdrw");
+     bool bNativeFormat    = cmdline.toBool("nativeformat");;
+     bool bSup2Dast        = cmdline.toBool("sup2dast");
+@@ -2742,7 +2794,7 @@ int main(int argc, char **argv)
+         }
+     }
+ 
+-    if (bDoBurn)
++    if (bDoBurn || bDoBurnIso)
+     {
+         if (mediaType < 0 || mediaType > 2)
+         {
+@@ -2820,6 +2872,8 @@ int main(int argc, char **argv)
+         res = isRemote(inFile);
+     else if (bDoBurn)
+         res = doBurnDVD(mediaType, bEraseDVDRW, bNativeFormat);
++    else if (bDoBurnIso)
++        res = doBurnIso(mediaType, bEraseDVDRW, inFile);
+     else if (bSup2Dast)
+     {
+         QByteArray inFileBA = inFile.toLocal8Bit();
+diff --git a/mythplugins/mytharchive/theme/default-wide/mythnative-ui.xml b/mythplugins/mytharchive/theme/default-wide/mythnative-ui.xml
+index 37242c7..82fb9d1 100644
+--- a/mythplugins/mytharchive/theme/default-wide/mythnative-ui.xml
++++ b/mythplugins/mytharchive/theme/default-wide/mythnative-ui.xml
+@@ -423,4 +423,95 @@ MythTV Archive GUI theme
+ 
+   </window>
+ 
++    <!--
++      Image File Selector
++    -->
++
++    <window name="imagefile_selector">
++
++        <textarea name="title" from="basetextarea">
++            <area>0,0,1280,45</area>
++            <font>baseextralarge</font>
++            <align>allcenter</align>
++            <value>File Finder To Burn</value>
++        </textarea>
++
++        <textedit name="location_edit" from="basetextedit">
++            <position>40,60</position>
++        </textedit>
++
++        <button name="back_button" from="basebutton">
++            <position>425,65</position>
++            <value>Back</value>
++        </button>
++
++        <button name="home_button" from="basebutton">
++            <position>585,65</position>
++            <value>Home</value>
++        </button>
++
++        <buttonlist name="filelist" from="basebuttonlist">
++            <area>40,140,1200,330</area>
++            <statetype name="buttonitem">
++                <state name="active">
++                    <imagetype name="buttonimage">
++                        <area>2,2,28,28</area>
++                    </imagetype>
++                    <textarea name="buttontext">
++                        <area>35,0,1190,30</area>
++                    </textarea>
++                </state>
++                <state name="selectedactive" from="active">
++                    <shape name="buttonbackground">
++                        <area>0,0,100%,100%</area>
++                        <fill style="gradient">
++                            <gradient start="#52CA38" end="#349838" />
++                        </fill>
++                    </shape>
++                </state>
++                <state name="selectedinactive" from="active">
++                    <shape name="buttonbackground">
++                        <area>0,0,100%,100%</area>
++                        <fill style="gradient">
++                            <gradient start="#52CA38" end="#349838" alpha="100" />
++                        </fill>
++                    </shape>
++                    <textarea name="buttontext">
++                        <font>basesmallpurple</font>
++                    </textarea>
++                </state>
++            </statetype>
++        </buttonlist>
++
++        <shape name="bottombackground" from="basebackground">
++            <area>35,485,1210,140</area>
++        </shape>
++
++        <textarea name="label1" from="basetextarea">
++            <area>50,495,160,40</area>
++            <font>basesmallyellow</font>
++            <value>Size:</value>
++        </textarea>
++
++        <textarea name="size_text" from="basetextarea">
++            <area>200,495,980,40</area>
++        </textarea>
++
++        <button name="cancel_button" from="basebutton">
++            <position>55,650</position>
++            <value>Cancel</value>
++        </button>
++
++        <button name="prev_button" from="basebutton">
++            <position>900,650</position>
++            <value>Prev</value>
++        </button>
++
++        <button name="next_button" from="basebutton">
++            <position>1060,650</position>
++            <value>Next</value>
++        </button>
++
++    </window>
++
+ </mythuitheme>
+diff --git a/mythplugins/mytharchive/theme/default/mythnative-ui.xml b/mythplugins/mytharchive/theme/default/mythnative-ui.xml
+index 58b1fcb..2733b76 100644
+--- a/mythplugins/mytharchive/theme/default/mythnative-ui.xml
++++ b/mythplugins/mytharchive/theme/default/mythnative-ui.xml
+@@ -419,4 +419,97 @@ MythTV Archive GUI theme
+ 
+   </window>
+ 
++    <!--
++      Image File Selector
++    -->
++
++    <window name="imagefile_selector">
++
++        <textarea name="pagetitle" from="basetextarea">
++            <area>30,10,570,40</area>
++            <font>baselarge</font>
++            <value>File Finder To Import</value>
++        </textarea>
++
++        <textedit name="location_edit" from="basetextedit">
++            <position>35,60</position>
++        </textedit>
++
++        <button name="back_button" from="basebutton">
++            <position>425,65</position>
++            <value>Back</value>
++        </button>
++
++        <button name="home_button" from="basebutton">
++            <position>585,65</position>
++            <value>Home</value>
++        </button>
++
++        <buttonlist name="filelist" from="basebuttonlist">
++            <area>25,130,740,260</area>
++            <statetype name="buttonitem">
++                <state name="active">
++                    <imagetype name="buttonimage">
++                        <area>2,2,28,28</area>
++                    </imagetype>
++                    <textarea name="buttontext">
++                        <area>35,0,650,30</area>
++                    </textarea>
++                    <statetype name="buttoncheck">
++                        <position>715,5</position>
++                    </statetype>
++                </state>
++                <state name="selectedactive" from="active">
++                    <shape name="buttonbackground">
++                        <area>0,0,100%,100%</area>
++                        <fill style="gradient">
++                            <gradient start="#52CA38" end="#349838" />
++                        </fill>
++                    </shape>
++                </state>
++                <state name="selectedinactive" from="active">
++                    <shape name="buttonbackground">
++                        <area>0,0,100%,100%</area>
++                        <fill style="gradient">
++                            <gradient start="#52CA38" end="#349838" alpha="100" />
++                        </fill>
++                    </shape>
++                    <textarea name="buttontext">
++                        <font>basesmallpurple</font>
++                    </textarea>
++                </state>
++            </statetype>
++        </buttonlist>
++
++        <shape name="topbackground" from="basebackground">
++            <area>20,410,760,120</area>
++        </shape>
++
++        <textarea name="label1" from="basetextarea">
++            <area>30,415,160,40</area>
++            <font>basesmallyellow</font>
++            <value>Size:</value>
++        </textarea>
++
++        <textarea name="size_text" from="basetextarea">
++            <area>180,420,500,40</area>
++        </textarea>
++
++        <button name="cancel_button" from="basebutton">
++            <position>35,550</position>
++            <value>Cancel</value>
++        </button>
++
++        <button name="prev_button" from="basebutton">
++            <position>440,550</position>
++            <value>Prev</value>
++        </button>
++
++        <button name="next_button" from="basebutton">
++            <position>610,550</position>
++            <value>Next</value>
++        </button>
++
++    </window>
++
+ </mythuitheme>
+diff --git a/mythplugins/mytharchive/theme/menus/archiveutils.xml b/mythplugins/mytharchive/theme/menus/archiveutils.xml
+index b9ae177..7b1e04e 100644
+--- a/mythplugins/mytharchive/theme/menus/archiveutils.xml
++++ b/mythplugins/mytharchive/theme/menus/archiveutils.xml
+@@ -18,4 +18,9 @@
+        <action>ARCHIVE_BURN_DVD</action>
+    </button>
+ 
++   <button>
++       <type>ARCHIVE_BURN_ISO</type>
++       <text>Burn DVD From ISO Image</text>
++       <action>ARCHIVE_BURN_ISO</action>
++   </button>
+ </mythmenu>
+-- 
+1.7.9.5
+

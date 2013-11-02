@@ -1,0 +1,99 @@
+# Patches to enable cross compilation Linux to MacOSX
+--- qt-everywhere-opensource-src-4.7.0.orig/configure	2010-09-10 11:04:46.000000000 +0200
++++ qt-everywhere-opensource-src-4.7.0/configure	2011-02-26 12:32:10.000000000 +0100
+@@ -188,7 +188,7 @@ PLATFORM_X11=no
+ PLATFORM_MAC=no
+ PLATFORM_QWS=no
+ 
+-if [ -f "$relpath"/src/gui/kernel/qapplication_mac.mm ] && [ -d /System/Library/Frameworks/Carbon.framework ]; then
++if [ -f "$relpath"/src/gui/kernel/qapplication_mac.mm ] && [ -d $QT_SYSROOT/System/Library/Frameworks/Carbon.framework ]; then
+     # Qt/Mac
+     # ~ the Carbon SDK exists
+     # ~ src/gui/base/qapplication_mac.cpp is present
+@@ -1329,7 +1329,7 @@ while [ "$#" -gt 0 ]; do
+     arch)
+         # if this is a Mac then "windows" probably means
+         # we are cross-compiling for MinGW
+-        if [ "$PLATFORM_MAC" = "yes" ] && [ "$VAL" != "windows" ]; then
++        if [ "$PLATFORM_MAC" = "yes" ] && [ -z "$XPLATFORM" ] && [ "$VAL" != "windows" ]; then
+             CFG_MAC_ARCHS="$CFG_MAC_ARCHS $VAL"
+         else
+             CFG_ARCH=$VAL
+@@ -2945,7 +2945,7 @@ elif [ "$XPLATFORM_MINGW" = "yes" ]; the
+     [ -z "$CFG_ARCH" ] && CFG_ARCH="windows"
+ elif echo "$XPLATFORM" | grep symbian > /dev/null; then
+     CFG_ARCH=symbian
+-elif [ "$PLATFORM_MAC" = "yes" ] || [ -z "$CFG_ARCH" ]; then
++elif [ "$PLATFORM_MAC" = "yes" -a -z "$XPLATFORM" ] || [ -z "$CFG_ARCH" ]; then
+     CFG_ARCH=$CFG_HOST_ARCH
+ fi
+ 
+@@ -4560,30 +4560,40 @@ if true; then ###[ '!' -f "$outpath/bin/
+         fi
+         if [ "$PLATFORM_MAC" = "yes" ]; then
+             echo "export MACOSX_DEPLOYMENT_TARGET = 10.4" >> "$mkfile"
+-            echo "CARBON_LFLAGS =-framework ApplicationServices" >>"$mkfile"
+-            echo "CARBON_CFLAGS =-fconstant-cfstrings" >>"$mkfile"
++            if [ -z "$XPLATFORM" ]; then
++                echo "CARBON_LFLAGS =-framework ApplicationServices" >>"$mkfile"
++                echo "CARBON_CFLAGS =-fconstant-cfstrings" >>"$mkfile"
++            fi
+             EXTRA_LFLAGS="$EXTRA_LFLAGS \$(CARBON_LFLAGS)"
+             EXTRA_CFLAGS="$EXTRA_CFLAGS \$(CARBON_CFLAGS)"
+             EXTRA_CXXFLAGS="$EXTRA_CXXFLAGS \$(CARBON_CFLAGS)"
+-            EXTRA_OBJS="qsettings_mac.o qcore_mac.o"
+-            EXTRA_SRCS="\"$relpath/src/corelib/io/qsettings_mac.cpp\" \"$relpath/src/corelib/kernel/qcore_mac.cpp\""
++            if [ -z "$XPLATFORM" ]; then
++                EXTRA_OBJS="qsettings_mac.o qcore_mac.o"
++                EXTRA_SRCS="\"$relpath/src/corelib/io/qsettings_mac.cpp\" \"$relpath/src/corelib/kernel/qcore_mac.cpp\""
++            fi
+ 	    if echo "$CFG_MAC_ARCHS" | grep x86 > /dev/null 2>&1; then # matches both x86 and x86_64
+-		X86_CFLAGS="-arch i386"
+-		X86_LFLAGS="-arch i386"
++                if [ -z "$XPLATFORM" ]; then
++	            X86_CFLAGS="-arch i386"
++                    X86_LFLAGS="-arch i386"
++                fi
+ 		EXTRA_CFLAGS="$X86_CFLAGS $EXTRA_CFLAGS"
+ 		EXTRA_CXXFLAGS="$X86_CFLAGS $EXTRA_CXXFLAGS"
+                 EXTRA_LFLAGS="$EXTRA_LFLAGS $X86_LFLAGS"
+             fi
+ 	    if echo "$CFG_MAC_ARCHS" | grep ppc > /dev/null 2>&1; then # matches both ppc and ppc64
+-		PPC_CFLAGS="-arch ppc"
+-		PPC_LFLAGS="-arch ppc"
++                if [ -z "$XPLATFORM" ]; then
++		    PPC_CFLAGS="-arch ppc"
++		    PPC_LFLAGS="-arch ppc"
++                fi
+ 		EXTRA_CFLAGS="$PPC_CFLAGS $EXTRA_CFLAGS"
+ 		EXTRA_CXXFLAGS="$PPC_CFLAGS $EXTRA_CXXFLAGS"
+                 EXTRA_LFLAGS="$EXTRA_LFLAGS $PPC_LFLAGS"
+             fi
+ 	    if [ '!' -z "$CFG_SDK" ]; then
+-		echo "SDK_LFLAGS =-Wl,-syslibroot,$CFG_SDK" >>"$mkfile"
+-		echo "SDK_CFLAGS =-isysroot $CFG_SDK" >>"$mkfile"
++                if [ -z "$XPLATFORM" ]; then
++	            echo "SDK_LFLAGS =-Wl,-syslibroot,$CFG_SDK" >>"$mkfile"
++		    echo "SDK_CFLAGS =-isysroot $CFG_SDK" >>"$mkfile"
++                fi
+ 		EXTRA_CFLAGS="$EXTRA_CFLAGS \$(SDK_CFLAGS)"
+ 		EXTRA_CXXFLAGS="$EXTRA_CXXFLAGS \$(SDK_CFLAGS)"
+ 		EXTRA_LFLAGS="$EXTRA_LFLAGS \$(SDK_LFLAGS)"
+@@ -5987,7 +5997,7 @@ if [ "$CFG_ENDIAN" = "auto" ]; then
+ fi
+ 
+ if [ "$CFG_HOST_ENDIAN" = "auto" ]; then
+-    if [ "$PLATFORM_MAC" = "yes" ]; then
++    if [ "$PLATFORM_MAC" = "yes" -a -z "$XPLATFORM" ]; then
+ 	true #leave as auto
+     else
+         "$unixtests/endian.test" "$QMAKESPEC" $OPT_VERBOSE "$relpath" "$outpath"
+@@ -7082,7 +7093,7 @@ fi
+ # using the Xarch compiler option when supported (10.5 and up).  On 10.4 the
+ # deployment version is set to 10.4 globally using the QMAKE_MACOSX_DEPLOYMENT_TARGET
+ # env. variable. 
+-if [ "$PLATFORM_MAC" = "yes" ] && [ "$CFG_MAC_XARCH" != "no" ] ; then
++if [ "$PLATFORM_MAC" = "yes" ] && [ -z "$XPLATFORM" ] && [ "$CFG_MAC_XARCH" != "no" ] ; then
+     if echo "$CFG_MAC_ARCHS" | grep '\<x86\>' > /dev/null 2>&1; then
+         QMakeVar add QMAKE_CFLAGS "-Xarch_i386 -mmacosx-version-min=10.4"
+         QMakeVar add QMAKE_CXXFLAGS "-Xarch_i386 -mmacosx-version-min=10.4"

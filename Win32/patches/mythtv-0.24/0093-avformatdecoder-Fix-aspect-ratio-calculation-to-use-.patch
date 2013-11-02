@@ -1,0 +1,68 @@
+From 8c60e9607fadf6455410b9a2b92ce0387406d9f8 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 6 Feb 2012 20:29:09 +0100
+Subject: [PATCH 093/285] avformatdecoder: Fix aspect ratio calculation to use
+ stream's PAR
+
+Currently the get_aspect() function uses the codec's pixel aspect
+ratio to calculate the dispolay aspect ratio.  This can be incorrect
+if a stream specifies a non-default pixel aspect ratio which then
+overrides the codec's default.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |   20 +++++++++++++++-----
+ 1 file changed, 15 insertions(+), 5 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index 1a112e0..e59d5ff 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -93,13 +93,16 @@ static QSize get_video_dim(const AVCodecContext &ctx)
+ {
+     return QSize(ctx.width >> ctx.lowres, ctx.height >> ctx.lowres);
+ }
+-static float get_aspect(const AVCodecContext &ctx)
++static float get_aspect(const AVStream &stream)
+ {
+     float aspect_ratio = 0.0f;
++    const AVCodecContext &ctx = *stream.codec;
++    const AVRational &sar = stream.sample_aspect_ratio.num ?
++        stream.sample_aspect_ratio : ctx.sample_aspect_ratio;
+ 
+-    if (ctx.sample_aspect_ratio.num && ctx.height)
++    if (sar.num && ctx.height)
+     {
+-        aspect_ratio = av_q2d(ctx.sample_aspect_ratio) * (float) ctx.width;
++        aspect_ratio = av_q2d(sar) * (float) ctx.width;
+         aspect_ratio /= (float) ctx.height;
+     }
+ 
+@@ -1353,7 +1356,14 @@ void AvFormatDecoder::InitVideoCodec(AVStream *stream, AVCodecContext *enc,
+         QSize dim    = get_video_dim(*enc);
+         int   width  = current_width  = dim.width();
+         int   height = current_height = dim.height();
+-        float aspect = current_aspect = get_aspect(*enc);
++        float aspect = current_aspect = get_aspect(*stream);
++
++        VERBOSE(VB_PLAYBACK, LOC +
++            QString("InitVideoCodec %1x%2 [PAR %3:%4] PAR %5:%6 DAR %7")
++            .arg(enc->width).arg(enc->height)
++            .arg(enc->sample_aspect_ratio.num).arg(enc->sample_aspect_ratio.den)
++            .arg(stream->sample_aspect_ratio.num).arg(stream->sample_aspect_ratio.den)
++            .arg(aspect) );
+ 
+         if (!width || !height)
+         {
+@@ -2911,7 +2921,7 @@ bool AvFormatDecoder::H264PreProcessPkt(AVStream *stream, AVPacket *pkt)
+             continue;
+         }
+ 
+-        float aspect_ratio = get_aspect(*context);
++        float aspect_ratio = get_aspect(*stream);
+         QSize dim    = get_video_dim(*context);
+         uint  width  = dim.width();
+         uint  height = dim.height();
+-- 
+1.7.9.5
+

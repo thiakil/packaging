@@ -1,0 +1,26 @@
+From 3d0974991e1a4ea8f22e34a355ea4b91b4a72102 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 20 Jun 2013 20:23:50 +0100
+Subject: [PATCH 228/285] UPNP: Fix Mingw platform string
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythupnp/httpserver.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythupnp/httpserver.cpp b/mythtv/libs/libmythupnp/httpserver.cpp
+index c233a77..620ad4b 100644
+--- a/mythtv/libs/libmythupnp/httpserver.cpp
++++ b/mythtv/libs/libmythupnp/httpserver.cpp
+@@ -62,7 +62,7 @@ HttpServer::HttpServer() : QTcpServer(), ThreadPool("HTTP")
+     // ----------------------------------------------------------------------
+ 
+ #ifdef USING_MINGW
+-    g_sPlatform = QString( "Windows %1.%1" )
++    g_sPlatform = QString( "Windows %1.%2" )
+         .arg(LOBYTE(LOWORD(GetVersion())))
+         .arg(HIBYTE(LOWORD(GetVersion())));
+ #else
+-- 
+1.7.9.5
+

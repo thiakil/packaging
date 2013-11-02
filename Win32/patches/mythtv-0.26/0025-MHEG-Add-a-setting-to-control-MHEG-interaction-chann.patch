@@ -1,0 +1,81 @@
+From ed6c74a3488d74abdbfcf73133000751170aab0a Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 26 May 2012 13:45:53 +0200
+Subject: [PATCH 025/227] MHEG: Add a setting to control MHEG interaction
+ channel
+
+Add a checkbox and dbase setting to allow control of network access
+by MHEG apps that supoort interaction channel (BBC iPlayer).
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mhegic.cpp                |    9 ++++++---
+ mythtv/programs/mythfrontend/globalsettings.cpp |   13 +++++++++++++
+ 2 files changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mhegic.cpp b/mythtv/libs/libmythtv/mhegic.cpp
+index 66035fe..592dbe9 100644
+--- a/mythtv/libs/libmythtv/mhegic.cpp
++++ b/mythtv/libs/libmythtv/mhegic.cpp
+@@ -18,6 +18,7 @@ using std::getenv;
+ // Myth
+ #include "netstream.h"
+ #include "mythlogging.h"
++#include "mythcorecontext.h"
+ 
+ #define LOC QString("[mhegic] ")
+ 
+@@ -48,14 +49,16 @@ MHInteractionChannel::EStatus MHInteractionChannel::status()
+         return kInactive;
+     }
+ 
+-    // TODO get this from mythdb
++    if (!gCoreContext->GetNumSetting("EnableMHEG", 0))
++        return kDisabled;
++
+     QStringList opts = QString(getenv("MYTHMHEG")).split(':');
+     if (opts.contains("noice", Qt::CaseInsensitive))
+         return kDisabled;
+     else if (opts.contains("ice", Qt::CaseInsensitive))
+         return kActive;
+-    else // Default
+-        return kActive;
++
++    return gCoreContext->GetNumSetting("EnableMHEGic", 1) ? kActive : kDisabled;
+ }
+ 
+ static inline bool isCached(const QString& csPath)
+diff --git a/mythtv/programs/mythfrontend/globalsettings.cpp b/mythtv/programs/mythfrontend/globalsettings.cpp
+index 75fc5ee..8c00cdd 100644
+--- a/mythtv/programs/mythfrontend/globalsettings.cpp
++++ b/mythtv/programs/mythfrontend/globalsettings.cpp
+@@ -1392,6 +1392,18 @@ static HostCheckBox *EnableMHEG()
+     return gc;
+ }
+ 
++static HostCheckBox *EnableMHEGic()
++{
++    HostCheckBox *gc = new HostCheckBox("EnableMHEGic");
++    gc->setLabel(QObject::tr("Enable network access for interactive TV"));
++    gc->setValue(true);
++    gc->setHelpText(QObject::tr(
++                        "If enabled, interactive TV applications (MHEG) will "
++                        "be able to access interactive content over the "
++                        "internet. This is used for BBC iPlayer."));
++    return gc;
++}
++
+ static HostCheckBox *PersistentBrowseMode()
+ {
+     HostCheckBox *gc = new HostCheckBox("PersistentBrowseMode");
+@@ -3448,6 +3460,7 @@ OSDSettings::OSDSettings()
+     osd->setLabel(QObject::tr("On-screen Display"));
+ 
+     osd->addChild(EnableMHEG());
++    osd->addChild(EnableMHEGic());
+     osd->addChild(PersistentBrowseMode());
+     osd->addChild(BrowseAllTuners());
+     osd->addChild(DefaultCCMode());
+-- 
+1.7.9.5
+

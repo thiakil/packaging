@@ -1,0 +1,55 @@
+From 34384402c60f0e3a407bee745c735b0eabcdbd2c Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 19 Mar 2013 15:15:18 +0000
+Subject: [PATCH 3/5] qmake: Fix xbuilding win32 plugins
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ qmake/generators/win32/mingw_make.cpp |   10 ++++++++++
+ 1 files changed, 10 insertions(+), 0 deletions(-)
+
+diff --git a/qmake/generators/win32/mingw_make.cpp b/qmake/generators/win32/mingw_make.cpp
+index f7ee7b0..accb6f8 100644
+--- a/qmake/generators/win32/mingw_make.cpp
++++ b/qmake/generators/win32/mingw_make.cpp
+@@ -303,6 +303,12 @@ void MingwMakefileGenerator::init()
+ 	project->values("QMAKE_LFLAGS").append(QString("-Wl,--out-implib,") + project->first("MINGW_IMPORT_LIB"));
+     }
+ 
++    if (project->isActiveConfig("plugin")) {
++        project->values("QMAKE_CFLAGS") += project->values("QMAKE_CFLAGS_PLUGIN");
++        project->values("QMAKE_CXXFLAGS") += project->values("QMAKE_CXXFLAGS_PLUGIN");
++        project->values("QMAKE_LFLAGS") += project->values("QMAKE_LFLAGS_PLUGIN");
++    }
++
+     if(!project->values("DEF_FILE").isEmpty() && project->values("QMAKE_SYMBIAN_SHLIB").isEmpty()) {
+         QString defFileName = fileFixify(project->values("DEF_FILE")).first();
+         project->values("QMAKE_LFLAGS").append(QString("-Wl,") + escapeFilePath(defFileName));
+@@ -342,6 +348,8 @@ void MingwMakefileGenerator::fixTargetExt()
+ {
+     if (project->isActiveConfig("staticlib") && project->first("TEMPLATE") == "lib") {
+         project->values("QMAKE_LFLAGS").append("-static");
++    } else if (project->isActiveConfig("plugin")) {
++        project->values("TARGET_EXT").append(".dll");
+     }
+     Win32MakefileGenerator::fixTargetExt();
+ }
+@@ -418,6 +426,7 @@ void MingwMakefileGenerator::writeObjectsPart(QTextStream &t)
+                 ar_cmd = "ar";
+             createArObjectScriptFile(ar_script_file, var("DEST_TARGET"), project->values("OBJECTS"));
+             objectsLinkLine = ar_cmd + " -M < " + escapeFilePath(ar_script_file);
++            project->values("QMAKE_DISTCLEAN").append(ar_script_file);
+         }
+     } else {
+         QString ld_script_file = var("QMAKE_LINK_OBJECT_SCRIPT") + "." + var("TARGET");
+@@ -430,6 +439,7 @@ void MingwMakefileGenerator::writeObjectsPart(QTextStream &t)
+         } else {
+             createLdObjectScriptFile(ld_script_file, project->values("OBJECTS"));
+             objectsLinkLine = escapeFilePath(ld_script_file);
++            project->values("QMAKE_DISTCLEAN").append(ld_script_file);
+         }
+     }
+     Win32MakefileGenerator::writeObjectsPart(t);
+-- 
+1.7.4.1
+

@@ -1,0 +1,37 @@
+From f5d50f46e8ccb6133ae53583d71c56375ffacdf5 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 18 Jul 2011 20:28:30 +0200
+Subject: [PATCH 003/124] freemheg: Catch divide by zero
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythfreemheg/Variables.h |    7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythfreemheg/Variables.h b/mythtv/libs/libmythfreemheg/Variables.h
+index 544a913..2363b06 100644
+--- a/mythtv/libs/libmythfreemheg/Variables.h
++++ b/mythtv/libs/libmythfreemheg/Variables.h
+@@ -205,14 +205,17 @@ class MHDivide: public MHIntegerAction {
+   public:
+     MHDivide(): MHIntegerAction(":Divide") {}
+   protected:
+-    virtual int DoOp(int arg1, int arg2) { return arg1/arg2; } // What about divide by zero?
++    virtual int DoOp(int arg1, int arg2) {
++        if (arg2 == 0) throw "Divide by 0";
++        return arg1/arg2;
++    }
+ };
+ 
+ class MHModulo: public MHIntegerAction {
+   public:
+     MHModulo(): MHIntegerAction(":Modulo") {}
+   protected:
+-    virtual int DoOp(int arg1, int arg2) { return arg1%arg2; } // What about divide by zero?
++    virtual int DoOp(int arg1, int arg2) { return arg2 ? arg1%arg2 : 0; }
+ };
+ 
+ // Append - 
+-- 
+1.7.9.5
+

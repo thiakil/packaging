@@ -1,0 +1,37 @@
+From d6db7480230dc6e0f674a9a7ba0dc5438664ce32 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 14 Apr 2013 20:33:35 +0100
+Subject: [PATCH 180/285] TV: Prevent the live TV pop-up EPG from nesting and
+ hanging the UI
+
+If the 'start EPG' key (S) is pressed twice quickly right after starting
+live TV then a Myth busy dialog box appears which can't be dismissed.
+
+The problem is caused by attempting to start the pop-up EPG while it is
+already active.
+
+This patch checks if the pop-up is active and ignores the request if it is.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/tv_play.cpp |    4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/tv_play.cpp b/mythtv/libs/libmythtv/tv_play.cpp
+index d831a39..100f0cc 100644
+--- a/mythtv/libs/libmythtv/tv_play.cpp
++++ b/mythtv/libs/libmythtv/tv_play.cpp
+@@ -7728,6 +7728,10 @@ vector<bool> TV::DoSetPauseState(PlayerContext *lctx, const vector<bool> &pause)
+ 
+ void TV::DoEditSchedule(int editType)
+ {
++    // Prevent nesting of the pop-up UI
++    if (ignoreKeyPresses)
++        return;
++
+     if ((editType == kScheduleProgramGuide  && !RunProgramGuidePtr) ||
+         (editType == kScheduleProgramFinder && !RunProgramFinderPtr) ||
+         (editType == kScheduledRecording    && !RunScheduleEditorPtr) ||
+-- 
+1.7.9.5
+

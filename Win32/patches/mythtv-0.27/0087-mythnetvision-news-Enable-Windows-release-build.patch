@@ -1,0 +1,57 @@
+From 625d121da9842a9666530154f42435f54fff36ef Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 31 Jul 2011 11:54:22 +0200
+Subject: [PATCH 087/207] mythnetvision/news: Enable Windows release build
+
+Remove the specific dependency on Qt debug libraries. This allows the
+release build of Qt to link against a release build of these plugins.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../mythnetvision/mythfillnetvision/main.cpp       |    2 +-
+ .../mythnetvision/mythnetvision/mythnetvision.pro  |    2 +-
+ mythplugins/mythnews/mythnews/mythnews.pro         |    2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/mythplugins/mythnetvision/mythfillnetvision/main.cpp b/mythplugins/mythnetvision/mythfillnetvision/main.cpp
+index e98180f..9e00cc6 100644
+--- a/mythplugins/mythnetvision/mythfillnetvision/main.cpp
++++ b/mythplugins/mythnetvision/mythfillnetvision/main.cpp
+@@ -27,7 +27,7 @@ using namespace std;
+ GrabberDownloadThread *gdt = 0;
+ RSSManager *rssMan = 0;
+ 
+-class MPUBLIC MythFillNVCommandLineParser : public MythCommandLineParser
++class MythFillNVCommandLineParser : public MythCommandLineParser
+ {
+   public:
+     MythFillNVCommandLineParser(); 
+diff --git a/mythplugins/mythnetvision/mythnetvision/mythnetvision.pro b/mythplugins/mythnetvision/mythnetvision/mythnetvision.pro
+index b200366..2bdfac5 100644
+--- a/mythplugins/mythnetvision/mythnetvision/mythnetvision.pro
++++ b/mythplugins/mythnetvision/mythnetvision/mythnetvision.pro
+@@ -5,7 +5,7 @@ include ( ../../programs-libs.pro )
+ QT += network sql xml
+ 
+ TEMPLATE = lib
+-CONFIG += plugin thread warn_on debug
++CONFIG += plugin thread warn_on
+ TARGET = mythnetvision
+ target.path = $${LIBDIR}/mythtv/plugins
+ INSTALLS += target
+diff --git a/mythplugins/mythnews/mythnews/mythnews.pro b/mythplugins/mythnews/mythnews/mythnews.pro
+index d2bff02..a9822d0 100644
+--- a/mythplugins/mythnews/mythnews/mythnews.pro
++++ b/mythplugins/mythnews/mythnews/mythnews.pro
+@@ -8,7 +8,7 @@ QT += widgets
+ }
+ 
+ TEMPLATE = lib
+-CONFIG += plugin thread warn_on debug
++CONFIG += plugin thread warn_on
+ TARGET = mythnews
+ target.path = $${LIBDIR}/mythtv/plugins
+ INSTALLS += target
+-- 
+1.7.9.5
+

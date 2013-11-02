@@ -1,0 +1,37 @@
+From 319906941e0d27e66f26303c408e0261e6fada15 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 23 Jun 2013 15:11:29 +0100
+Subject: [PATCH 232/285] BE: SET_VERBOSE message returns current verbosity
+ with empty arg
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythbackend/mainserver.cpp |    8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/programs/mythbackend/mainserver.cpp b/mythtv/programs/mythbackend/mainserver.cpp
+index 245268e..376cd04 100644
+--- a/mythtv/programs/mythbackend/mainserver.cpp
++++ b/mythtv/programs/mythbackend/mainserver.cpp
+@@ -5037,12 +5037,16 @@ void MainServer::HandleSetVerbose(QStringList &slist, PlaybackSock *pbs)
+     int len=newverbose.length();
+     if (len > 12)
+     {
+-        parse_verbose_arg(newverbose.right(len-12));
++        int ret = parse_verbose_arg(newverbose.right(len-12));
+ 
+         VERBOSE(VB_IMPORTANT, QString("Verbose level changed, new level is: %1")
+                                       .arg(verboseString));
+ 
+-        retlist << "OK";
++        retlist << (!ret ? "OK" : "Failed");
++    }
++    else if (len == 11)
++    {
++        retlist << verboseString.trimmed();
+     }
+     else
+     {
+-- 
+1.7.9.5
+

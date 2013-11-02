@@ -1,0 +1,72 @@
+From 27c5b23d42ab003116da67729aa86aea8775b7e2 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 19 Jun 2013 18:31:22 +0100
+Subject: [PATCH 075/227] mythtranscode: Fix the cutlist frame count to match
+ commflag and the cutlist editor
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythtranscode/mpeg2fix.cpp |   13 +++++++++++++
+ mythtv/programs/mythtranscode/mpeg2fix.h   |    1 +
+ 2 files changed, 14 insertions(+)
+
+diff --git a/mythtv/programs/mythtranscode/mpeg2fix.cpp b/mythtv/programs/mythtranscode/mpeg2fix.cpp
+index a3818a2..29ac206 100644
+--- a/mythtv/programs/mythtranscode/mpeg2fix.cpp
++++ b/mythtv/programs/mythtranscode/mpeg2fix.cpp
+@@ -236,6 +236,7 @@ MPEG2fixup::MPEG2fixup(const QString &inf, const QString &outf,
+     mpeg2_malloc_hooks(my_malloc, NULL);
+     header_decoder = mpeg2_init();
+     img_decoder = mpeg2_init();
++    droppedFrames = 0;
+ 
+     av_register_all();
+     av_log_set_callback(my_av_print);
+@@ -1374,6 +1375,7 @@ int MPEG2fixup::GetFrame(AVPacket *pkt)
+                 if (!ProcessVideo(vFrame.last(), header_decoder))
+                     return 0;
+                 framePool.enqueue(vFrame.takeLast());
++                ++droppedFrames;
+                 break;
+ 
+             case AVMEDIA_TYPE_AUDIO:
+@@ -2025,6 +2027,10 @@ int MPEG2fixup::Start()
+ 
+     InitReplex();
+ 
++    // Include initial partial video frames to match Mythcommflag & the cutlist editor
++    frame_count = droppedFrames;
++    LOG(VB_PROCESS, LOG_INFO, QString("Initial frame count: %1").arg(frame_count) );
++
+     while (!file_end)
+     {
+         /* read packet */
+@@ -2180,6 +2186,13 @@ int MPEG2fixup::Start()
+                         delMap.remove(delMap.begin().key());
+                         markedFrameP = curFrame;
+ 
++                        LOG(VB_PROCESS, LOG_INFO, QString("Cut %1 at frame %2, PTS %3 (+%4)")
++                            .arg(new_discard_state ? "begins" : "ends")
++                            .arg(frame_count)
++                            .arg(PtsTime(markedFrameP->pkt.pts))
++                            .arg(PtsTime(markedFrameP->pkt.pts - initPTS))
++                        );
++
+                         if (!new_discard_state)
+                         {
+                             cutEndPTS = markedFrameP->pkt.pts;
+diff --git a/mythtv/programs/mythtranscode/mpeg2fix.h b/mythtv/programs/mythtranscode/mpeg2fix.h
+index 8796803..429505f 100644
+--- a/mythtv/programs/mythtranscode/mpeg2fix.h
++++ b/mythtv/programs/mythtranscode/mpeg2fix.h
+@@ -270,6 +270,7 @@ class MPEG2fixup
+     int framenum;
+     int status_update_time;
+     uint64_t last_written_pos;
++    int droppedFrames;
+ };
+ 
+ #ifdef NO_MYTH
+-- 
+1.7.9.5
+

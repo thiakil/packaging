@@ -1,0 +1,55 @@
+From 4b35800d49b2de70642fb47d0f23fe9b35dd5b4b Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 1 Feb 2012 19:22:12 +0100
+Subject: [PATCH 089/285] mythtranscode: --fifoinfo reports aspect ratio of
+ first uncut frame
+
+This fixes a problem using the --fifoinfo option to report the format
+of a recording.  When using a cutlist the first few frames may be cut
+and the format of the first uncut frame may be different from the first
+physical frame.
+
+This fixes a problem when using nuvexport etc if the recording starts
+in widescreen e.g. for adverts but switches to 4:3 for the feature.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythtranscode/transcode.cpp |   17 ++++++++++++++++-
+ 1 file changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/programs/mythtranscode/transcode.cpp b/mythtv/programs/mythtranscode/transcode.cpp
+index c39809d..9a11437 100755
+--- a/mythtv/programs/mythtranscode/transcode.cpp
++++ b/mythtv/programs/mythtranscode/transcode.cpp
+@@ -745,12 +745,27 @@ int Transcode::TranscodeFile(
+ 
+         audio_codec_name = "raw";
+ 
++        // If cutlist is used then get info on first uncut frame
++        if (honorCutList && fifo_info)
++        {
++            bool is_key;
++            int did_ff;
++            frm_dir_map_t::iterator dm_iter;
++            player->TranscodeGetNextFrame(dm_iter, did_ff, is_key, true);
++
++            QSize buf_size = player->GetVideoBufferSize();
++            video_width = buf_size.width();
++            video_height = buf_size.height();
++            video_aspect = player->GetVideoAspect();
++            video_frame_rate = player->GetFrameRate();
++        }
++
+         // Display details of the format of the fifo data.
+         // Circumvent logging system so that output is independent
+         // of logging level.
+         cout << "FifoVideoWidth "      << video_width              << endl;
+         cout << "FifoVideoHeight "     << video_height             << endl;
+-        cout << "FifoVideoAspectRatio "<< player->GetVideoAspect() << endl;
++        cout << "FifoVideoAspectRatio "<< video_aspect             << endl;
+         cout << "FifoVideoFrameRate "  << video_frame_rate         << endl;
+         cout << "FifoAudioFormat "     << audio_codec_name         << endl;
+         cout << "FifoAudioChannels "   << arb->channels            << endl;
+-- 
+1.7.9.5
+

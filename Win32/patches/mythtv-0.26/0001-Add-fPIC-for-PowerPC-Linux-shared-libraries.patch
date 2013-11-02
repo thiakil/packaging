@@ -1,0 +1,32 @@
+From b6bb84c9e825805b960c03e7077f83b02ac06e4d Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 14 Mar 2011 11:57:28 +0100
+Subject: [PATCH 001/227] Add -fPIC for PowerPC Linux shared libraries
+
+If ./configure is run on a PowerPC Linux system then the -fPIC compiler
+flag is not set for building shared libraries.  This results in runtime
+errors from ld.so when loading those shared objects.
+
+Ticket URL: <http://code.mythtv.org/trac/ticket/9478>
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/configure |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/configure b/mythtv/configure
+index 27958e1..482cbce 100755
+--- a/mythtv/configure
++++ b/mythtv/configure
+@@ -3330,7 +3330,7 @@ check_host_cflags -std=c99
+ check_host_cflags -Wall
+ 
+ case "$arch" in
+-    alpha|ia64|mips|parisc|sparc)
++    alpha|ia64|mips|parisc|sparc|ppc)
+         spic=$shared
+     ;;
+     x86)
+-- 
+1.7.9.5
+

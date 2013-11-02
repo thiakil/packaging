@@ -1,0 +1,35 @@
+From 613e4535c56fa61dc3150e27db3475805af65117 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 14 Mar 2011 12:04:59 +0100
+Subject: [PATCH 004/285] Fix libmythui compilation with disable-X11
+
+If mythtv configure is run with --disable-X11 on a Linux system then
+compilation of libmythui/mythdisplay.cpp fails with an undefined reference
+to OpenMythXDisplay().  This is because Q_WS_X11 is defined by Qmake but
+mythxdisplay.h conditionally defines OpenMythXDisplay() dependent on
+USING_X11.  This patch adds USING_X11 to the conditional in
+mythdisplay.cpp
+
+Ticket URL: <http://code.mythtv.org/trac/ticket/9477>
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythui/mythdisplay.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythui/mythdisplay.cpp b/mythtv/libs/libmythui/mythdisplay.cpp
+index 5de158a..67c285a 100644
+--- a/mythtv/libs/libmythui/mythdisplay.cpp
++++ b/mythtv/libs/libmythui/mythdisplay.cpp
+@@ -77,7 +77,7 @@ DisplayInfo MythDisplay::GetDisplayInfo(void)
+         ret.res    = QSize((uint)width, (uint)height);
+     }
+ 
+-#elif defined (Q_WS_X11)
++#elif defined (Q_WS_X11) && defined USING_X11
+     MythXDisplay *disp = OpenMythXDisplay();
+     if (!disp)
+         return ret;
+-- 
+1.7.9.5
+

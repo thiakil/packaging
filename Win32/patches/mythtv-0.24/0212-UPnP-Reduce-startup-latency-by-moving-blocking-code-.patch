@@ -1,0 +1,94 @@
+From 2ce825ed1e72ffc51d09a54ea70a50afb3c862ad Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 5 Jun 2013 10:52:56 +0100
+Subject: [PATCH 212/285] UPnP: Reduce startup latency by moving blocking code
+ to own thread
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythupnp/ssdp.cpp           |   13 +++++++------
+ mythtv/libs/libmythupnp/upnptasknotify.cpp |    9 ++++++++-
+ mythtv/libs/libmythupnp/upnptasknotify.h   |    4 +++-
+ 3 files changed, 18 insertions(+), 8 deletions(-)
+
+diff --git a/mythtv/libs/libmythupnp/ssdp.cpp b/mythtv/libs/libmythupnp/ssdp.cpp
+index 9ecaa99..3cbbda2 100644
+--- a/mythtv/libs/libmythupnp/ssdp.cpp
++++ b/mythtv/libs/libmythupnp/ssdp.cpp
+@@ -123,17 +123,18 @@ void SSDP::EnableNotifications()
+         // First Send out Notification that we are leaving the network.
+         // ------------------------------------------------------------------
+ 
+-        VERBOSE(VB_UPNP, "SSDP::EnableNotifications() - sending NTS_byebye");
+-        m_pNotifyTask->SetNTS( NTS_byebye );
+-        m_pNotifyTask->Execute( NULL );
++        VERBOSE(VB_UPNP, "SSDP::EnableNotifications() - sending NTS_byebye2");
++        m_pNotifyTask->SetNTS( NTS_byebye2 );
++    }
++    else
++    {
++        VERBOSE(VB_UPNP, "SSDP::EnableNotifications() - sending NTS_alive");
++        m_pNotifyTask->SetNTS( NTS_alive );
+     }
+ 
+     // ------------------------------------------------------------------
+     // Add Announcement Task to the Queue
+     // ------------------------------------------------------------------
+-
+-    VERBOSE(VB_UPNP, "SSDP::EnableNotifications() - sending NTS_alive");
+-    m_pNotifyTask->SetNTS( NTS_alive );
+     UPnp::g_pTaskQueue->AddTask( m_pNotifyTask  );
+     VERBOSE(VB_UPNP, "SSDP::EnableNotifications() - Task added to UPnP queue");
+ }
+diff --git a/mythtv/libs/libmythupnp/upnptasknotify.cpp b/mythtv/libs/libmythupnp/upnptasknotify.cpp
+index 4d4891a..cffda94 100644
+--- a/mythtv/libs/libmythupnp/upnptasknotify.cpp
++++ b/mythtv/libs/libmythupnp/upnptasknotify.cpp
+@@ -135,7 +135,9 @@ void UPnpNotifyTask::SendNotifyMsg( MSocketDevice *pSocket,
+         // ------------------------------------------------------------------
+ 
+         pSocket->writeBlock( scPacket, scPacket.length(), pSocket->address(), pSocket->port() );
+-        usleep( rand() % 250000 );
++        // Only wait if not sending final bybbye.  This speeds up shutdown
++        if (m_eNTS != NTS_byebye)
++            usleep( rand() % 250000 );
+         pSocket->writeBlock( scPacket, scPacket.length(), pSocket->address(), pSocket->port() );
+     }
+     }
+@@ -182,6 +184,11 @@ void UPnpNotifyTask::Execute( TaskQueue *pQueue )
+ 
+     if (m_eNTS == NTS_alive) 
+         pQueue->AddTask( (m_nMaxAge / 2) * 1000, (Task *)this  );
++    else if (m_eNTS == NTS_byebye2)
++    {
++        m_eNTS = NTS_alive;
++        pQueue->AddTask( this );
++    }
+ 
+     m_mutex.unlock();
+ 
+diff --git a/mythtv/libs/libmythupnp/upnptasknotify.h b/mythtv/libs/libmythupnp/upnptasknotify.h
+index 51c0b98..3310f2f 100644
+--- a/mythtv/libs/libmythupnp/upnptasknotify.h
++++ b/mythtv/libs/libmythupnp/upnptasknotify.h
+@@ -47,7 +47,8 @@
+ typedef enum 
+ {
+     NTS_alive   = 0,
+-    NTS_byebye  = 1
++    NTS_byebye  = 1,
++    NTS_byebye2
+ 
+ } UPnpNotifyNTS;
+ 
+@@ -99,6 +100,7 @@ class UPnpNotifyTask : public Task
+             {  
+                 case NTS_alive : return( "ssdp:alive"  );
+                 case NTS_byebye: return( "ssdp:byebye" );
++                case NTS_byebye2: return( "ssdp:byebye" );
+             }
+             return( "unknown" );
+         }
+-- 
+1.7.9.5
+

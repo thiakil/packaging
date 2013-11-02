@@ -1,0 +1,32 @@
+From c8876733ffbce3797781c2d426f965404e9f515d Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 14 Mar 2012 09:44:54 +0100
+Subject: [PATCH 099/285] Profile build on Windows and MacOSX don't require Qt
+ debug libs
+
+At present profile builds pull in debug builds of Qt.  This
+causes link errors on Windows and MacOSX unless the debug libs
+are available.  This patch removes debug from CONFIG on these
+platforms.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/settings.pro |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/settings.pro b/mythtv/settings.pro
+index f0d25a8..a9b7ab4 100644
+--- a/mythtv/settings.pro
++++ b/mythtv/settings.pro
+@@ -110,7 +110,7 @@ macx: QMAKE_CFLAGS_STATIC_LIB += -fno-common
+ QMAKE_CFLAGS   += $$CPPFLAGS   $$CFLAGS
+ QMAKE_CXXFLAGS += $$CXXPPFLAGS $$ECXXFLAGS
+ 
+-profile:CONFIG += debug
++profile:!win32:!macx:CONFIG += debug
+ 
+ QMAKE_CXXFLAGS += $$CONFIG_DIRECTFB_CXXFLAGS
+ 
+-- 
+1.7.9.5
+

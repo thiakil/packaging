@@ -1,0 +1,352 @@
+From 2941b086be6a7fe6d0bd4fc395389766e556ba78 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 2 Oct 2011 14:36:50 +0200
+Subject: [PATCH 040/124] freemheg: Support bitmap backgrounds used by
+ BBC/Freesat
+
+Add support for bitmaps with a content hook of type 5 which are
+transmitted by the BBC on FreeSat & FreeView.
+
+Type 5 bitmaps are identical to type 2, an MPEG I-frame, but are intended
+to be used as a background onto which the MHEG content and video are rendered.
+
+At present when using the BBC 'Red button' service the background is all
+black, missing the background image and red/green/yellow key legend
+present on all other STB implementations.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythfreemheg/Bitmap.cpp |   30 ++++-----
+ mythtv/libs/libmythfreemheg/freemheg.h |    2 +-
+ mythtv/libs/libmythtv/mhi.cpp          |  114 +++++++++++++++++++++-----------
+ mythtv/libs/libmythtv/mhi.h            |    9 +--
+ 4 files changed, 93 insertions(+), 62 deletions(-)
+
+diff --git a/mythtv/libs/libmythfreemheg/Bitmap.cpp b/mythtv/libs/libmythfreemheg/Bitmap.cpp
+index 522175d..b6ee0d9 100644
+--- a/mythtv/libs/libmythfreemheg/Bitmap.cpp
++++ b/mythtv/libs/libmythfreemheg/Bitmap.cpp
+@@ -157,25 +157,19 @@ void MHBitmap::CreateContent(const unsigned char *data, int length, MHEngine *en
+         nCHook = engine->GetDefaultBitmapCHook();
+     }
+ 
+-    // TODO: What if we can't convert it?
+-    if (nCHook == 4)   // PNG.
++    switch (nCHook)
+     {
++    case 4: // PNG.
+         m_pContent->CreateFromPNG(data, length);
+-    }
+-    // CHook 5 seems to be used by the BBC on Freesat for an MPEG I-frame for the
+-    // background but enabling it here results in it overlaying the video.
+-    // Presumably it is not simply the same as CHook 2.
+-    else if (nCHook == 2 /* ||nCHook == 5 */)   // MPEG I-frame.
+-    {
++        break;
++    case 2: // MPEG I-frame.
++    case 5: // BBC/Freesat MPEG I-frame background
+         m_pContent->CreateFromMPEG(data, length);
+-    }
+-    else if (nCHook == 6) // JPEG ISO/IEC 10918-1, JFIF file
+-    {
++        break;
++    case 6: // JPEG ISO/IEC 10918-1, JFIF file
+         m_pContent->CreateFromJPEG(data, length);
+-    }
+-    else
+-    {
+-        // 1,3,5,8 are reserved. 7= H.264 Intra Frame
++        break;
++    default: // 1,3,5,8 are reserved. 7= H.264 Intra Frame
+         MHERROR(QString("Unknown bitmap content hook %1").arg(nCHook));
+     }
+ 
+@@ -236,7 +230,8 @@ void MHBitmap::Display(MHEngine *)
+     }
+ 
+     m_pContent->Draw(m_nPosX + m_nXDecodeOffset, m_nPosY + m_nYDecodeOffset,
+-                     QRect(m_nPosX, m_nPosY, m_nBoxWidth, m_nBoxHeight), m_fTiling);
++            QRect(m_nPosX, m_nPosY, m_nBoxWidth, m_nBoxHeight), m_fTiling,
++            m_nContentHook == 5); // 'under video' if BBC MPEG I-frame background
+ }
+ 
+ // Return the region drawn by the bitmap.
+@@ -260,7 +255,8 @@ QRegion MHBitmap::GetVisibleArea()
+ QRegion MHBitmap::GetOpaqueArea()
+ {
+     // The area is empty unless the bitmap is opaque.
+-    if (! m_fRunning || m_pContent == NULL || ! m_pContent->IsOpaque())
++    // and it's not a BBC MPEG I-frame background
++    if (! m_fRunning || m_nContentHook == 5 || m_pContent == NULL || ! m_pContent->IsOpaque())
+     {
+         return QRegion();
+     }
+diff --git a/mythtv/libs/libmythfreemheg/freemheg.h b/mythtv/libs/libmythfreemheg/freemheg.h
+index 8a9a983..97bf11b 100644
+--- a/mythtv/libs/libmythfreemheg/freemheg.h
++++ b/mythtv/libs/libmythfreemheg/freemheg.h
+@@ -209,7 +209,7 @@ class MHBitmapDisplay
+     // Draw the completed drawing onto the display.  x and y give the position of the image
+     // relative to the screen.  rect gives the bounding box for the image, again relative to
+     // the screen.
+-    virtual void Draw(int x, int y, QRect rect, bool tiled) = 0;
++    virtual void Draw(int x, int y, QRect rect, bool tiled, bool bUnder) = 0;
+     // Creation functions
+     virtual void CreateFromPNG(const unsigned char *data, int length) = 0;
+     virtual void CreateFromMPEG(const unsigned char *data, int length) = 0;
+diff --git a/mythtv/libs/libmythtv/mhi.cpp b/mythtv/libs/libmythtv/mhi.cpp
+index 7d4da2b..f6d1c76 100644
+--- a/mythtv/libs/libmythtv/mhi.cpp
++++ b/mythtv/libs/libmythtv/mhi.cpp
+@@ -47,6 +47,7 @@ class MHIImageData
+     QImage m_image;
+     int    m_x;
+     int    m_y;
++    bool   m_bUnder;
+ };
+ 
+ // Special value for the NetworkBootInfo version.  Real values are a byte.
+@@ -131,6 +132,7 @@ void MHIContext::ClearDisplay(void)
+     for (; it != m_display.end(); ++it)
+         delete *it;
+     m_display.clear();
++    m_videoDisplayRect = QRect();
+ }
+ 
+ void MHIContext::ClearQueue(void)
+@@ -583,10 +585,50 @@ void MHIContext::UpdateOSD(InteractiveScreen *osdWindow,
+         return;
+ 
+     QMutexLocker locker(&m_display_lock);
++
++    // In MHEG the video is just another item in the display stack
++    // but when we create the OSD we overlay everything over the video.
++    // We need to cut out anything belowthe video on the display stack
++    // to leave the video area clear.
++    list<MHIImageData*>::iterator it = m_display.begin();
++    for (; it != m_display.end(); ++it)
++    {
++        MHIImageData *data = *it;
++        if (!data->m_bUnder)
++            continue;
++
++        QRect imageRect(data->m_x, data->m_y,
++                        data->m_image.width(), data->m_image.height());
++        if (!m_videoDisplayRect.intersects(imageRect))
++            continue;
++
++        // Replace this item with a set of cut-outs.
++        it = m_display.erase(it);
++
++        QVector<QRect> rects =
++            (QRegion(imageRect) - QRegion(m_videoDisplayRect)).rects();
++        for (uint j = 0; j < (uint)rects.size(); j++)
++        {
++            QRect &rect = rects[j];
++            QImage image =
++                data->m_image.copy(rect.x()-data->m_x, rect.y()-data->m_y,
++                                   rect.width(), rect.height());
++            MHIImageData *newData = new MHIImageData;
++            newData->m_image = image;
++            newData->m_x = rect.x();
++            newData->m_y = rect.y();
++            newData->m_bUnder = true;
++            it = m_display.insert(it, newData);
++            ++it;
++        }
++        --it;
++        delete data;
++    }
++
+     m_updated = false;
+     osdWindow->DeleteAllChildren();
+     // Copy all the display items into the display.
+-    list<MHIImageData*>::iterator it = m_display.begin();
++    it = m_display.begin();
+     for (int count = 0; it != m_display.end(); ++it, count++)
+     {
+         MHIImageData *data = *it;
+@@ -629,7 +671,7 @@ void MHIContext::RequireRedraw(const QRegion &)
+     m_updated = true;
+ }
+ 
+-void MHIContext::AddToDisplay(const QImage &image, int x, int y)
++void MHIContext::AddToDisplay(const QImage &image, int x, int y, bool bUnder /*=false*/)
+ {
+     MHIImageData *data = new MHIImageData;
+     int dispx = x + m_displayRect.left();
+@@ -638,14 +680,29 @@ void MHIContext::AddToDisplay(const QImage &image, int x, int y)
+     data->m_image = image;
+     data->m_x = dispx;
+     data->m_y = dispy;
++    data->m_bUnder = bUnder;
+     QMutexLocker locker(&m_display_lock);
+-    m_display.push_back(data);
++    if (!bUnder)
++        m_display.push_back(data);
++    else
++    {
++        // Replace any existing items under the video with this
++        list<MHIImageData*>::iterator it = m_display.begin();
++        while (it != m_display.end())
++        {
++            MHIImageData *old = *it;
++            if (!old->m_bUnder)
++                ++it;
++            else
++            {
++                it = m_display.erase(it);
++                delete old;
++            }
++        }
++        m_display.push_front(data);
++    }
+ }
+ 
+-// In MHEG the video is just another item in the display stack
+-// but when we create the OSD we overlay everything over the video.
+-// We need to cut out anything belowthe video on the display stack
+-// to leave the video area clear.
+ // The videoRect gives the size and position to which the video must be scaled.
+ // The displayRect gives the rectangle reserved for the video.
+ // e.g. part of the video may be clipped within the displayRect.
+@@ -665,40 +722,17 @@ void MHIContext::DrawVideo(const QRect &videoRect, const QRect &dispRect)
+         }
+     }
+ 
+-    QMutexLocker locker(&m_display_lock);
+-    QRect displayRect(SCALED_X(dispRect.x()),
++    m_videoDisplayRect = QRect(SCALED_X(dispRect.x()),
+                       SCALED_Y(dispRect.y()),
+                       SCALED_X(dispRect.width()),
+                       SCALED_Y(dispRect.height()));
+ 
++    // Mark all existing items in the display stack as under the video
++    QMutexLocker locker(&m_display_lock);
+     list<MHIImageData*>::iterator it = m_display.begin();
+     for (; it != m_display.end(); ++it)
+     {
+-        MHIImageData *data = *it;
+-        QRect imageRect(data->m_x, data->m_y,
+-                        data->m_image.width(), data->m_image.height());
+-        if (displayRect.intersects(imageRect))
+-        {
+-            // Replace this item with a set of cut-outs.
+-            it = m_display.erase(it);
+-
+-            QVector<QRect> rects =
+-                (QRegion(imageRect) - QRegion(displayRect)).rects();
+-            for (uint j = 0; j < (uint)rects.size(); j++)
+-            {
+-                QRect &rect = rects[j];
+-                QImage image =
+-                    data->m_image.copy(rect.x()-data->m_x, rect.y()-data->m_y,
+-                                       rect.width(), rect.height());
+-                MHIImageData *newData = new MHIImageData;
+-                newData->m_image = image;
+-                newData->m_x = rect.x();
+-                newData->m_y = rect.y();
+-                m_display.insert(it, newData);
+-                ++it;
+-            }
+-            delete data;
+-        }
++        (*it)->m_bUnder = true;
+     }
+ }
+ 
+@@ -1020,7 +1054,7 @@ void MHIContext::DrawRect(int xPos, int yPos, int width, int height,
+ // and usually that will be the same as the origin of the bounding
+ // box (clipRect).
+ void MHIContext::DrawImage(int x, int y, const QRect &clipRect,
+-                           const QImage &qImage, bool bScaled /* = false */)
++                           const QImage &qImage, bool bScaled, bool bUnder)
+ {
+     if (qImage.isNull())
+         return;
+@@ -1037,7 +1071,7 @@ void MHIContext::DrawImage(int x, int y, const QRect &clipRect,
+                 Qt::IgnoreAspectRatio,
+                 Qt::SmoothTransformation);
+         AddToDisplay(q_scaled.convertToFormat(QImage::Format_ARGB32),
+-                     SCALED_X(x), SCALED_Y(y));
++                     SCALED_X(x), SCALED_Y(y), bUnder);
+     }
+     else if (!displayRect.isEmpty())
+     { // We must clip the image.
+@@ -1051,7 +1085,7 @@ void MHIContext::DrawImage(int x, int y, const QRect &clipRect,
+                 Qt::SmoothTransformation);
+         AddToDisplay(q_scaled,
+                      SCALED_X(displayRect.x()),
+-                     SCALED_Y(displayRect.y()));
++                     SCALED_Y(displayRect.y()), bUnder);
+     }
+     // Otherwise draw nothing.
+ }
+@@ -1628,7 +1662,7 @@ void MHIDLA::DrawPoly(bool isFilled, int nPoints, const int *xArray, const int *
+ }
+ 
+ 
+-void MHIBitmap::Draw(int x, int y, QRect rect, bool tiled)
++void MHIBitmap::Draw(int x, int y, QRect rect, bool tiled, bool bUnder)
+ {
+     if (tiled)
+     {
+@@ -1646,12 +1680,12 @@ void MHIBitmap::Draw(int x, int y, QRect rect, bool tiled)
+                 tiledImage.setPixel(i, j, m_image.pixel(i % m_image.width(), j % m_image.height()));
+             }
+         }
+-        m_parent->DrawImage(rect.x(), rect.y(), rect, tiledImage, true);
++        m_parent->DrawImage(rect.x(), rect.y(), rect, tiledImage, true, bUnder);
+     }
+     else
+     {
+         // NB THe BBC expects bitmaps to be scaled, not clipped
+-        m_parent->DrawImage(x, y, rect, m_image, true);
++        m_parent->DrawImage(x, y, rect, m_image, true, bUnder);
+     }
+ }
+ 
+diff --git a/mythtv/libs/libmythtv/mhi.h b/mythtv/libs/libmythtv/mhi.h
+index e54023b..acb25b5 100644
+--- a/mythtv/libs/libmythtv/mhi.h
++++ b/mythtv/libs/libmythtv/mhi.h
+@@ -100,7 +100,8 @@ class MHIContext : public MHContext, public QRunnable
+     virtual void DrawBackground(const QRegion &reg);
+     virtual void DrawVideo(const QRect &videoRect, const QRect &displayRect);
+ 
+-    void DrawImage(int x, int y, const QRect &rect, const QImage &image, bool bScaled = false);
++    void DrawImage(int x, int y, const QRect &rect, const QImage &image,
++        bool bScaled = false, bool bUnder = false);
+ 
+     virtual int GetChannelIndex(const QString &str);
+     /// Get netId etc from the channel index.
+@@ -142,7 +143,7 @@ class MHIContext : public MHContext, public QRunnable
+ 
+     // Operations used by the display classes
+     // Add an item to the display vector
+-    void AddToDisplay(const QImage &image, int x, int y);
++    void AddToDisplay(const QImage &image, int x, int y, bool bUnder = false);
+ 
+     FT_Face GetFontFace(void) { return m_face; }
+     bool IsFaceLoaded(void) { return m_face_loaded; }
+@@ -205,7 +206,7 @@ class MHIContext : public MHContext, public QRunnable
+     uint             m_lastNbiVersion;
+     vector<unsigned char> m_nbiData;
+ 
+-    QRect            m_videoRect;
++    QRect            m_videoRect, m_videoDisplayRect;
+     QRect            m_displayRect;
+ };
+ 
+@@ -261,7 +262,7 @@ class MHIBitmap : public MHBitmapDisplay
+      *  \param y     Vertical position of the image relative to the screen.
+      *  \param rect  Bounding box for the image relative to the screen.
+      */
+-    virtual void Draw(int x, int y, QRect rect, bool tiled);
++    virtual void Draw(int x, int y, QRect rect, bool tiled, bool bUnder);
+ 
+     /// Scale the bitmap.  Only used for image derived from MPEG I-frames.
+     virtual void ScaleImage(int newWidth, int newHeight);
+-- 
+1.7.9.5
+

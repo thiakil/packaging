@@ -1,0 +1,91 @@
+From 189db50002607268461b81cf02d2c5b9dd3ec389 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 14 Jul 2013 18:17:50 +0100
+Subject: [PATCH 259/285] Ffmpeg: Fix some simple compiler warnings
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/external/FFmpeg/libavfilter/defaults.c |    2 +-
+ mythtv/external/FFmpeg/libavformat/mpegts.c   |   11 +++++------
+ 2 files changed, 6 insertions(+), 7 deletions(-)
+
+diff --git a/mythtv/external/FFmpeg/libavfilter/defaults.c b/mythtv/external/FFmpeg/libavfilter/defaults.c
+index 19559b1..9bcb051 100644
+--- a/mythtv/external/FFmpeg/libavfilter/defaults.c
++++ b/mythtv/external/FFmpeg/libavfilter/defaults.c
+@@ -87,7 +87,7 @@ AVFilterBufferRef *avfilter_default_get_audio_buffer(AVFilterLink *link, int per
+     AVFilterBuffer *samples = av_mallocz(sizeof(AVFilterBuffer));
+     AVFilterBufferRef *ref = NULL;
+     int i, sample_size, chans_nb, bufsize, per_channel_size, step_size = 0;
+-    char *buf;
++    char *buf = NULL;
+ 
+     if (!samples || !(ref = av_mallocz(sizeof(AVFilterBufferRef))))
+         goto fail;
+diff --git a/mythtv/external/FFmpeg/libavformat/mpegts.c b/mythtv/external/FFmpeg/libavformat/mpegts.c
+index f8c3a8e..c5f2aca 100644
+--- a/mythtv/external/FFmpeg/libavformat/mpegts.c
++++ b/mythtv/external/FFmpeg/libavformat/mpegts.c
+@@ -563,6 +563,7 @@ static inline int get16(const uint8_t **pp, const uint8_t *p_end)
+     return c;
+ }
+ 
++#if 0
+ /* read and allocate a DVB string preceeded by its length */
+ static char *getstr8(const uint8_t **pp, const uint8_t *p_end)
+ {
+@@ -585,6 +586,7 @@ static char *getstr8(const uint8_t **pp, const uint8_t *p_end)
+     *pp = p;
+     return str;
+ }
++#endif
+ 
+ static int parse_section_header(SectionHeader *h,
+                                 const uint8_t **pp, const uint8_t *p_end)
+@@ -1130,8 +1132,6 @@ static void pmt_cb(MpegTSFilter *filter, const uint8_t *section, int section_len
+ 
+     int last_item = 0;
+     int desc_count = 0;
+-    int streams_changed = 0;
+-    PESContext *pes;
+     const uint8_t *p, *p_end, *desc_list_end, *desc_end;
+     int program_info_length, pcr_pid, pid, stream_type;
+     int desc_list_len, desc_len, desc_tag;
+@@ -1377,7 +1377,7 @@ static void pmt_cb(MpegTSFilter *filter, const uint8_t *section, int section_len
+             mpegts_add_stream(ts, h->id, &items[idx], prog_reg_desc, pcr_pid);
+ 
+         /* cache pmt */
+-        void *tmp0 = avctx->cur_pmt_sect;
++        void *tmp0 = (void*)avctx->cur_pmt_sect;
+         void *tmp1 = av_malloc(section_len);
+         memcpy(tmp1, section, section_len);
+         avctx->cur_pmt_sect = (uint8_t*) tmp1;
+@@ -1594,7 +1594,7 @@ static void mpegts_add_stream(MpegTSContext *ts, int id, pmt_entry_t* item,
+             ts->pid_cnt++;
+ 
+             av_log(NULL, AV_LOG_DEBUG, "mpegts_add_stream: "
+-                   "stream #%d, has id 0x%x and codec %s, type %s at 0x%x\n",
++                   "stream #%d, has id 0x%x and codec %s, type %s at %p\n",
+                    st->index, st->id, ff_codec_id_string(st->codec->codec_id),
+                    ff_codec_type_string(st->codec->codec_type), st);
+         } else {
+@@ -1656,7 +1656,7 @@ static void mpegts_add_stream(MpegTSContext *ts, int id, pmt_entry_t* item,
+             st->component_tag = item->dvbci.component_tag;
+ 
+             av_log(NULL, AV_LOG_DEBUG, "mpegts_add_stream: "
+-                   "stream #%d, has id 0x%x and codec %s, type %s at 0x%x\n",
++                   "stream #%d, has id 0x%x and codec %s, type %s at %p\n",
+                    st->index, st->id, ff_codec_id_string(st->codec->codec_id),
+                    ff_codec_type_string(st->codec->codec_type), st);
+         }
+@@ -1697,7 +1697,6 @@ static void pat_cb(MpegTSFilter *filter, const uint8_t *section, int section_len
+     MpegTSContext *ts = filter->u.section_filter.opaque;
+     SectionHeader h1, *h = &h1;
+     const uint8_t *p, *p_end;
+-    int sid, pmt_pid;
+     char buf[256];
+ 
+     int pmt_pnums[PAT_MAX_PMT];
+-- 
+1.7.9.5
+

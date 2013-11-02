@@ -1,0 +1,270 @@
+From b14dc505153eee75c1b4ddde7d966141995f6065 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 14 Mar 2011 15:07:41 +0100
+Subject: [PATCH 024/124] Fix SEGV faults in mythfrontend during backend
+ selection
+
+Fix several segv faults and logic problems with mythfrontend during backend
+configuration either after a fresh install or by specifying the -p option.
+
+1 Can't select Manual dbase configuration with -p option[[BR]]
+2 Can't Cancel[[BR]]
+3 Segv after selecting Save on win32[[BR]]
+4 Segv in ShowOkPopup due to stale static data[[BR]]
+5 Segv in MythScreenStack::PopScreen due to null pointer
+
+All apart from 1 are reproducible on both Linux & Windows.  The exception
+is the seg fault when you select Save caused by a NULL m_XML in
+BackendSelection::Accept
+
+1. Start "mythfrontend -p", select language, tab to Manual and click. If
+ your setup conforms to defaults you'll go to the root menu.  If you have
+ anything unusual you'll get a dialog - Cannot login.
+2. Start "mythfrontend -p", select language, tab to cancel and click, same
+ result as 1.
+3. Win32 only: Start "mythfrontend -p", select language, tab to Save and
+ click - SEGV
+4. Start "mythfrontend -p", select language, tab to cancel and click -
+ Cannot login. Click cancel again - SEGV
+
+Ticket URL: <http://code.mythtv.org/trac/ticket/9654>
+---
+ mythtv/libs/libmyth/backendselect.cpp    |   35 ++++++++++++++----------------
+ mythtv/libs/libmyth/backendselect.h      |    5 +++--
+ mythtv/libs/libmyth/mythcontext.cpp      |   33 ++++++++++++++++++++--------
+ mythtv/libs/libmythui/mythdialogbox.cpp  |   28 ++++++++++--------------
+ mythtv/libs/libmythui/mythmainwindow.cpp |    5 ++++-
+ 5 files changed, 59 insertions(+), 47 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/backendselect.cpp b/mythtv/libs/libmyth/backendselect.cpp
+index 0b2240b..e707ed5 100644
+--- a/mythtv/libs/libmyth/backendselect.cpp
++++ b/mythtv/libs/libmyth/backendselect.cpp
+@@ -37,16 +37,17 @@ BackendSelection::~BackendSelection()
+     m_devices.clear();
+ }
+ 
+-bool BackendSelection::m_backendChanged = false;
++BackendSelection::EAction BackendSelection::m_backendChanged;
+ 
+-bool BackendSelection::prompt(DatabaseParams *dbParams,
+-                              Configuration  *pConfig)
++BackendSelection::EAction
++BackendSelection::prompt(DatabaseParams *dbParams,
++                              Configuration *pConfig)
+ {
+-    m_backendChanged = false;
++    m_backendChanged = kCancel;
+ 
+     MythScreenStack *mainStack = GetMythMainWindow()->GetMainStack();
+     if (!mainStack)
+-        return false;
++        return kCancel;
+ 
+     BackendSelection *backendSettings = new BackendSelection(mainStack,
+                                                              dbParams,
+@@ -94,32 +95,26 @@ void BackendSelection::Accept(MythUIButtonListItem *item)
+     if (!item)
+         return;
+ 
+-    DeviceLocation *dev = qVariantValue<DeviceLocation *>(item->GetData());
+-
+-    if (!dev)
+-        Close();
+-
+-    if (ConnectBackend(dev))  // this does a Release()
++    if (m_pConfig)
+     {
+-        if (m_pConfig)
++        DeviceLocation *dev = qVariantValue<DeviceLocation *>(item->GetData());
++
++        if (dev && ConnectBackend(dev))  // this does a Release()
+         {
+             if (m_pinCode.length())
+                 m_pConfig->SetValue(kDefaultPIN, m_pinCode);
+             m_pConfig->SetValue(kDefaultUSN, m_USN);
+             m_pConfig->Save();
+         }
+-        Close();
+     }
++
++    m_backendChanged = kSave;
++    Close();
+ }
+ 
+ void BackendSelection::Accept(void)
+ {
+-    MythUIButtonListItem *item = m_backendList->GetItemCurrent();
+-
+-    if (!item)
+-        return;
+-
+-    Accept(item);
++    Accept(m_backendList->GetItemCurrent());
+ }
+ 
+ 
+@@ -233,6 +228,7 @@ bool BackendSelection::ConnectBackend(DeviceLocation *dev)
+ 
+ void BackendSelection::Cancel()
+ {
++    m_backendChanged = kCancel;
+     Close();
+ }
+ 
+@@ -259,6 +255,7 @@ void BackendSelection::Init(void)
+ 
+ void BackendSelection::Manual(void)
+ {
++    m_backendChanged = kManual;
+     Close();
+ }
+ 
+diff --git a/mythtv/libs/libmyth/backendselect.h b/mythtv/libs/libmyth/backendselect.h
+index 560622c..034b17f 100644
+--- a/mythtv/libs/libmyth/backendselect.h
++++ b/mythtv/libs/libmyth/backendselect.h
+@@ -44,7 +44,8 @@ class BackendSelection : public MythScreenType
+     bool Create(void);
+     void customEvent(QEvent *event);
+ 
+-    static bool prompt(DatabaseParams *dbParams, Configuration *pConfig);
++    enum EAction { kCancel, kSave, kManual };
++    static EAction prompt(DatabaseParams *dbParams, Configuration *pConfig);
+ 
+   signals:
+ //    void
+@@ -81,7 +82,7 @@ class BackendSelection : public MythScreenType
+ 
+     QMutex  m_mutex;
+ 
+-    static bool m_backendChanged;
++    static EAction m_backendChanged;
+ };
+ 
+ Q_DECLARE_METATYPE(DeviceLocation*)
+diff --git a/mythtv/libs/libmyth/mythcontext.cpp b/mythtv/libs/libmyth/mythcontext.cpp
+index 58168eb..0b8f1dc 100644
+--- a/mythtv/libs/libmyth/mythcontext.cpp
++++ b/mythtv/libs/libmyth/mythcontext.cpp
+@@ -389,6 +389,7 @@ bool MythContextPrivate::FindDatabase(const bool prompt, const bool noPrompt)
+         switch (ChooseBackend(QString::null))
+         {
+             case -1:    // User asked to configure database manually
++                manualSelect = false;
+                 if (PromptForDatabaseParams(""))
+                     break;
+                 else
+@@ -412,15 +413,23 @@ bool MythContextPrivate::FindDatabase(const bool prompt, const bool noPrompt)
+     while (!failure.isEmpty())
+     {
+         LOG(VB_GENERAL, LOG_ALERT, failure);
+-        if (( manualSelect && ChooseBackend(failure)) ||
+-            (!manualSelect && PromptForDatabaseParams(failure)))
++        if (manualSelect) switch (ChooseBackend(failure))
+         {
+-            failure = TestDBconnection();
+-            if (failure.length())
+-                LOG(VB_GENERAL, LOG_ALERT, failure);
+-        }
+-        else
++        case -1: // User asked to configure database manually
++            manualSelect = false;
++            continue;
++        case 1: // User selected a backend
++            break;
++        case 0:   // User cancelled. Exit application
++        default:
+             goto NoDBfound;
++        }
++        else if (!PromptForDatabaseParams(failure))
++            goto NoDBfound;   // User cancelled - changed their mind?
++
++        failure = TestDBconnection();
++        if (failure.length())
++            LOG(VB_GENERAL, LOG_ALERT, failure);
+     }
+ 
+ DBfound:
+@@ -698,11 +707,17 @@ int MythContextPrivate::ChooseBackend(const QString &error)
+ 
+     LOG(VB_GENERAL, LOG_INFO, "Putting up the UPnP backend chooser");
+ 
+-    BackendSelection::prompt(&m_DBparams, m_pConfig);
++    int ret;
++    switch (BackendSelection::prompt(&m_DBparams, m_pConfig))
++    {
++    case BackendSelection::kCancel: ret = 0; break;
++    case BackendSelection::kSave:   ret = 1; break;
++    case BackendSelection::kManual: ret = -1; break;
++    }
+ 
+     EndTempWindow();
+ 
+-    return 1;
++    return ret;
+ }
+ 
+ /**
+diff --git a/mythtv/libs/libmythui/mythdialogbox.cpp b/mythtv/libs/libmythui/mythdialogbox.cpp
+index 625aa1e..b8463ae 100644
+--- a/mythtv/libs/libmythui/mythdialogbox.cpp
++++ b/mythtv/libs/libmythui/mythdialogbox.cpp
+@@ -575,25 +575,21 @@ MythConfirmationDialog  *ShowOkPopup(const QString &message, QObject *parent,
+     MythConfirmationDialog  *pop;
+     MythScreenStack         *stk = NULL;
+ 
++    MythMainWindow *win = GetMythMainWindow();
+ 
+-    if (!stk)
++    if (win)
++        stk = win->GetStack("popup stack");
++    else
+     {
+-        MythMainWindow *win = GetMythMainWindow();
+-
+-        if (win)
+-            stk = win->GetStack("popup stack");
+-        else
+-        {
+-            LOG(VB_GENERAL, LOG_ERR, LOC + "no main window?");
+-            return NULL;
+-        }
++        LOG(VB_GENERAL, LOG_ERR, LOC + "no main window?");
++        return NULL;
++    }
+ 
+-        if (!stk)
+-        {
+-            LOG(VB_GENERAL, LOG_ERR, LOC + "no popup stack? "
+-                                           "Is there a MythThemeBase?");
+-            return NULL;
+-        }
++    if (!stk)
++    {
++        LOG(VB_GENERAL, LOG_ERR, LOC + "no popup stack? "
++                                       "Is there a MythThemeBase?");
++        return NULL;
+     }
+ 
+     pop = new MythConfirmationDialog(stk, message, showCancel);
+diff --git a/mythtv/libs/libmythui/mythmainwindow.cpp b/mythtv/libs/libmythui/mythmainwindow.cpp
+index d93e348..223ace1 100644
+--- a/mythtv/libs/libmythui/mythmainwindow.cpp
++++ b/mythtv/libs/libmythui/mythmainwindow.cpp
+@@ -633,8 +633,11 @@ void MythMainWindow::AddScreenStack(MythScreenStack *stack, bool main)
+ 
+ void MythMainWindow::PopScreenStack()
+ {
+-    delete d->stackList.back();
++    MythScreenStack *stack = d->stackList.back();
+     d->stackList.pop_back();
++    if (stack == d->mainStack)
++        d->mainStack = NULL;
++    delete stack;
+ }
+ 
+ int MythMainWindow::GetStackCount(void)
+-- 
+1.7.9.5
+

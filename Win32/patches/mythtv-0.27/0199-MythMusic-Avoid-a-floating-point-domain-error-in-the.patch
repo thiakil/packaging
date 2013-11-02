@@ -1,0 +1,39 @@
+From 8a1edea5888ba45457e6f31151dc11633c1656c9 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 7 Oct 2013 15:15:44 +0100
+Subject: [PATCH 199/207] MythMusic: Avoid a floating point domain error in
+ the spectrum visualiser
+
+- Avoid taking the log of 0
+
+This change avoids the 'sticky bars' sometimes seen with the spectrum
+and squares visualisers.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/mythmusic/mythmusic/visualize.cpp |    9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/mythplugins/mythmusic/mythmusic/visualize.cpp b/mythplugins/mythmusic/mythmusic/visualize.cpp
+index 1838f55..815aae2 100644
+--- a/mythplugins/mythmusic/mythmusic/visualize.cpp
++++ b/mythplugins/mythmusic/mythmusic/visualize.cpp
+@@ -697,10 +697,11 @@ bool Spectrum::process(VisualNode *node)
+ 
+     for (i = 0; (int)i < rects.size(); i++, w += analyzerBarWidth)
+     {
+-        magL = (log(sq(real(lout[index])) + sq(real(lout[FFTW_N - index]))) - 22.0) *
+-               scaleFactor;
+-        magR = (log(sq(real(rout[index])) + sq(real(rout[FFTW_N - index]))) - 22.0) *
+-               scaleFactor;
++        tmp = sq(real(lout[index])) + sq(real(lout[FFTW_N - index]));
++        magL = (tmp > 1.) ? (log(tmp) - 22.0) * scaleFactor : 0.;
++
++        tmp = sq(real(rout[index])) + sq(real(rout[FFTW_N - index]));
++        magR = (tmp > 1.) ? (log(tmp) - 22.0) * scaleFactor : 0.;
+ 
+         if (magL > size.height() / 2)
+         {
+-- 
+1.7.9.5
+

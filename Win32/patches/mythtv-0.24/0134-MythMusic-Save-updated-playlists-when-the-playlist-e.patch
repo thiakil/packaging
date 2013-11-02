@@ -1,0 +1,32 @@
+From f86585264ccfaa088697251d9af44a0641910ab2 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 26 Jun 2012 16:05:15 +0200
+Subject: [PATCH 134/285] MythMusic: Save updated playlists when the playlist
+ editor is closed
+
+This patch saves any changed playlists when the playlist editor is closed.
+At present the playlists are only saved when MythTV exits normally, which
+can cause data loss if MythTV abnormally exits.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/mythmusic/mythmusic/main.cpp |    3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/mythplugins/mythmusic/mythmusic/main.cpp b/mythplugins/mythmusic/mythmusic/main.cpp
+index f1359d2..51e2fd2 100644
+--- a/mythplugins/mythmusic/mythmusic/main.cpp
++++ b/mythplugins/mythmusic/mythmusic/main.cpp
+@@ -262,6 +262,9 @@ static void startDatabaseTree(void)
+     dbbox->exec();
+     delete dbbox;
+ 
++    if (gMusicData->all_playlists && gMusicData->all_playlists->cleanOutThreads())
++        gMusicData->all_playlists->save();
++
+     gPlayer->constructPlaylist();
+ }
+ 
+-- 
+1.7.9.5
+

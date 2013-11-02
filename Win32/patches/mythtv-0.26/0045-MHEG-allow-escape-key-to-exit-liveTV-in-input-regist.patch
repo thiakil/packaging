@@ -1,0 +1,59 @@
+From 106a28c2d775ebea4f3677d8161f8d7b8716d763 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 29 Jun 2013 18:30:31 +0100
+Subject: [PATCH 045/227] MHEG: allow escape key to exit liveTV in input
+ register 5
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mhi.cpp |   13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mhi.cpp b/mythtv/libs/libmythtv/mhi.cpp
+index b5a0057..8e7f373 100644
+--- a/mythtv/libs/libmythtv/mhi.cpp
++++ b/mythtv/libs/libmythtv/mhi.cpp
+@@ -15,6 +15,7 @@
+ #include "mythdirs.h"
+ #include "myth_imgconvert.h"
+ #include "mythlogging.h"
++#include "mythmainwindow.h"
+ 
+ static bool       ft_loaded = false;
+ static FT_Library ft_library;
+@@ -513,7 +514,8 @@ private:
+ void MHKeyLookup::key(const QString &name, int code, int r1,
+     int r2, int r3, int r4, int r5, int r6, int r7, int r8, int r9)
+ {
+-    m_map.insert(key_t(name,r1), code);
++    if (r1 > 0)
++      m_map.insert(key_t(name,r1), code);
+     if (r2 > 0)
+         m_map.insert(key_t(name,r2), code);
+     if (r3 > 0)
+@@ -534,6 +536,13 @@ void MHKeyLookup::key(const QString &name, int code, int r1,
+ 
+ MHKeyLookup::MHKeyLookup()
+ {
++    // Use a modification of the standard key mapping for RC's with a single
++    // stop button which is used for both Esc and TEXTEXIT (Back).
++    // This mapping doesn't pass Esc to the MHEG app in registers 3 or 5 and
++    // hence allows the user to exit playback when the red button icon is shown
++    QStringList keylist = GET_KEY("TV Playback", "TEXTEXIT").split(QChar(','));
++    bool strict = !keylist.contains("Esc", Qt::CaseInsensitive);
++
+     // This supports the UK and NZ key profile registers.
+     // The UK uses 3, 4 and 5 and NZ 13, 14 and 15.  These are
+     // similar but the NZ profile also provides an EPG key.
+@@ -554,7 +563,7 @@ MHKeyLookup::MHKeyLookup()
+     key(ACTION_8,           13, 4,6,7,14);
+     key(ACTION_9,           14, 4,6,7,14);
+     key(ACTION_SELECT,      15, 4,5,6,7,14,15);
+-    key(ACTION_TEXTEXIT,    16, 3,4,5,6,7,13,14,15); // 16= Cancel
++    key(ACTION_TEXTEXIT,    16, strict ? 3 : 0,4,strict ? 5 : 0,6,7,13,14,15); // 16= Cancel
+     // 17= help
+     // 18..99 reserved by DAVIC
+     key(ACTION_MENURED,    100, 3,4,5,6,7,13,14,15);
+-- 
+1.7.9.5
+

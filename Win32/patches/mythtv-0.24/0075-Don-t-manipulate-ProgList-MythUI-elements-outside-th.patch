@@ -1,0 +1,101 @@
+From 6d22bf78ee45c1b37291385deffb09ebf6497096 Mon Sep 17 00:00:00 2001
+From: Chris Pinkham <cpinkham@mythtv.org>
+Date: Tue, 11 Oct 2011 20:49:42 -0400
+Subject: [PATCH 075/285] Don't manipulate ProgList MythUI elements outside
+ the UI thread
+
+FillItemList is called both in the UI thread and outside the
+UI thread.  Outside the UI thread, 'allowDisp' is false.  We don't
+need to call m_progList->Reset() inside FillItemList because it
+is called inside UpdateDisplay() which is called from FillItemList
+when updateDisp is true.
+
+This commit also refactors the two UpdateDisplay() methods a little
+and adds a new RestoreSelection() method to perform the position
+restoration that was originally in the 2nd UpdateDisplay() method.
+
+Fixes #10073.
+---
+ mythtv/programs/mythfrontend/proglist.cpp |   24 ++++++++++++------------
+ mythtv/programs/mythfrontend/proglist.h   |    4 ++--
+ 2 files changed, 14 insertions(+), 14 deletions(-)
+
+diff --git a/mythtv/programs/mythfrontend/proglist.cpp b/mythtv/programs/mythfrontend/proglist.cpp
+index 5558d4a..70326f9 100644
+--- a/mythtv/programs/mythfrontend/proglist.cpp
++++ b/mythtv/programs/mythfrontend/proglist.cpp
+@@ -1370,10 +1370,7 @@ void ProgLister::FillItemList(bool restorePosition, bool updateDisp)
+         selected = *selectedP;
+         selectedP = &selected;
+     }
+-    int selectedOffset = 
+-        m_progList->GetCurrentPos() - m_progList->GetTopItemPos();
+ 
+-    m_progList->Reset();
+     m_itemList.clear();
+ 
+     if (m_type == plPreviouslyRecorded)
+@@ -1423,7 +1420,7 @@ void ProgLister::FillItemList(bool restorePosition, bool updateDisp)
+         SortList(GetSortBy(), m_reverseSort);
+ 
+     if (updateDisp)
+-        UpdateDisplay(selectedP, selectedOffset);
++        UpdateDisplay(selectedP);
+ }
+ 
+ ProgLister::SortBy ProgLister::GetSortBy(void) const
+@@ -1470,8 +1467,13 @@ void ProgLister::ClearCurrentProgramInfo(void)
+         m_positionText->Reset();
+ }
+ 
+-void ProgLister::UpdateDisplay(void)
++void ProgLister::UpdateDisplay(const ProgramInfo *selected)
+ {
++    int offset = 0;
++
++    if (selected)
++        offset = m_progList->GetCurrentPos() - m_progList->GetTopItemPos();
++
+     m_progList->Reset();
+ 
+     if (m_messageText)
+@@ -1483,16 +1485,14 @@ void ProgLister::UpdateDisplay(void)
+         m_curviewText->SetText(m_viewTextList[m_curView]);
+ 
+     UpdateButtonList();
++
++    if (selected)
++        RestoreSelection(selected, offset);
+ }
+ 
+-void ProgLister::UpdateDisplay(const ProgramInfo *selected, int selectedOffset)
++void ProgLister::RestoreSelection(const ProgramInfo *selected,
++                                  int selectedOffset)
+ {
+-    UpdateDisplay();
+-
+-    if (!selected)
+-        return;
+-
+-    // Restore selection
+     plCompare *comp;
+     if (!m_titleSort)
+         comp = new plTimeSort();
+diff --git a/mythtv/programs/mythfrontend/proglist.h b/mythtv/programs/mythfrontend/proglist.h
+index d8de723..eb8e4b6 100644
+--- a/mythtv/programs/mythfrontend/proglist.h
++++ b/mythtv/programs/mythfrontend/proglist.h
+@@ -76,8 +76,8 @@ class ProgLister : public ScheduleCommon
+     void FillItemList(bool restorePosition, bool updateDisp = true);
+ 
+     void ClearCurrentProgramInfo(void);
+-    void UpdateDisplay(void);
+-    void UpdateDisplay(const ProgramInfo *selected, int selectedOffset);
++    void UpdateDisplay(const ProgramInfo *selected = NULL);
++    void RestoreSelection(const ProgramInfo *selected, int selectedOffset);
+     void UpdateButtonList(void);
+     void UpdateKeywordInDB(const QString &text, const QString &oldValue);
+ 
+-- 
+1.7.9.5
+

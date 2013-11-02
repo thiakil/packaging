@@ -1,0 +1,32 @@
+From 4c3a4b03baf89c749badf383756a7b61e61c8280 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 29 Jun 2013 15:09:05 +0100
+Subject: [PATCH 018/227] AFD: Reduce time spent parsing http streams
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |    8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index 27d72d2..4da05c6 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -914,6 +914,14 @@ int AvFormatDecoder::FindStreamInfo(void)
+     // Suppress ffmpeg logging unless "-v libav --loglevel debug"
+     if (!VERBOSE_LEVEL_CHECK(VB_LIBAV, LOG_DEBUG))
+         silence_ffmpeg_logging = true;
++#ifdef FF_FDEBUG_TS
++    if (VERBOSE_LEVEL_CHECK(VB_LIBAV|VB_TIMESTAMP, LOG_DEBUG))
++        ic->debug |= FF_FDEBUG_TS;
++    else
++        ic->debug &= ~FF_FDEBUG_TS;
++#endif
++    if (ringBuffer->GetFilename().startsWith("http"))
++        ic->probesize = 256*1024;
+     avfRingBuffer->SetInInit(ringBuffer->IsStreamed());
+     int retval = avformat_find_stream_info(ic, NULL);
+     silence_ffmpeg_logging = false;
+-- 
+1.7.9.5
+

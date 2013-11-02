@@ -1,0 +1,35 @@
+From 7dd9ad9f8ba8402db1405e5bd4ac58a78b0bc38a Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 24 Jun 2013 11:07:49 +0100
+Subject: [PATCH 044/207] Player: Avoid a race condition when creating the
+ InteractiveTV object.
+
+There is a race condition bewtween the GUI and decoder threads
+to create the interactiveTV object because the guarding mutex is
+not acquired before reading the interactiveTV variable.
+
+This often manifests itself to the user as an absence of interactive
+text on recorded (but not liveTV) programs.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |    3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index b5b96a9..3d372a3 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -5048,7 +5048,8 @@ InteractiveTV *MythPlayer::GetInteractiveTV(void)
+     {
+         QMutexLocker locker1(&osdLock);
+         QMutexLocker locker2(&itvLock);
+-        interactiveTV = new InteractiveTV(this);
++        if (!interactiveTV && osd)
++            interactiveTV = new InteractiveTV(this);
+     }
+ #endif // USING_MHEG
+     return interactiveTV;
+-- 
+1.7.9.5
+

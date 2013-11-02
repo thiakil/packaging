@@ -1,0 +1,31 @@
+From edf418930553513ee46e5dfd4f4ccffb0cbeb9c1 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 10 Aug 2013 17:56:10 +0100
+Subject: [PATCH 196/227] NVD: Prevent SEGV in NuppelDecoder dtor
+
+The strm_buf member variable is not initialised in NuppelDecoder's
+ctor but is deleted in its dtor.  This causes a SEGV typically
+when using an analogue input and the source is powered on after
+starting playback.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/nuppeldecoder.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/nuppeldecoder.cpp b/mythtv/libs/libmythtv/nuppeldecoder.cpp
+index 97544bc..afc4d97 100644
+--- a/mythtv/libs/libmythtv/nuppeldecoder.cpp
++++ b/mythtv/libs/libmythtv/nuppeldecoder.cpp
+@@ -47,7 +47,7 @@ NuppelDecoder::NuppelDecoder(MythPlayer *parent,
+       directframe(NULL),            decoded_video_frame(NULL),
+       mpa_vidcodec(0), mpa_vidctx(0), mpa_audcodec(0), mpa_audctx(0),
+       directrendering(false),
+-      lastct('1'), strm(0), buf(0), buf2(0),
++      lastct('1'), strm_buf(0), strm(0), buf(0), buf2(0),
+       videosizetotal(0), videoframesread(0), setreadahead(false)
+ {
+     // initialize structures
+-- 
+1.7.9.5
+

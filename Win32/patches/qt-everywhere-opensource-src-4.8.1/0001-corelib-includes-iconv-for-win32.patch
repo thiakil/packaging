@@ -1,0 +1,26 @@
+From bbbf79af6253644ebfd7e8bdd29275cfd6239ffe Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 19 Mar 2013 10:46:00 +0000
+Subject: [PATCH 1/5] corelib includes iconv for win32
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ src/corelib/codecs/codecs.pri |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/src/corelib/codecs/codecs.pri b/src/corelib/codecs/codecs.pri
+index 6bc2fa6..0801fe9 100644
+--- a/src/corelib/codecs/codecs.pri
++++ b/src/corelib/codecs/codecs.pri
+@@ -19,7 +19,7 @@ SOURCES += \
+ 	codecs/qutfcodec.cpp \
+ 	codecs/qtextcodecplugin.cpp
+ 
+-unix {
++unix|win32-* {
+ 	SOURCES += codecs/qfontlaocodec.cpp
+ 
+         contains(QT_CONFIG,iconv) {
+-- 
+1.7.4.1
+

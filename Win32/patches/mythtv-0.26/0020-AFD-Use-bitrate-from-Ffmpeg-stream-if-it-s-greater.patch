@@ -1,0 +1,27 @@
+From 9649935ad5bc910f29aeb141cce4bc8a3b5437ba Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 27 Jul 2013 19:12:24 +0100
+Subject: [PATCH 020/227] AFD: Use bitrate from Ffmpeg stream if it's greater
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |    3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index 0a980b5..cd83c86 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -2264,6 +2264,9 @@ int AvFormatDecoder::ScanStreams(bool novideo)
+         }
+     }
+ 
++    if (bitrate == 0 && ic->bit_rate > 0)
++        bitrate = (uint)ic->bit_rate;
++
+     if (bitrate > 0)
+     {
+         bitrate = (bitrate + 999) / 1000;
+-- 
+1.7.9.5
+

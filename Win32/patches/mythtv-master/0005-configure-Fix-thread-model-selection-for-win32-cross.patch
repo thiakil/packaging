@@ -1,0 +1,33 @@
+From 3b3494929ee8c6ff549c3d4159c887ecbf1ab406 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 5 Jan 2013 15:45:45 +0000
+Subject: [PATCH 005/202] configure: Fix thread model selection for win32
+ cross build
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/configure |    4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/configure b/mythtv/configure
+index 225e8ba..4ff9e39 100755
+--- a/mythtv/configure
++++ b/mythtv/configure
+@@ -4910,12 +4910,12 @@ fi
+ 
+ #End MythTV check
+ 
++enabled ffmpeg_pthreads && enable pthreads
++
+ if ! disabled w32threads && ! enabled pthreads; then
+     check_func_headers "windows.h process.h" _beginthreadex && enable w32threads
+ fi
+ 
+-enabled ffmpeg_pthreads && enable pthreads
+-
+ # check for some common methods of building with pthread support
+ # do this before the optional library checks as some of them require pthreads
+ if ! disabled pthreads && ! enabled w32threads; then
+-- 
+1.7.9.5
+

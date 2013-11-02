@@ -1,0 +1,79 @@
+From d16ffc770b4e655362cb072ced2f19b9c941d639 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 15 Apr 2011 21:21:13 +0200
+Subject: [PATCH 023/285] Set mediamonitor's default CD/DVD drive name for
+ win32
+
+The current default CD name is /dev/cdrom but should be e: or similar
+on Windows.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/mythmediamonitor.cpp |   18 +++++++++++++-----
+ 1 file changed, 13 insertions(+), 5 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/mythmediamonitor.cpp b/mythtv/libs/libmyth/mythmediamonitor.cpp
+index 99e4044..44f1261 100644
+--- a/mythtv/libs/libmyth/mythmediamonitor.cpp
++++ b/mythtv/libs/libmyth/mythmediamonitor.cpp
+@@ -819,12 +819,20 @@ QString MediaMonitor::defaultDevice(QString dbSetting,
+     return device;
+ }
+ 
++#ifdef Q_OS_WIN32
++# define DEFAULT_CD "e:"
++# define DEFAULT_DVD "e:"
++#else
++# define DEFAULT_CD "/dev/cdrom"
++# define DEFAULT_DVD "/dev/dvd"
++#endif
++
+ /**
+  * CDDevice, user-selected drive, or /dev/cdrom
+  */
+ QString MediaMonitor::defaultCDdevice()
+ {
+-    return defaultDevice("CDDevice", tr("Select a CD drive"), "/dev/cdrom");
++    return defaultDevice("CDDevice", tr("Select a CD drive"), DEFAULT_CD);
+ }
+ 
+ /**
+@@ -833,7 +841,7 @@ QString MediaMonitor::defaultCDdevice()
+ QString MediaMonitor::defaultVCDdevice()
+ {
+     return defaultDevice("VCDDeviceLocation",
+-                         tr("Select a VCD drive"), "/dev/cdrom");
++                         tr("Select a VCD drive"), DEFAULT_CD);
+ }
+ 
+ /**
+@@ -842,7 +850,7 @@ QString MediaMonitor::defaultVCDdevice()
+ QString MediaMonitor::defaultDVDdevice()
+ {
+     return defaultDevice("DVDDeviceLocation",
+-                         tr("Select a DVD drive"), "/dev/dvd");
++                         tr("Select a DVD drive"), DEFAULT_DVD);
+ }
+ 
+ /**
+@@ -851,7 +859,7 @@ QString MediaMonitor::defaultDVDdevice()
+ QString MediaMonitor::defaultCDWriter()
+ {
+     return defaultDevice("CDWriterDeviceLocation",
+-                         tr("Select a CD writer"), "/dev/cdrom");
++                         tr("Select a CD writer"), DEFAULT_CD);
+ }
+ 
+ /**
+@@ -863,7 +871,7 @@ QString MediaMonitor::defaultCDWriter()
+ QString MediaMonitor::defaultDVDWriter()
+ {
+     QString device = defaultDevice("MythArchiveDVDLocation",
+-                                   tr("Select a DVD writer"), "/dev/dvd");
++                                   tr("Select a DVD writer"), DEFAULT_DVD);
+ 
+     return device;
+ }
+-- 
+1.7.9.5
+

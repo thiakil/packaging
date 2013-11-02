@@ -1,0 +1,186 @@
+diff --git mythplugins/mythmusic/mythmusic/synaesthesia.cpp mythplugins/mythmusic/mythmusic/synaesthesia.cpp
+index 5c50357..8460f3c 100644
+--- mythplugins/mythmusic/mythmusic/synaesthesia.cpp
++++ mythplugins/mythmusic/mythmusic/synaesthesia.cpp
+@@ -35,7 +35,8 @@ Synaesthesia::Synaesthesia(long int winid)
+     (void) winid;
+ 
+     fps = 29;
+-    fadeMode = Stars;
++#define FADEMODE Stars /* Stars Flame Wave */
++    fadeMode = FADEMODE;
+     pointsAreDiamonds = true;
+     energy_avg = 80.0;
+ 
+@@ -105,10 +106,11 @@ void Synaesthesia::setupPalette(void)
+ 
+     for (i = 0; i < 256; i++) {
+         int f = i & 15, b = i / 16;
+-        //palette[i * 3 + 0] = sPEAKIFY(b*bgRed*16+f*fgRed*16);
+-        //palette[i * 3 + 1] = sPEAKIFY(b*bgGreen*16+f*fgGreen*16);
+-        //palette[i * 3 + 2] = sPEAKIFY(b*bgBlue*16+f*fgBlue*16);
+-
++#if 0
++        palette[i * 3 + 0] = sPEAKIFY(b*bgRed*16+f*fgRed*16);
++        palette[i * 3 + 1] = sPEAKIFY(b*bgGreen*16+f*fgGreen*16);
++        palette[i * 3 + 2] = sPEAKIFY(b*bgBlue*16+f*fgBlue*16);
++#else
+         double red = b * bgRed * 16 + f * fgRed * 16;
+         double green = b * bgGreen * 16 + f * fgGreen * 16;
+         double blue = b * bgBlue * 16 + f * fgBlue * 16;
+@@ -132,9 +134,10 @@ void Synaesthesia::setupPalette(void)
+         green *= scale;
+         blue *= scale;
+ 
+-        palette[i * 3 + 0] = sBOUND(int(Qt::red));
+-        palette[i * 3 + 1] = sBOUND(int(Qt::green));
+-        palette[i * 3 + 2] = sBOUND(int(Qt::blue));
++        palette[i * 3 + 0] = sBOUND((int)(red + .5));
++        palette[i * 3 + 1] = sBOUND((int)(green + .5));
++        palette[i * 3 + 2] = sBOUND((int)(blue + .5));
++#endif
+     }
+ }
+ 
+@@ -297,6 +300,7 @@ unsigned char Synaesthesia::getPixel(int x, int y, int where)
+     return lastOutput[where];
+ }
+ 
++#if FADEMODE == Stars
+ void Synaesthesia::fadeFade(void)
+ {
+     register uint32_t *ptr = (uint32_t *)output;
+@@ -310,7 +314,9 @@ void Synaesthesia::fadeFade(void)
+             ptr++;
+     } while (--i > 0);
+ }
++#endif
+ 
++#if FADEMODE == Wave
+ void Synaesthesia::fadePixelWave(int x, int y, int where, int step)
+ {
+     short j = short((int(getPixel(x - 1, y, where - 2)) +
+@@ -384,7 +390,9 @@ void Synaesthesia::fadeWave(void)
+         } while(++i < end);
+     }
+ }
++#endif /* FADEMODE == Wave */
+ 
++#if FADEMODE == Flame
+ void Synaesthesia::fadePixelHeat(int x, int y, int where, int step) 
+ {
+     short j = short((int(getPixel(x - 1, y, where - 2)) +
+@@ -459,15 +467,19 @@ void Synaesthesia::fadeHeat(void)
+         } while(++i < end);
+     }
+ }
++#endif /* FADEMODE == Flame */
+ 
+ void Synaesthesia::fade(void) 
+ {
+-    switch(fadeMode) {
+-        case Stars: fadeFade(); break;
+-        case Flame: fadeHeat(); break;
+-        case Wave: fadeWave(); break;
+-        default: break;
+-    }
++#if FADEMODE == Stars
++    fadeFade();
++#elif FADEMODE == Flame
++    fadeHeat();
++#elif FADEMODE == Wave
++    fadeWave();
++#else
++#   error Invalid FADMODE
++#endif
+ }
+ 
+ bool Synaesthesia::process(VisualNode *node)
+@@ -611,9 +623,10 @@ bool Synaesthesia::process(VisualNode *node)
+ 
+ bool Synaesthesia::draw(QPainter *p, const QColor &back)
+ {
+-    (void)p;
+     (void)back;
+ #ifdef SDL_SUPPORT
++    (void)p;
++
+     if (!surface)
+     {
+         VERBOSE(VB_IMPORTANT, "No sdl surface");
+@@ -621,14 +634,23 @@ bool Synaesthesia::draw(QPainter *p, const QColor &back)
+     }
+ 
+     SDL_LockSurface(surface);
++#else
++    if (!outputImage)
++        return false;
++#endif
+ 
+     register uint32_t *ptrOutput = (uint32_t *)output;
+ 
+     for (int j = 0; j < outHeight * 2; j += 2) 
+     {		
++#ifdef SDL_SUPPORT
+         uint32_t *ptrTop = (uint32_t *)(surface->pixels) + outWidth / 4 * j;
+-	uint32_t *ptrBot = (uint32_t *)(surface->pixels) + 
++        uint32_t *ptrBot = (uint32_t *)(surface->pixels) + 
+                                                          outWidth / 4 * (j + 1);
++#else
++        uint32_t *ptrTop = (uint32_t *)(outputImage->scanLine(j));
++        uint32_t *ptrBot = (uint32_t *)(outputImage->scanLine(j+1));
++#endif
+ 		
+         int i = outWidth / 4;
+ 
+@@ -651,48 +673,12 @@ bool Synaesthesia::draw(QPainter *p, const QColor &back)
+         }while(--i);
+     }
+ 
++#ifdef SDL_SUPPORT
+     SDL_UnlockSurface(surface);
+     SDL_Flip(surface);
+-
+     return false;
+ #else
+-
+-    if (!outputImage)
+-        return false;
+-
+-    register uint32_t *ptrOutput = (uint32_t *)output;
+-
+-    for (int j = 0; j < outHeight * 2; j += 2) 
+-    {
+-        uint32_t *ptrTop = (uint32_t *)(outputImage->scanLine(j));
+-        uint32_t *ptrBot = (uint32_t *)(outputImage->scanLine(j+1));
+-
+-        int i = outWidth / 4;
+-
+-        do
+-        {
+-            register unsigned int const r1 = *(ptrOutput++);
+-            register unsigned int const r2 = *(ptrOutput++);
+-
+-            register unsigned int const v = ((r1 & 0x000000f0ul) >> 4) |
+-                                            ((r1 & 0x0000f000ul) >> 8) |
+-                                            ((r1 & 0x00f00000ul) >> 12) |
+-                                            ((r1 & 0xf0000000ul) >> 16);
+-
+-            *(ptrTop++) = v | (((r2 & 0x000000f0ul) << 12) |
+-                               ((r2 & 0x0000f000ul) << 8) |
+-                               ((r2 & 0x00f00000ul) << 4) |
+-                               ((r2 & 0xf0000000ul)));
+-
+-            *(ptrBot++) = v | (((r2 & 0x000000f0ul) << 12) |
+-                               ((r2 & 0x0000f000ul) << 8) |
+-                               ((r2 & 0x00f00000ul) << 4) |
+-                               ((r2 & 0xf0000000ul)));
+-        } while (--i);
+-    }
+-
+-    p->drawImage(QRect(0, 0, 800, 600), *outputImage);
+-
++    p->drawImage(QRect(0, 0, outWidth, outHeight*2), *outputImage);
+     return true;
+ #endif
+ }

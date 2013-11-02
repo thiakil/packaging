@@ -1,0 +1,35 @@
+From 9852a0d816270bc90ae0a7fd56e766affd418908 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 8 Jun 2012 18:46:43 +0200
+Subject: [PATCH 135/227] libmythui: Don't draw zero sized MythUIType objects
+
+MythUIType::Draw uses the m_Area rect to intersect with the clip rect
+to determine if a redraw is required.  Unfortunately, some objects have
+an invalid m_Area and intersection is undefined in this case.
+
+This bug results in a debug build of Qt complaining:
+	QPainter::begin: Paint device returned engine == 0, type: 3
+when drawing some OSD objects.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythui/mythuitype.cpp |    3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/mythtv/libs/libmythui/mythuitype.cpp b/mythtv/libs/libmythui/mythuitype.cpp
+index b1af66e..03e7b24 100644
+--- a/mythtv/libs/libmythui/mythuitype.cpp
++++ b/mythtv/libs/libmythui/mythuitype.cpp
+@@ -482,6 +482,9 @@ void MythUIType::Draw(MythPainter *p, int xoffset, int yoffset, int alphaMod,
+     if (!m_Visible || m_Vanished)
+         return;
+ 
++    if (!m_Area.isValid())
++        return;
++
+     QRect realArea = m_Area.toQRect();
+     realArea.translate(xoffset, yoffset);
+ 
+-- 
+1.7.9.5
+

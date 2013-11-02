@@ -1,0 +1,26 @@
+From bfc9e906df756cde79221ba1b3774e0580bae7a4 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 7 Jul 2013 10:17:50 +0100
+Subject: [PATCH 177/227] TV: Reduce log verbosity of GeneratePreviewImage
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/previewgeneratorqueue.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/previewgeneratorqueue.cpp b/mythtv/libs/libmythtv/previewgeneratorqueue.cpp
+index ff14de8..bd8239a 100644
+--- a/mythtv/libs/libmythtv/previewgeneratorqueue.cpp
++++ b/mythtv/libs/libmythtv/previewgeneratorqueue.cpp
+@@ -390,7 +390,7 @@ QString PreviewGeneratorQueue::GeneratePreviewImage(
+     }
+     else if (needs_gen)
+     {
+-        LOG(VB_PLAYBACK, LOG_INFO, LOC +
++        LOG(VB_PLAYBACK, LOG_DEBUG, LOC +
+             QString("Not requesting preview for %1,"
+                     "as it is already being generated")
+                 .arg(pginfo.toString(ProgramInfo::kTitleSubtitle)));
+-- 
+1.7.9.5
+

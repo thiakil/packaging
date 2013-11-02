@@ -1,0 +1,28 @@
+From 98ddab8a22cd6563da6fe579ce1d840e44c4279f Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 30 Jul 2013 10:12:15 +0100
+Subject: [PATCH 008/202] Mythsystemlegacy: Add missing SIGTRAP definition for
+ Mingw
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythbase/mythsystemlegacy.cpp |    3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/mythtv/libs/libmythbase/mythsystemlegacy.cpp b/mythtv/libs/libmythbase/mythsystemlegacy.cpp
+index 3a7ee24..eee1746 100644
+--- a/mythtv/libs/libmythbase/mythsystemlegacy.cpp
++++ b/mythtv/libs/libmythbase/mythsystemlegacy.cpp
+@@ -316,6 +316,9 @@ void MythSystemLegacy::Signal(MythSignal sig)
+     if (m_status != GENERIC_EXIT_RUNNING)
+         return;
+ 
++#ifndef SIGTRAP /* For Mingw */
++#define SIGTRAP -1
++#endif
+     int posix_signal = SIGTRAP;
+     switch (sig)
+     {
+-- 
+1.7.9.5
+

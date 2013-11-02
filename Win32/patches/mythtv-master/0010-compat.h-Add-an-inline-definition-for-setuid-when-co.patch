@@ -1,0 +1,27 @@
+From 36a75eedff5e817a34768742dd8cf2651282197b Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 30 Jul 2013 10:36:57 +0100
+Subject: [PATCH 010/202] compat.h: Add an inline definition for setuid when
+ compiling with Mingw
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythbase/compat.h |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythbase/compat.h b/mythtv/libs/libmythbase/compat.h
+index 2b31c61..86b2315 100644
+--- a/mythtv/libs/libmythbase/compat.h
++++ b/mythtv/libs/libmythbase/compat.h
+@@ -247,7 +247,7 @@
+ 	// getuid/geteuid/setuid - not implemented
+ #   define getuid() 0
+ #	define geteuid() 0
+-#	define setuid(x) 0
++static inline int setuid(int uid) { (void)uid; return 0; }
+ #endif // _WIN32
+ 
+ #if defined(_WIN32) && !defined(gmtime_r)
+-- 
+1.7.9.5
+

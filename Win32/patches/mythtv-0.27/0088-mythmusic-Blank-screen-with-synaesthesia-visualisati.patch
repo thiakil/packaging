@@ -1,0 +1,137 @@
+From 8dc8933445778b5f785419d98b2b17f9d72cbb15 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 14 Mar 2011 23:09:14 +0100
+Subject: [PATCH 088/207] mythmusic: Blank screen with synaesthesia
+ visualisation
+
+If I select the MythMusic Synaesthesia visualisation then all I see is a
+blank screen.  This occurs on both Windows and Linux and with or without
+SDL.
+
+Looking at the code it appears that the palette is not being correctly
+initialised.  This patch fixes this and also removes redundant code
+dependent on the visualisation mode, which is fixed at compile time.
+
+Ticket URL: <http://code.mythtv.org/trac/ticket/9474>
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/mythmusic/mythmusic/synaesthesia.cpp |   44 ++++++++++++++--------
+ 1 file changed, 28 insertions(+), 16 deletions(-)
+
+diff --git a/mythplugins/mythmusic/mythmusic/synaesthesia.cpp b/mythplugins/mythmusic/mythmusic/synaesthesia.cpp
+index 4439672..ed2505d 100644
+--- a/mythplugins/mythmusic/mythmusic/synaesthesia.cpp
++++ b/mythplugins/mythmusic/mythmusic/synaesthesia.cpp
+@@ -31,11 +31,13 @@ using namespace std;
+ #include "mainvisual.h"
+ #include "synaesthesia.h"
+ 
++#define FADEMODE Stars /* Stars Flame Wave */
++
+ Synaesthesia::Synaesthesia(void) :
+     m_size(0,0),
+ 
+     m_maxStarRadius(1),
+-    m_fadeMode(Stars),
++    m_fadeMode(FADEMODE),
+     m_pointsAreDiamonds(true),
+     m_brightnessTwiddler(0.3),
+     m_starSize(0.5),
+@@ -90,10 +92,11 @@ void Synaesthesia::setupPalette(void)
+ 
+     for (i = 0; i < 256; i++) {
+         int f = i & 15, b = i / 16;
+-        //palette[i * 3 + 0] = sPEAKIFY(b*bgRed*16+f*fgRed*16);
+-        //palette[i * 3 + 1] = sPEAKIFY(b*bgGreen*16+f*fgGreen*16);
+-        //palette[i * 3 + 2] = sPEAKIFY(b*bgBlue*16+f*fgBlue*16);
+-
++#if 0
++        palette[i * 3 + 0] = sPEAKIFY(b*bgRed*16+f*fgRed*16);
++        palette[i * 3 + 1] = sPEAKIFY(b*bgGreen*16+f*fgGreen*16);
++        palette[i * 3 + 2] = sPEAKIFY(b*bgBlue*16+f*fgBlue*16);
++#else
+         double red = b * bgRed * 16 + f * fgRed * 16;
+         double green = b * bgGreen * 16 + f * fgGreen * 16;
+         double blue = b * bgBlue * 16 + f * fgBlue * 16;
+@@ -117,9 +120,10 @@ void Synaesthesia::setupPalette(void)
+         green *= scale;
+         blue *= scale;
+ 
+-        m_palette[i * 3 + 0] = sBOUND(int(red));
+-        m_palette[i * 3 + 1] = sBOUND(int(green));
+-        m_palette[i * 3 + 2] = sBOUND(int(blue));
++        m_palette[i * 3 + 0] = sBOUND((int)(red + .5));
++        m_palette[i * 3 + 1] = sBOUND((int)(green + .5));
++        m_palette[i * 3 + 2] = sBOUND((int)(blue + .5));
++#endif
+     }
+ }
+ 
+@@ -283,6 +287,7 @@ unsigned char Synaesthesia::getPixel(int x, int y, int where)
+     return lastOutput[where];
+ }
+ 
++#if FADEMODE == Stars
+ void Synaesthesia::fadeFade(void)
+ {
+     register uint32_t *ptr = (uint32_t *)output;
+@@ -296,7 +301,9 @@ void Synaesthesia::fadeFade(void)
+             ptr++;
+     } while (--i > 0);
+ }
++#endif
+ 
++#if FADEMODE == Wave
+ void Synaesthesia::fadePixelWave(int x, int y, int where, int step)
+ {
+     short j = short((int(getPixel(x - 1, y, where - 2)) +
+@@ -374,7 +381,9 @@ void Synaesthesia::fadeWave(void)
+         } while(++i < end);
+     }
+ }
++#endif /* FADEMODE == Wave */
+ 
++#if FADEMODE == Flame
+ void Synaesthesia::fadePixelHeat(int x, int y, int where, int step) 
+ {
+     short j = short((int(getPixel(x - 1, y, where - 2)) +
+@@ -450,16 +459,19 @@ void Synaesthesia::fadeHeat(void)
+         } while(++i < end);
+     }
+ }
++#endif /* FADEMODE == Flame */
+ 
+ void Synaesthesia::fade(void) 
+ {
+-    switch(m_fadeMode)
+-    {
+-        case Stars: fadeFade(); break;
+-        case Flame: fadeHeat(); break;
+-        case Wave: fadeWave(); break;
+-        default: break;
+-    }
++#if FADEMODE == Stars
++    fadeFade();
++#elif FADEMODE == Flame
++    fadeHeat();
++#elif FADEMODE == Wave
++    fadeWave();
++#else
++#   error Invalid FADEMODE
++#endif
+ }
+ 
+ bool Synaesthesia::process(VisualNode *node)
+@@ -639,7 +651,7 @@ bool Synaesthesia::draw(QPainter *p, const QColor &back)
+         } while (--i);
+     }
+ 
+-    p->drawImage(0, 0, *m_outputImage);
++    p->drawImage(QRect(0, 0, m_outWidth, m_outHeight*2), *m_outputImage);
+ 
+     return true;
+ }
+-- 
+1.7.9.5
+

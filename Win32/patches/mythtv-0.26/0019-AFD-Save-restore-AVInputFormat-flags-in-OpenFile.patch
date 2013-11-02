@@ -1,0 +1,66 @@
+From 1ce8a95eb279dca6a82b8dec3232bde78b626abb Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 30 Jun 2013 15:49:12 +0100
+Subject: [PATCH 019/227] AFD: Save/restore AVInputFormat flags in OpenFile
+
+The AVInputFormat flags are set and then cleared in AvFormatDecoder::OpenFile
+however the mpegts formats requires the AVFMT_NOFILE bit to be clear in
+order to probe and detect an mpegts stream.
+
+This patch saves and restores the flags on exit from OpenFile
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |   17 ++++++++++++++---
+ 1 file changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index 4da05c6..0a980b5 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -419,13 +419,14 @@ void AvFormatDecoder::CloseContext()
+         CloseCodecs();
+ 
+         AVInputFormat *fmt = ic->iformat;
+-        ic->iformat->flags |= AVFMT_NOFILE;
++        int flags = fmt->flags;
++        fmt->flags |= AVFMT_NOFILE;
+ 
+         av_free(ic->pb->buffer);
+         av_free(ic->pb);
+         avformat_close_input(&ic);
+         ic = NULL;
+-        fmt->flags &= ~AVFMT_NOFILE;
++        fmt->flags = flags;
+     }
+ 
+     delete private_dec;
+@@ -979,6 +980,16 @@ int AvFormatDecoder::OpenFile(RingBuffer *rbuffer, bool novideo,
+         return -1;
+     }
+ 
++    struct FlagSaver
++    {
++        FlagSaver(AVInputFormat *fmt) : m_fmt(fmt), m_flags(fmt->flags) { }
++        ~FlagSaver() { Restore(); }
++
++        void Restore() { m_fmt->flags = m_flags; }
++
++        AVInputFormat * const m_fmt;
++        int const m_flags;
++    } flags(fmt);
+ #if 0
+     fmt->flags |= AVFMT_NOFILE;
+ #endif
+@@ -1017,7 +1028,7 @@ int AvFormatDecoder::OpenFile(RingBuffer *rbuffer, bool novideo,
+ 
+     ic->stream_change_data = this;
+ 
+-    fmt->flags &= ~AVFMT_NOFILE;
++    flags.Restore();
+ 
+     if (!livetv && !ringBuffer->IsDisc())
+     {
+-- 
+1.7.9.5
+

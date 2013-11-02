@@ -1,0 +1,20 @@
+--- libvisual-0.4.0.orig/libvisual/lv_cpu.c	2006-01-22 14:23:37.000000000 +0100
++++ libvisual-0.4.0/libvisual/lv_cpu.c	2011-03-05 11:59:41.000000000 +0100
+@@ -124,7 +124,8 @@ LONG CALLBACK win32_sig_handler_sse(EXCE
+ #endif /* VISUAL_OS_WIN32 */
+ 
+ 
+-#if defined(VISUAL_ARCH_POWERPC) && !defined(VISUAL_OS_DARWIN)
++#if defined(VISUAL_ARCH_POWERPC)
++#if !defined(VISUAL_OS_DARWIN)
+ static sigjmp_buf __lv_powerpc_jmpbuf;
+ static volatile sig_atomic_t __lv_powerpc_canjump = 0;
+ 
+@@ -140,6 +141,7 @@ static void sigill_handler (int sig)
+ 	__lv_powerpc_canjump = 0;
+ 	siglongjmp (__lv_powerpc_jmpbuf, 1);
+ }
++#endif
+ 
+ static void check_os_altivec_support( void )
+ {

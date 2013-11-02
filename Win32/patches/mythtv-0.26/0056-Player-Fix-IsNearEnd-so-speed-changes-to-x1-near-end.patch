@@ -1,0 +1,70 @@
+From 6953da2ab1fa7ff17d6efa5c6c3d073ba0f89dbd Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 12 Jun 2013 16:12:14 +0100
+Subject: [PATCH 056/227] Player: Fix IsNearEnd so speed changes to x1 near
+ end of recording
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |   24 +++++++++---------------
+ 1 file changed, 9 insertions(+), 15 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 8129afb..51c8913 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -3679,8 +3679,6 @@ bool MythPlayer::IsReallyNearEnd(void) const
+  */
+ bool MythPlayer::IsNearEnd(void)
+ {
+-    uint64_t framesRead, framesLeft = 0;
+-
+     if (!player_ctx)
+         return false;
+ 
+@@ -3697,15 +3695,14 @@ bool MythPlayer::IsNearEnd(void)
+     margin = (long long) (margin * audio.GetStretchFactor());
+     bool watchingTV = IsWatchingInprogress();
+ 
+-    framesRead = decoder->GetFramesRead();
++    long long framesRead = decoder->GetFramesRead();
+ 
+     if (!player_ctx->IsPIP() &&
+         player_ctx->GetState() == kState_WatchingPreRecorded)
+     {
+-        if (framesRead >= deleteMap.GetLastFrame(totalFrames))
++        if ((uint64_t)framesRead >= deleteMap.GetLastFrame(totalFrames))
+             return true;
+-        framesLeft = (totalFrames > framesRead) ? totalFrames - framesRead : 0;
+-        return (framesLeft < (uint64_t)margin);
++        return totalFrames < (uint64_t)(framesRead + margin);
+     }
+ 
+     if (!livetv && !watchingTV)
+@@ -3714,17 +3711,14 @@ bool MythPlayer::IsNearEnd(void)
+     if (livetv && player_ctx->tvchain && player_ctx->tvchain->HasNext())
+         return false;
+ 
+-    if (player_ctx->recorder)
+-    {
+-        framesLeft =
+-            player_ctx->recorder->GetCachedFramesWritten() - framesRead;
++    if (!player_ctx->recorder)
++        return false;
+ 
+-        // if it looks like we are near end, get an updated GetFramesWritten()
+-        if (framesLeft < (uint64_t)margin)
+-            framesLeft = player_ctx->recorder->GetFramesWritten() - framesRead;
+-    }
++    long long framesWritten = player_ctx->recorder->GetCachedFramesWritten();
++    if (framesWritten < framesRead + margin)
++        framesWritten = player_ctx->recorder->GetFramesWritten();
+ 
+-    return (framesLeft < (uint64_t)margin);
++    return framesWritten < framesRead + margin;
+ }
+ 
+ bool MythPlayer::DoFastForward(uint64_t frames, double inaccuracy)
+-- 
+1.7.9.5
+

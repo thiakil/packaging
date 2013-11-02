@@ -1,0 +1,37 @@
+From 0598e2eda3e02db60b953e9949fa02da7e3c71a2 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 1 Jul 2013 12:49:34 +0100
+Subject: [PATCH 175/227] Settings: Fix a redraw bug when adding or renoving a
+ playback profile
+
+TV settings, Playback profiles (3/8)
+Pressing Add New Entry or Delete entry doesn't update the screen.
+
+VerticalConfigurationGroup::replaceChild incorrectly tests for a non-null
+'widget' member variable.  This member is never set.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/mythconfiggroups.cpp |    6 ------
+ 1 file changed, 6 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/mythconfiggroups.cpp b/mythtv/libs/libmyth/mythconfiggroups.cpp
+index b5679df..5b3004d 100644
+--- a/mythtv/libs/libmyth/mythconfiggroups.cpp
++++ b/mythtv/libs/libmyth/mythconfiggroups.cpp
+@@ -191,12 +191,6 @@ bool VerticalConfigurationGroup::replaceChild(
+ 
+         *it = new_child;
+ 
+-        if (!widget)
+-        {
+-            old_child->deleteLater();
+-            return true;
+-        }
+-
+         if (childwidget[i])
+         {
+             old_child->widgetInvalid(childwidget[i]);
+-- 
+1.7.9.5
+

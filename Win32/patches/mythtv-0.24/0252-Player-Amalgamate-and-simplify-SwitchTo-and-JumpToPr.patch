@@ -1,0 +1,347 @@
+From 9cb2f983f09316ca11ed352fb0f7d44ece87a123 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 7 Jul 2013 16:50:46 +0100
+Subject: [PATCH 252/285] Player: Amalgamate and simplify SwitchTo and
+ JumpToProgram
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |  209 +++++++++++-----------------------
+ mythtv/libs/libmythtv/mythplayer.h   |    3 +-
+ 2 files changed, 67 insertions(+), 145 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index eb74d11..c1ca082 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -2272,42 +2272,45 @@ void MythPlayer::CheckTVChain(void)
+     SetWatchingRecording(last);
+ }
+ 
+-void MythPlayer::SwitchToProgram(void)
++void MythPlayer::ChangeProgram(bool bJump)
+ {
+-    VERBOSE(VB_PLAYBACK, LOC + "SwitchToProgram - start");
++    VERBOSE(VB_PLAYBACK, LOC + QString("ChangeProgram(%1) - start").arg(bJump));
++
++    int nextpos = bJump ? player_ctx->tvchain->GetJumpPos() : 0;
+     bool discontinuity = false, newtype = false;
+     int newid = -1;
+     QSharedPointer<ProgramInfo> pginfo(player_ctx->tvchain->GetSwitchProgram(
+         discontinuity, newtype, newid));
+     if (!pginfo)
+     {
+-        VERBOSE(VB_IMPORTANT, LOC_ERR + "SwitchToProgram - No ProgramInfo");
++        VERBOSE(VB_IMPORTANT, LOC_ERR + "ChangeProgram - No ProgramInfo");
+         return;
+     }
+ 
+-    bool newIsDummy = player_ctx->tvchain->GetCardType(newid) == "DUMMY";
+-
++    bool bEOF = GetEof();
++    VERBOSE(VB_PLAYBACK, LOC + QString("ChangeProgram "
++            "discont: %1 newtype: %2 newid: %3 decoderEof: %4")
++            .arg(discontinuity).arg(newtype).arg(newid).arg(bEOF));
+     SetPlayingInfo(*pginfo);
+ 
+-    if (newIsDummy)
++    Pause();
++
++    if (player_ctx->tvchain->GetCardType(newid) == "DUMMY")
+     {
+-        Pause();
++        player_ctx->tvchain->SetProgram(*pginfo);
+         OpenDummy();
+         ResetPlaying();
+         SetEof(false);
+         return;
+     }
+ 
+-    VERBOSE(VB_PLAYBACK, LOC + QString("SwitchToProgram(void) "
+-            "discont: %1 newtype: %2 newid: %3 decoderEof: %4")
+-            .arg(discontinuity).arg(newtype).arg(newid).arg(GetEof()));
++    SendMythSystemPlayEvent("PLAY_CHANGED", pginfo.data());
+ 
+     player_ctx->buffer->OpenFile(
+         pginfo->GetPlaybackURL(), RingBuffer::kLiveTVOpenTimeout);
+-
+     if (!player_ctx->buffer->IsOpen())
+     {
+-        VERBOSE(VB_IMPORTANT, LOC_ERR + "SwitchToProgram's OpenFile failed " +
++        VERBOSE(VB_IMPORTANT, LOC_ERR + "ChangeProgram's OpenFile failed " +
+                 QString("(card type: %1).")
+                 .arg(player_ctx->tvchain->GetCardType(newid)));
+         VERBOSE(VB_IMPORTANT, QString("\n") + player_ctx->tvchain->toString());
+@@ -2316,58 +2319,81 @@ void MythPlayer::SwitchToProgram(void)
+         return;
+     }
+ 
+-    if (discontinuity || newtype || GetEof())
++    player_ctx->tvchain->SetProgram(*pginfo);
++    if (discontinuity || newtype || isDummy || bEOF || bJump)
+     {
+-        Pause();
+-        ResetCaptions();
+-
+-        player_ctx->tvchain->SetProgram(*pginfo);
+         player_ctx->buffer->Reset(true);
++        player_ctx->SetPlayerChangingBuffers(false);
+ 
++        ResetCaptions();
+         ResetPlaying();
+ 
+-        if (newtype)
++        if (newtype || isDummy)
+         {
+             if (OpenFile() < 0)
+                 SetErrored(QObject::tr("Error opening switch program file"));
+         }
++        else if (decoder)
++        {
++            // the bitrate is reset by player_ctx->buffer->OpenFile()...
++            // but set in OpenFile in decoder->OpenFile
++            player_ctx->buffer->UpdateRawBitrate(decoder->GetRawBitrate());
++        }
+ 
+         if (IsErrored() || !decoder)
+         {
+-            VERBOSE(VB_IMPORTANT, LOC_ERR + "SwitchToProgram failed.");
++            VERBOSE(VB_IMPORTANT, LOC_ERR + "ChangeProgram failed.");
+             SetEof(true);
+             return;
+         }
+ 
+-        SetEof(false);
++        // After an audio reconfigure the audio is unpaused
++        audio.Pause(true);
+ 
+-        // the bitrate is reset by player_ctx->buffer->OpenFile()...
+-        // but set in OpenFile in decoder->OpenFile
+-        if (!newtype)
+-            player_ctx->buffer->UpdateRawBitrate(decoder->GetRawBitrate());
++        SetEof(false);
+         decoder->SetProgramInfo(*pginfo);
+ 
+         CheckTVChain();
+-        forcePositionMapSync = true;
+-        Play();
+-        ChangeSpeed();
++
++        UnpauseBuffer();
++        UnpauseDecoder();
++
++        if (nextpos < 0)
++            nextpos += totalFrames;
++        if (nextpos > 10)
++            DoFastForward(nextpos, true, false);
++
++        // Delay restarting a/v playback until enough video buffers
++        // This avoids stutters during initial few secs on remote frontends
++        do
++            usleep(10000);
++        while (!noVideoTracks && !PrebufferEnoughFrames(false) && !IsErrored());
++    }
++    else if (!decoder)
++    {
++        VERBOSE(VB_IMPORTANT, LOC_ERR + "ChangeProgram no decoder.");
++        SetEof(true);
++        return;
+     }
+     else
+     {
++        // the bitrate is reset by player_ctx->buffer->OpenFile()...
++        player_ctx->buffer->UpdateRawBitrate(decoder->GetRawBitrate());
++
+         player_ctx->SetPlayerChangingBuffers(true);
+-        if (decoder)
+-        {
+-            // the bitrate is reset by player_ctx->buffer->OpenFile()...
+-            player_ctx->buffer->UpdateRawBitrate(decoder->GetRawBitrate());
+-            decoder->SetReadAdjust(player_ctx->buffer->SetAdjustFilesize());
+-            decoder->SetWaitForChange();
+-        }
++        decoder->SetReadAdjust(player_ctx->buffer->SetAdjustFilesize());
++        decoder->SetWaitForChange();
+     }
+ 
++    Play();
++    ChangeSpeed();
++    forcePositionMapSync = true;
++
+     // Holdoff a/v sync while decoder and ringbuffer settle down
+-    avsync_holdoff = 25;
++    avsync_holdoff = 20;
++    avsync_audiopaused = false;
+ 
+-    VERBOSE(VB_PLAYBACK, LOC + "SwitchToProgram - end");
++    VERBOSE(VB_PLAYBACK, LOC + "ChangeProgram - end");
+ }
+ 
+ void MythPlayer::FileChangedCallback(void)
+@@ -2380,7 +2406,6 @@ void MythPlayer::FileChangedCallback(void)
+     player_ctx->SetPlayerChangingBuffers(false);
+ 
+     player_ctx->LockPlayingInfo(__FILE__, __LINE__);
+-    player_ctx->tvchain->SetProgram(*player_ctx->playingInfo);
+     if (decoder)
+         decoder->SetProgramInfo(*player_ctx->playingInfo);
+     player_ctx->UnlockPlayingInfo(__FILE__, __LINE__);
+@@ -2388,107 +2413,6 @@ void MythPlayer::FileChangedCallback(void)
+     CheckTVChain();
+ }
+ 
+-void MythPlayer::JumpToProgram(void)
+-{
+-    VERBOSE(VB_PLAYBACK, LOC + "JumpToProgram - start");
+-    bool discontinuity = false, newtype = false;
+-    int newid = -1;
+-    long long nextpos = player_ctx->tvchain->GetJumpPos();
+-    QSharedPointer<ProgramInfo> pginfo(player_ctx->tvchain->GetSwitchProgram(
+-        discontinuity, newtype, newid));
+-    if (!pginfo)
+-    {
+-        VERBOSE(VB_IMPORTANT, LOC_ERR + "JumpToProgram - No ProgramInfo");
+-        return;
+-    }
+-
+-    bool newIsDummy = player_ctx->tvchain->GetCardType(newid) == "DUMMY";
+-    SetPlayingInfo(*pginfo);
+-
+-    Pause();
+-    player_ctx->tvchain->SetProgram(*pginfo);
+-    player_ctx->buffer->Reset(true);
+-    player_ctx->SetPlayerChangingBuffers(false);
+-
+-    if (newIsDummy)
+-    {
+-        OpenDummy();
+-        ResetPlaying();
+-        SetEof(false);
+-        return;
+-    }
+-
+-    ResetCaptions();
+-    SendMythSystemPlayEvent("PLAY_CHANGED", pginfo.data());
+-
+-    player_ctx->buffer->OpenFile(
+-        pginfo->GetPlaybackURL(), RingBuffer::kLiveTVOpenTimeout);
+-
+-    if (!player_ctx->buffer->IsOpen())
+-    {
+-        VERBOSE(VB_IMPORTANT, LOC_ERR + "JumpToProgram's OpenFile failed " +
+-                QString("(card type: %1).")
+-                .arg(player_ctx->tvchain->GetCardType(newid)));
+-        VERBOSE(VB_IMPORTANT, QString("\n") + player_ctx->tvchain->toString());
+-        SetEof(true);
+-        SetErrored(QObject::tr("Error opening jump program file buffer"));
+-        return;
+-    }
+-
+-    ResetPlaying();
+-
+-    if (newtype || isDummy)
+-    {
+-        if (OpenFile() < 0)
+-        {
+-            SetErrored(QObject::tr("Error opening jump program file"));
+-            return;
+-        }
+-        if (IsErrored() || !decoder)
+-        {
+-            VERBOSE(VB_IMPORTANT, LOC_ERR + "JumpToProgram failed.");
+-            SetErrored(QObject::tr("Error reopening video decoder"));
+-            return;
+-        }
+-    }
+-    else
+-    {
+-        // the bitrate is reset by player_ctx->buffer->OpenFile()...
+-        // but set in OpenFile in decoder->OpenFile
+-        player_ctx->buffer->UpdateRawBitrate(decoder->GetRawBitrate());
+-    }
+-
+-    SetEof(false);
+-
+-    decoder->SetProgramInfo(*pginfo);
+-    CheckTVChain();
+-
+-    forcePositionMapSync = true;
+-
+-    UnpauseDecoder();
+-
+-    if (nextpos < 0)
+-        nextpos += totalFrames;
+-    if (nextpos < 0)
+-        nextpos = 0;
+-    if (nextpos > 10)
+-        DoFastForward(nextpos, true, false);
+-
+-    // Delay starting a/v playback until enough video buffers
+-    // This avoids stutters during initial few secs on remote frontends
+-    audio.Pause(true);
+-    while (!noVideoTracks && !PrebufferEnoughFrames(false) && !IsErrored())
+-        usleep(10000);
+-
+-    Play();
+-    ChangeSpeed();
+-
+-    // Holdoff a/v sync while decoder and ringbuffer settle down
+-    avsync_holdoff = 25;
+-
+-    VERBOSE(VB_PLAYBACK, LOC + "JumpToProgram - end");
+-}
+-
+ bool MythPlayer::StartPlaying(void)
+ {
+     if (OpenFile() < 0)
+@@ -2606,20 +2530,20 @@ void MythPlayer::EventLoop(void)
+     {
+         // Switch from the dummy recorder to the tuned program in livetv
+         player_ctx->tvchain->JumpToNext(true, 1);
+-        JumpToProgram();
++        ChangeProgram(true);
+     }
+     else if ((!allpaused || GetEof()) &&
+              decoder && !decoder->GetWaitForChange() &&
+              player_ctx->tvchain && player_ctx->tvchain->NeedsToSwitch())
+     {
+         // Switch to the next program in livetv
+-        SwitchToProgram();
++        ChangeProgram(false);
+     }
+ 
+     // Jump to the next program in livetv
+     if (player_ctx->tvchain && player_ctx->tvchain->NeedsToJump())
+     {
+-        JumpToProgram();
++        ChangeProgram(true);
+     }
+ 
+     // Change interactive stream if requested
+@@ -4667,8 +4591,7 @@ bool MythPlayer::SetStream(const QString &stream)
+     {
+         // Restore livetv
+         SetEof(true);
+-        player_ctx->tvchain->JumpToNext(false, 1);
+-        player_ctx->tvchain->JumpToNext(true, 1);
++        player_ctx->tvchain->JumpTo(-1, 1);
+     }
+ 
+     return !stream.isEmpty();
+diff --git a/mythtv/libs/libmythtv/mythplayer.h b/mythtv/libs/libmythtv/mythplayer.h
+index 454bf7d..5d0f448 100644
+--- a/mythtv/libs/libmythtv/mythplayer.h
++++ b/mythtv/libs/libmythtv/mythplayer.h
+@@ -520,8 +520,7 @@ class MPUBLIC MythPlayer
+     void  CheckExtraAudioDecode(void);
+ 
+     // Private LiveTV stuff
+-    void  SwitchToProgram(void);
+-    void  JumpToProgram(void);
++    void  ChangeProgram(bool bJump);
+     void  JumpToStream(const QString&);
+ 
+     void calcSliderPosPriv(osdInfo &info, bool paddedFields,
+-- 
+1.7.9.5
+

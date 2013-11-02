@@ -1,0 +1,52 @@
+From 411558122b879904f20a82584599eb13213265f4 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 24 Jul 2011 13:13:41 +0200
+Subject: [PATCH 180/207] libmythtv: Move thread affinity of PreviewGenerator
+ objects to QApplication
+
+If viewing a recorded program using a debug build of Qt 4.7, then when the
+recoding comes to an end the following assert is often triggered:
+
+ASSERT failure in QCoreApplication::sendEvent: "Cannot send events to
+ objects owned by a different thread. Current thread a24e070.
+ Receiver '' (of type 'PreviewGenerator') was created in thread ac2f84b8",
+ file kernel/qcoreapplication.cpp, line 349
+
+Qt requires that an event receiver have the same thread affinity as the
+QThread sending the event and this mechanism is used to dispatch
+MythEvents sent by gCoreContext->dispatchNow(me)
+
+This patch moves all PreviewGenerator objects to the QApplication::instance()
+thread.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/previewgenerator.cpp |    5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/previewgenerator.cpp b/mythtv/libs/libmythtv/previewgenerator.cpp
+index 2ece259..d5c1d70 100644
+--- a/mythtv/libs/libmythtv/previewgenerator.cpp
++++ b/mythtv/libs/libmythtv/previewgenerator.cpp
+@@ -15,6 +15,7 @@
+ #include <QImage>
+ #include <QDir>
+ #include <QUrl>
++#include <QApplication>
+ 
+ // MythTV headers
+ #include "mythconfig.h"
+@@ -74,6 +75,10 @@ PreviewGenerator::PreviewGenerator(const ProgramInfo *pginfo,
+       timeInSeconds(true),  captureTime(-1),  outFileName(QString::null),
+       outSize(0,0), token(_token), gotReply(false), pixmapOk(false)
+ {
++    // Qt requires that a receiver have the same thread affinity as the QThread
++    // sending the event, which is used to dispatch MythEvents sent by
++    // gCoreContext->dispatchNow(me)
++    moveToThread(QApplication::instance()->thread());
+ }
+ 
+ PreviewGenerator::~PreviewGenerator()
+-- 
+1.7.9.5
+

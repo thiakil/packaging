@@ -1,0 +1,30 @@
+From ee186805b40991e6a3437338be9748a00d9c098d Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 4 Oct 2013 10:22:57 +0100
+Subject: [PATCH 190/202] UPNP: Fix missing EWOULDBLOCK with Mingw build
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythupnp/ssdp.cpp |    6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythupnp/ssdp.cpp b/mythtv/libs/libmythupnp/ssdp.cpp
+index d720c5c..0d7a10a 100644
+--- a/mythtv/libs/libmythupnp/ssdp.cpp
++++ b/mythtv/libs/libmythupnp/ssdp.cpp
+@@ -328,7 +328,11 @@ void SSDP::ProcessData( MSocketDevice *pSocket )
+             long ret = pSocket->readBlock( buffer.data() + nRead, nBytes - nRead );
+             if (ret < 0)
+             {
+-                if (errno == EAGAIN || errno == EWOULDBLOCK)
++                if (errno == EAGAIN
++#ifdef EWOULDBLOCK
++                    || errno == EWOULDBLOCK
++#endif
++                )
+                 {
+                     if (retries == 3)
+                     {
+-- 
+1.7.9.5
+

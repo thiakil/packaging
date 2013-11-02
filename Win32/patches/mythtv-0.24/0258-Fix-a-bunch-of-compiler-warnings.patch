@@ -1,0 +1,578 @@
+From ad54977a60ab08a17feb41e81df3f30de6c86e24 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 14 Jul 2013 09:15:50 +0100
+Subject: [PATCH 258/285] Fix a bunch of compiler warnings
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/mythgame/mythgame/dbcheck.cpp         |    2 +-
+ mythplugins/mythgame/mythgame/gamehandler.cpp     |   14 +++++++-------
+ mythplugins/mythgame/mythgame/gamesettings.cpp    |    6 +++---
+ mythplugins/mythgame/mythgame/rom_metadata.cpp    |    4 ++--
+ mythplugins/mythmusic/mythmusic/lameencoder.cpp   |    2 +-
+ mythplugins/mythmusic/mythmusic/metadata.cpp      |    2 +-
+ mythplugins/mythmusic/mythmusic/musiccommon.cpp   |   16 +++++++++++-----
+ mythplugins/mythnetvision/mythnetvision/main.cpp  |    8 ++++----
+ mythtv/libs/libmyth/uilistbtntype.cpp             |    2 +-
+ mythtv/libs/libmyth/uitypes.cpp                   |    2 +-
+ mythtv/libs/libmythdb/mythcorecontext.cpp         |    2 +-
+ mythtv/libs/libmythdb/remotefile.cpp              |    2 +-
+ mythtv/libs/libmythtv/avformatdecoder.cpp         |   14 ++++++--------
+ mythtv/libs/libmythtv/mythdvdplayer.cpp           |    2 +-
+ mythtv/libs/libmythui/mythrender_vdpau.cpp        |    2 +-
+ mythtv/programs/mythbackend/autoexpire.cpp        |    4 ++--
+ mythtv/programs/mythfrontend/playbackbox.cpp      |    4 ++--
+ mythtv/programs/mythfrontend/themechooser.cpp     |    2 +-
+ mythtv/programs/mythtranscode/mpeg2fix.cpp        |    4 ++--
+ mythtv/programs/mythtranscode/replex/avi.c        |    4 ++--
+ mythtv/programs/mythtranscode/replex/pes.c        |    4 ++--
+ mythtv/programs/mythtranscode/replex/ringbuffer.c |    4 ++--
+ 22 files changed, 55 insertions(+), 51 deletions(-)
+
+diff --git a/mythplugins/mythgame/mythgame/dbcheck.cpp b/mythplugins/mythgame/mythgame/dbcheck.cpp
+index 89c7ec0..8148c0c 100644
+--- a/mythplugins/mythgame/mythgame/dbcheck.cpp
++++ b/mythplugins/mythgame/mythgame/dbcheck.cpp
+@@ -62,7 +62,7 @@ static bool performActualUpdate(const QString updates[], QString version,
+     return true;
+ }
+ 
+-bool InitializeDatabase(void)
++static bool InitializeDatabase(void)
+ {
+     VERBOSE(VB_IMPORTANT, "Inserting MythGame initial database information.");
+ 
+diff --git a/mythplugins/mythgame/mythgame/gamehandler.cpp b/mythplugins/mythgame/mythgame/gamehandler.cpp
+index 630223f..4cc2e8e 100644
+--- a/mythplugins/mythgame/mythgame/gamehandler.cpp
++++ b/mythplugins/mythgame/mythgame/gamehandler.cpp
+@@ -18,8 +18,8 @@
+ #define LOC QString("MythGame:GAMEHANDLER: ")
+ 
+ static QList<GameHandler*> *handlers = NULL;
+-
+-bool existsHandler(const QString name)
++/*
++static bool existsHandler(const QString name)
+ {
+     for (int i = 0; i < handlers->size(); i++)
+     {
+@@ -30,7 +30,7 @@ bool existsHandler(const QString name)
+ 
+     return false;
+ }
+-
++*/
+ static void checkHandlers(void)
+ {
+     // If a handlers list doesn't currently exist create one. Otherwise
+@@ -192,7 +192,7 @@ void GameHandler::GetMetadata(GameHandler *handler, QString rom, QString* Genre,
+     
+ }
+ 
+-void purgeGameDB(QString filename, QString RomPath) 
++static void purgeGameDB(QString filename, QString RomPath)
+ {
+     VERBOSE(VB_GENERAL, LOC + QString("Purging %1 - %2").arg(RomPath)
+             .arg(filename));
+@@ -256,7 +256,7 @@ void GameHandler::promptForRemoval(QString filename, QString RomPath)
+ 
+ }
+ 
+-void updateDisplayRom(QString romname, int display, QString Systemname)
++static void updateDisplayRom(QString romname, int display, QString Systemname)
+ {
+     MSqlQuery query(MSqlQuery::InitCon());
+     query.prepare("UPDATE gamemetadata SET display = :DISPLAY "
+@@ -271,7 +271,7 @@ void updateDisplayRom(QString romname, int display, QString Systemname)
+ 
+ }
+ 
+-void updateDiskCount(QString romname, int diskcount, QString GameType)
++static void updateDiskCount(QString romname, int diskcount, QString GameType)
+ {
+     MSqlQuery query(MSqlQuery::InitCon());
+     query.prepare("UPDATE gamemetadata SET diskcount = :DISKCOUNT "
+@@ -286,7 +286,7 @@ void updateDiskCount(QString romname, int diskcount, QString GameType)
+ 
+ }
+ 
+-void updateGameName(QString romname, QString GameName, QString Systemname)
++static void updateGameName(QString romname, QString GameName, QString Systemname)
+ {
+     MSqlQuery query(MSqlQuery::InitCon());
+     query.prepare("UPDATE gamemetadata SET GameName = :GAMENAME "
+diff --git a/mythplugins/mythgame/mythgame/gamesettings.cpp b/mythplugins/mythgame/mythgame/gamesettings.cpp
+index 7076f3e..3cac090 100644
+--- a/mythplugins/mythgame/mythgame/gamesettings.cpp
++++ b/mythplugins/mythgame/mythgame/gamesettings.cpp
+@@ -80,7 +80,7 @@ static HostCheckBox *GameTreeView()
+     return gc;
+ }
+ 
+-HostLineEdit *GetScreenshotDir()
++static HostLineEdit *GetScreenshotDir()
+ {
+     HostLineEdit *gc = new HostLineEdit("mythgame.screenshotdir");
+     gc->setLabel(QObject::tr("Directory where Game Screenshots are stored"));
+@@ -90,7 +90,7 @@ HostLineEdit *GetScreenshotDir()
+     return gc;
+ }
+ 
+-HostLineEdit *GetFanartDir()
++static HostLineEdit *GetFanartDir()
+ {
+     HostLineEdit *gc = new HostLineEdit("mythgame.fanartdir");
+     gc->setLabel(QObject::tr("Directory where Game Fanart is stored"));
+@@ -100,7 +100,7 @@ HostLineEdit *GetFanartDir()
+     return gc;
+ }
+ 
+-HostLineEdit *GetBoxartDir()
++static HostLineEdit *GetBoxartDir()
+ {
+     HostLineEdit *gc = new HostLineEdit("mythgame.boxartdir");
+     gc->setLabel(QObject::tr("Directory where Game Boxart is stored"));
+diff --git a/mythplugins/mythgame/mythgame/rom_metadata.cpp b/mythplugins/mythgame/mythgame/rom_metadata.cpp
+index 5fc91a9..1b4d4ee 100644
+--- a/mythplugins/mythgame/mythgame/rom_metadata.cpp
++++ b/mythplugins/mythgame/mythgame/rom_metadata.cpp
+@@ -6,7 +6,7 @@
+ 
+ #include "unzip.h"
+ 
+-int calcOffset(QString GameType, uLong filesize) {
++static int calcOffset(QString GameType, uLong filesize) {
+     int result;
+     uLong rom_size;
+ 
+@@ -30,7 +30,7 @@ int calcOffset(QString GameType, uLong filesize) {
+     return result;
+ }
+ 
+-QString crcStr(uLong crc) {
++static QString crcStr(uLong crc) {
+     QString tmpcrc("");
+ 
+     tmpcrc = QString("%1").arg( crc, 0, 16 );
+diff --git a/mythplugins/mythmusic/mythmusic/lameencoder.cpp b/mythplugins/mythmusic/mythmusic/lameencoder.cpp
+index 0235f6d..b5a64e6 100644
+--- a/mythplugins/mythmusic/mythmusic/lameencoder.cpp
++++ b/mythplugins/mythmusic/mythmusic/lameencoder.cpp
+@@ -36,7 +36,7 @@
+ 
+ using namespace std;
+ 
+-int write_buffer(char *buf, int bufsize, FILE *fp)
++static int write_buffer(char *buf, int bufsize, FILE *fp)
+ {
+     return fwrite(buf, 1, bufsize, fp);
+ }
+diff --git a/mythplugins/mythmusic/mythmusic/metadata.cpp b/mythplugins/mythmusic/mythmusic/metadata.cpp
+index 0e5778e..a96b381 100644
+--- a/mythplugins/mythmusic/mythmusic/metadata.cpp
++++ b/mythplugins/mythmusic/mythmusic/metadata.cpp
+@@ -37,7 +37,7 @@ bool operator!=(const Metadata& a, const Metadata& b)
+     return false;
+ }
+ 
+-bool meta_less_than(const Metadata *item1, const Metadata *item2)
++static bool meta_less_than(const Metadata *item1, const Metadata *item2)
+ {
+     return item1->compare(item2) < 0;
+ }
+diff --git a/mythplugins/mythmusic/mythmusic/musiccommon.cpp b/mythplugins/mythmusic/mythmusic/musiccommon.cpp
+index f40d529..a543436 100755
+--- a/mythplugins/mythmusic/mythmusic/musiccommon.cpp
++++ b/mythplugins/mythmusic/mythmusic/musiccommon.cpp
+@@ -335,6 +335,8 @@ void MusicCommon::switchView(int view)
+     }
+ 
+     Close();
++#else
++    (void)view;
+ #endif
+ }
+ 
+@@ -622,6 +624,8 @@ void MusicCommon::showSpeed(bool show)
+                                      speed_text, "Generic", false));
+         lcd->switchToGeneric(textItems);
+     }
++#else
++    (void)show;
+ #endif
+ }
+ 
+@@ -1130,7 +1134,7 @@ void MusicCommon::customEvent(QEvent *event)
+         //FIXME should just remove the list item
+         if (m_currentPlaylist)
+         {
+-            MusicPlayerEvent *mpe = (MusicPlayerEvent*)(event);
++//            MusicPlayerEvent *mpe = (MusicPlayerEvent*)(event);
+ //            int trackID = mpe->TrackID;
+             // FIXME: should restore track position
+             int pos = m_currentPlaylist->GetCurrentPos();
+@@ -1145,7 +1149,7 @@ void MusicCommon::customEvent(QEvent *event)
+     {
+         if (m_currentPlaylist)
+         {
+-            MusicPlayerEvent *mpe = (MusicPlayerEvent*)(event);
++//            MusicPlayerEvent *mpe = (MusicPlayerEvent*)(event);
+ //            int trackID = mpe->TrackID;
+             int pos = m_currentPlaylist->GetCurrentPos();
+             int topPos = m_currentPlaylist->GetTopItemPos();
+@@ -1157,7 +1161,7 @@ void MusicCommon::customEvent(QEvent *event)
+     }
+     else if (event->type() == MusicPlayerEvent::AllTracksRemovedEvent)
+     {
+-        MusicPlayerEvent *mpe = (MusicPlayerEvent*)(event);
++//        MusicPlayerEvent *mpe = (MusicPlayerEvent*)(event);
+         updateUIPlaylist();
+         updatePlaylistStats();
+     }
+@@ -1186,7 +1190,7 @@ void MusicCommon::customEvent(QEvent *event)
+     }
+ }
+ 
+-void MusicCommon::updateVolume(uint volume, bool muted)
++void MusicCommon::updateVolume(uint /*volume*/, bool muted)
+ {
+     if (!m_controlVolume)
+     {
+@@ -1231,6 +1235,8 @@ void MusicCommon::editTrackInfo(Metadata *mdata)
+     connect(editDialog, SIGNAL(metadataChanged()), this, SLOT(metadataChanged()));
+ 
+     mainStack->AddScreen(editDialog);
++#else
++    (void)mdata;
+ #endif
+ }
+ 
+@@ -1540,7 +1546,7 @@ bool MythMusicVolumeDialog::keyPressEvent(QKeyEvent *event)
+     return handled;
+ }
+ 
+-void MythMusicVolumeDialog::customEvent(QEvent *event)
++void MythMusicVolumeDialog::customEvent(QEvent * /*event*/)
+ {
+ 
+ }
+diff --git a/mythplugins/mythnetvision/mythnetvision/main.cpp b/mythplugins/mythnetvision/mythnetvision/main.cpp
+index b8dff1d..553847c 100644
+--- a/mythplugins/mythnetvision/mythnetvision/main.cpp
++++ b/mythplugins/mythnetvision/mythnetvision/main.cpp
+@@ -61,7 +61,7 @@ static int RunNetTree(void)
+         return -1;
+     }
+ }
+-
++/*
+ static int RunTreeEditor(void)
+ {
+     MythScreenStack *mainStack = GetMythMainWindow()->GetMainStack();
+@@ -79,7 +79,7 @@ static int RunTreeEditor(void)
+         return -1;
+     }
+ }
+-
++*/
+ static void runNetVision(void)
+ {
+     RunNetVision();
+@@ -89,12 +89,12 @@ static void runNetTree(void)
+ {
+     RunNetTree();
+ }
+-
++/*
+ static void runTreeEditor(void)
+ {
+     RunTreeEditor();
+ }
+-
++*/
+ static void setupKeys(void)
+ {
+     REG_JUMP("MythNetSearch", QT_TRANSLATE_NOOP("MythControls",
+diff --git a/mythtv/libs/libmyth/uilistbtntype.cpp b/mythtv/libs/libmyth/uilistbtntype.cpp
+index f7325b7..14c94d0 100644
+--- a/mythtv/libs/libmyth/uilistbtntype.cpp
++++ b/mythtv/libs/libmyth/uilistbtntype.cpp
+@@ -1482,7 +1482,7 @@ bool UIListBtnType::incSearchStart(void)
+     modeCombo->insertItem(tr("Contains text"));
+     popup->addWidget(modeCombo);
+ 
+-    MythLineEdit *searchEdit = new MythLineEdit(false, popup, "mode_combo");
++    MythLineEdit *searchEdit = new MythLineEdit("", popup, "mode_combo");
+     searchEdit->setText(m_incSearch);
+     popup->addWidget(searchEdit);
+     searchEdit->setFocus();
+diff --git a/mythtv/libs/libmyth/uitypes.cpp b/mythtv/libs/libmyth/uitypes.cpp
+index 514652a..ef8d10b 100644
+--- a/mythtv/libs/libmyth/uitypes.cpp
++++ b/mythtv/libs/libmyth/uitypes.cpp
+@@ -2994,7 +2994,7 @@ bool UIManagedTreeListType::incSearchStart(void)
+     modeCombo->insertItem(tr("Contains text"));
+     popup->addWidget(modeCombo);
+ 
+-    MythLineEdit *searchEdit = new MythLineEdit(false, popup, "mode_combo");
++    MythLineEdit *searchEdit = new MythLineEdit("", popup, "mode_combo");
+     searchEdit->setText(incSearch);
+     popup->addWidget(searchEdit);
+     searchEdit->setFocus();
+diff --git a/mythtv/libs/libmythdb/mythcorecontext.cpp b/mythtv/libs/libmythdb/mythcorecontext.cpp
+index 621b3cc..556dcaa 100644
+--- a/mythtv/libs/libmythdb/mythcorecontext.cpp
++++ b/mythtv/libs/libmythdb/mythcorecontext.cpp
+@@ -944,7 +944,7 @@ bool MythCoreContext::CheckProtoVersion(MythSocket *socket, uint timeout_ms,
+     {
+         VERBOSE(VB_GENERAL, QString("Protocol version or token mismatch "
+                                     "(frontend=%1/%2,"
+-                                    "backend=%3/??)\n")
++                                    "backend=%3)\n")
+                                     .arg(MYTH_PROTO_VERSION)
+                                     .arg(MYTH_PROTO_TOKEN)
+                                     .arg(strlist[1]));
+diff --git a/mythtv/libs/libmythdb/remotefile.cpp b/mythtv/libs/libmythdb/remotefile.cpp
+index e606ee9..bb1a868 100644
+--- a/mythtv/libs/libmythdb/remotefile.cpp
++++ b/mythtv/libs/libmythdb/remotefile.cpp
+@@ -317,7 +317,7 @@ QString RemoteFile::GetFileHash(const QString &url)
+         filename = filename.right(filename.length()-1);
+ 
+     if (filename.isEmpty() || sgroup.isEmpty())
+-        return false;
++        return QString();
+ 
+     QStringList strlist("QUERY_FILE_HASH");
+     strlist << filename;
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index e91c00b..07f5b47 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -426,7 +426,7 @@ int64_t AvFormatDecoder::NormalizeVideoTimecode(int64_t timecode)
+     if (!st)
+         return false;
+ 
+-    if (ic->start_time != AV_NOPTS_VALUE)
++    if (ic->start_time != (int64_t)AV_NOPTS_VALUE)
+         start_pts = av_rescale(ic->start_time,
+                                st->time_base.den,
+                                AV_TIME_BASE * (int64_t)st->time_base.num);
+@@ -446,7 +446,7 @@ int64_t AvFormatDecoder::NormalizeVideoTimecode(AVStream *st,
+ {
+     int64_t start_pts = 0, pts;
+ 
+-    if (ic->start_time != AV_NOPTS_VALUE)
++    if (ic->start_time != (int64_t)AV_NOPTS_VALUE)
+         start_pts = av_rescale(ic->start_time,
+                                st->time_base.den,
+                                AV_TIME_BASE * (int64_t)st->time_base.num);
+@@ -575,8 +575,6 @@ bool AvFormatDecoder::DoFastForward(long long desiredFrame, bool discardFrames)
+         return true;
+     }
+ 
+-    AVCodecContext *context = st->codec;
+-
+     long long ts = 0;
+     if (ic->start_time != (int64_t)AV_NOPTS_VALUE)
+         ts = ic->start_time;
+@@ -1242,7 +1240,7 @@ static enum PixelFormat get_format_vdpau(struct AVCodecContext *avctx,
+ 
+     return fmt[i];
+ }
+-
++/*
+ static enum PixelFormat get_format_dxva2(struct AVCodecContext *avctx,
+                                          const enum PixelFormat *fmt)
+ {
+@@ -1254,14 +1252,14 @@ static enum PixelFormat get_format_dxva2(struct AVCodecContext *avctx,
+             break;
+     return fmt[i];
+ }
+-
++*/
+ static bool IS_VAAPI_PIX_FMT(enum PixelFormat fmt)
+ {
+     return fmt == PIX_FMT_VAAPI_MOCO ||
+            fmt == PIX_FMT_VAAPI_IDCT ||
+            fmt == PIX_FMT_VAAPI_VLD;
+ }
+-
++/*
+ static enum PixelFormat get_format_vaapi(struct AVCodecContext *avctx,
+                                          const enum PixelFormat *fmt)
+ {
+@@ -1273,7 +1271,7 @@ static enum PixelFormat get_format_vaapi(struct AVCodecContext *avctx,
+             break;
+     return fmt[i];
+ }
+-
++*/
+ static bool IS_DR1_PIX_FMT(const enum PixelFormat fmt)
+ {
+     switch (fmt)
+diff --git a/mythtv/libs/libmythtv/mythdvdplayer.cpp b/mythtv/libs/libmythtv/mythdvdplayer.cpp
+index 9895b80..7104409 100644
+--- a/mythtv/libs/libmythtv/mythdvdplayer.cpp
++++ b/mythtv/libs/libmythtv/mythdvdplayer.cpp
+@@ -492,7 +492,7 @@ void MythDVDPlayer::DisplayDVDButton(void)
+     bool numbuttons    = player_ctx->buffer->DVD()->NumMenuButtons();
+ 
+     // nothing to do
+-    if (buttonversion == m_buttonVersion)
++    if ((int)buttonversion == m_buttonVersion)
+     {
+         player_ctx->buffer->DVD()->ReleaseMenuButton();
+         return;
+diff --git a/mythtv/libs/libmythui/mythrender_vdpau.cpp b/mythtv/libs/libmythui/mythrender_vdpau.cpp
+index 8e5415d..b02b76d 100644
+--- a/mythtv/libs/libmythui/mythrender_vdpau.cpp
++++ b/mythtv/libs/libmythui/mythrender_vdpau.cpp
+@@ -1402,7 +1402,7 @@ void* MythRenderVDPAU::GetRender(uint id)
+ uint MythRenderVDPAU::GetSurfaceOwner(VdpVideoSurface surface)
+ {
+     LOCK_RENDER
+-    CHECK_STATUS(NULL)
++    CHECK_STATUS(0)
+ 
+     if (!m_videoSurfaceHash.contains(surface))
+         return 0;
+diff --git a/mythtv/programs/mythbackend/autoexpire.cpp b/mythtv/programs/mythbackend/autoexpire.cpp
+index 1d4e3fc..d96693b 100644
+--- a/mythtv/programs/mythbackend/autoexpire.cpp
++++ b/mythtv/programs/mythbackend/autoexpire.cpp
+@@ -464,7 +464,7 @@ void AutoExpire::ExpireRecordings(void)
+             continue;
+         }
+ 
+-        if ((int64_t)max(0LL, fsit->freeSpaceKB) < desired_space[fsit->fsID])
++        if ((uint64_t)max(0LL, fsit->freeSpaceKB) < desired_space[fsit->fsID])
+         {
+             VERBOSE(VB_FILE,
+                     QString("    Not Enough Free Space!  We want %1 MB")
+@@ -491,7 +491,7 @@ void AutoExpire::ExpireRecordings(void)
+             QString myHostName = gCoreContext->GetHostName();
+             pginfolist_t::iterator it = expireList.begin();
+             while ((it != expireList.end()) &&
+-                   ((int64_t)max(0LL, fsit->freeSpaceKB) < desired_space[fsit->fsID]))
++                   ((uint64_t)max(0LL, fsit->freeSpaceKB) < desired_space[fsit->fsID]))
+             {
+                 ProgramInfo *p = *it;
+                 it++;
+diff --git a/mythtv/programs/mythfrontend/playbackbox.cpp b/mythtv/programs/mythfrontend/playbackbox.cpp
+index 93f2a56..82bb31b 100644
+--- a/mythtv/programs/mythfrontend/playbackbox.cpp
++++ b/mythtv/programs/mythfrontend/playbackbox.cpp
+@@ -280,8 +280,8 @@ static void push_onto_del(QStringList &list, const ProgramInfo &pginfo)
+     list.clear();
+     list.push_back(QString::number(pginfo.GetChanID()));
+     list.push_back(pginfo.GetRecordingStartTime(ISODate));
+-    list.push_back(false /* force Delete */);
+-    list.push_back(false); /* forget history */
++    list.push_back(NULL /* force Delete */);
++    list.push_back(NULL); /* forget history */
+ }
+ 
+ static bool extract_one_del(
+diff --git a/mythtv/programs/mythfrontend/themechooser.cpp b/mythtv/programs/mythfrontend/themechooser.cpp
+index f46a972..35481c9 100644
+--- a/mythtv/programs/mythfrontend/themechooser.cpp
++++ b/mythtv/programs/mythfrontend/themechooser.cpp
+@@ -88,7 +88,7 @@ ThemeChooser::~ThemeChooser()
+     gCoreContext->removeListener(this);
+ }
+ 
+-bool sortThemeNames(const QFileInfo &s1, const QFileInfo &s2)
++static bool sortThemeNames(const QFileInfo &s1, const QFileInfo &s2)
+ {
+     return s1.fileName().toLower() < s2.fileName().toLower();
+ }
+diff --git a/mythtv/programs/mythtranscode/mpeg2fix.cpp b/mythtv/programs/mythtranscode/mpeg2fix.cpp
+index f3301e6..a381f25 100644
+--- a/mythtv/programs/mythtranscode/mpeg2fix.cpp
++++ b/mythtv/programs/mythtranscode/mpeg2fix.cpp
+@@ -75,7 +75,7 @@ static void my_av_print(void *ptr, int level, const char* fmt, va_list vl)
+         full_line = QString("");
+     }
+ }
+-
++/*
+ static void DEBUGpts(Q3PtrList<MPEG2frame> *vFrame)
+ {
+     int pos = vFrame->at();
+@@ -89,7 +89,7 @@ static void DEBUGpts(Q3PtrList<MPEG2frame> *vFrame)
+     }
+     vFrame->at(pos);
+ }
+-
++*/
+ static QString PtsTime(int64_t pts)
+ {
+     bool is_neg = false;
+diff --git a/mythtv/programs/mythtranscode/replex/avi.c b/mythtv/programs/mythtranscode/replex/avi.c
+index aa28779..f4ad8dc 100644
+--- a/mythtv/programs/mythtranscode/replex/avi.c
++++ b/mythtv/programs/mythtranscode/replex/avi.c
+@@ -42,7 +42,7 @@ static uint32_t getle32(uint8_t *buf)
+ {
+ 	return (buf[3]<<24)|(buf[2]<<16)|(buf[1]<<8)|buf[0];
+ }
+-
++/*
+ static uint32_t getbe32(uint8_t *buf)
+ {
+ 	return (buf[0]<<24)|(buf[1]<<16)|(buf[2]<<8)|buf[3];
+@@ -52,7 +52,7 @@ static void printhead(uint8_t *buf)
+ {
+ 	printf("%c%c%c%c ", buf[0], buf[1], buf[2], buf[3]);
+ }
+-
++*/
+ static uint32_t getsize(int fd)
+ {
+ 	int len;
+diff --git a/mythtv/programs/mythtranscode/replex/pes.c b/mythtv/programs/mythtranscode/replex/pes.c
+index 97f8415..459c176 100644
+--- a/mythtv/programs/mythtranscode/replex/pes.c
++++ b/mythtv/programs/mythtranscode/replex/pes.c
+@@ -389,7 +389,7 @@ void get_pes (pes_in_t *p, uint8_t *buf, int count, void (*func)(pes_in_t *p))
+ 	return;
+ }
+ 
+-
++/*
+ static uint32_t scr_base_ps(uint8_t *scr)
+ {
+ 	uint32_t base = 0;
+@@ -422,7 +422,7 @@ static uint16_t scr_ext_ps(uint8_t *scr)
+ 
+ 	return ext;
+ }
+-
++*/
+ 
+ 
+ static void init_ps(ps_packet *p)
+diff --git a/mythtv/programs/mythtranscode/replex/ringbuffer.c b/mythtv/programs/mythtranscode/replex/ringbuffer.c
+index 9c23fe1..c3aca15 100644
+--- a/mythtv/programs/mythtranscode/replex/ringbuffer.c
++++ b/mythtv/programs/mythtranscode/replex/ringbuffer.c
+@@ -423,7 +423,7 @@ int dummy_delete(dummy_buffer *dbuf, uint64_t time)
+ 
+ 	return dsize;
+ }
+-
++/*
+ static void dummy_print(dummy_buffer *dbuf)
+ {
+    int i;
+@@ -439,4 +439,4 @@ static void dummy_print(dummy_buffer *dbuf)
+        printf("%d : %llu %u\n", i, (long long unsigned int)rtime, size);
+    }
+    printf("Used: %d Free: %d data-free: %d\n", avail, 1000-avail, dbuf->size - dbuf->fill);
+-}
++}*/
+-- 
+1.7.9.5
+

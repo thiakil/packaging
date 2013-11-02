@@ -1,0 +1,40 @@
+From edd27dc98141b8664d7021b9d87a554debdc798d Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 29 Oct 2011 11:24:57 +0200
+Subject: [PATCH 097/207] dvbrecorder: Correct test for MPEG TS continuity
+ counter
+
+The transport stream continuity counter is only incremented iff the packet
+has a payload.  This change only reports a continuity error iff the
+packet has a payload.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/recorders/dtvrecorder.cpp |    4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/recorders/dtvrecorder.cpp b/mythtv/libs/libmythtv/recorders/dtvrecorder.cpp
+index 099f8a6..3763f3b 100644
+--- a/mythtv/libs/libmythtv/recorders/dtvrecorder.cpp
++++ b/mythtv/libs/libmythtv/recorders/dtvrecorder.cpp
+@@ -1319,7 +1319,7 @@ bool DTVRecorder::ProcessTSPacket(const TSPacket &tspacket)
+ 
+     // Check continuity counter
+     uint old_cnt = _continuity_counter[pid];
+-    if ((pid != 0x1fff) && !CheckCC(pid, tspacket.ContinuityCounter()))
++    if ((pid != 0x1fff) && tspacket.HasPayload() && !CheckCC(pid, tspacket.ContinuityCounter()))
+     {
+         int v = _continuity_error_count.fetchAndAddRelaxed(1) + 1;
+         double erate = v * 100.0 / _packet_count.fetchAndAddRelaxed(0);
+@@ -1423,7 +1423,7 @@ bool DTVRecorder::ProcessAVTSPacket(const TSPacket &tspacket)
+ 
+     // Check continuity counter
+     uint old_cnt = _continuity_counter[pid];
+-    if ((pid != 0x1fff) && !CheckCC(pid, tspacket.ContinuityCounter()))
++    if ((pid != 0x1fff) && tspacket.HasPayload() && !CheckCC(pid, tspacket.ContinuityCounter()))
+     {
+         int v = _continuity_error_count.fetchAndAddRelaxed(1) + 1;
+         double erate = v * 100.0 / _packet_count.fetchAndAddRelaxed(0);
+-- 
+1.7.9.5
+

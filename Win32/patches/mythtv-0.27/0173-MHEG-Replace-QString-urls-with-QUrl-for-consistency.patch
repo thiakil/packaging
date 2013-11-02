@@ -1,0 +1,281 @@
+From cce9daa6fd3ec37f4a7c858c5c6144ebe8f40379 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 21 Aug 2013 13:36:35 +0100
+Subject: [PATCH 173/207] MHEG: Replace QString urls with QUrl for consistency
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mhegic.cpp    |   38 ++++++++++++++++++-----------------
+ mythtv/libs/libmythtv/mhegic.h      |    3 ++-
+ mythtv/libs/libmythtv/netstream.cpp |   18 +++++++++--------
+ mythtv/libs/libmythtv/netstream.h   |    7 ++++---
+ 4 files changed, 36 insertions(+), 30 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mhegic.cpp b/mythtv/libs/libmythtv/mhegic.cpp
+index 31456c1..46560f4 100644
+--- a/mythtv/libs/libmythtv/mhegic.cpp
++++ b/mythtv/libs/libmythtv/mhegic.cpp
+@@ -61,31 +61,32 @@ MHInteractionChannel::EStatus MHInteractionChannel::status()
+     return gCoreContext->GetNumSetting("EnableMHEGic", 1) ? kActive : kDisabled;
+ }
+ 
+-static inline bool isCached(const QString& csPath)
++static inline bool isCached(const QUrl& url)
+ {
+-    return NetStream::GetLastModified(csPath).isValid();
++    return NetStream::GetLastModified(url).isValid();
+ }
+ 
+ // Is a file ready to read?
+ bool MHInteractionChannel::CheckFile(const QString& csPath, const QByteArray &cert)
+ {
++    QUrl url(csPath);
+     QMutexLocker locker(&m_mutex);
+ 
+     // Is it complete?
+-    if (m_finished.contains(csPath))
++    if (m_finished.contains(url))
+         return true;
+ 
+     // Is it pending?
+-    if (m_pending.contains(csPath))
++    if (m_pending.contains(url))
+         return false; // It's pending so unavailable
+ 
+     // Is it in the cache?
+-    if (isCached(csPath))
++    if (isCached(url))
+         return true; // It's cached
+ 
+     // Queue a request
+     LOG(VB_MHEG, LOG_DEBUG, LOC + QString("CheckFile queue %1").arg(csPath));
+-    QScopedPointer< NetStream > p(new NetStream(csPath, NetStream::kPreferCache, cert));
++    QScopedPointer< NetStream > p(new NetStream(url, NetStream::kPreferCache, cert));
+     if (!p || !p->IsOpen())
+     {
+         LOG(VB_MHEG, LOG_WARNING, LOC + QString("CheckFile failed %1").arg(csPath) );
+@@ -93,7 +94,7 @@ bool MHInteractionChannel::CheckFile(const QString& csPath, const QByteArray &ce
+     }
+ 
+     connect(p.data(), SIGNAL(Finished(QObject*)), this, SLOT(slotFinished(QObject*)) );
+-    m_pending.insert(csPath, p.take());
++    m_pending.insert(url, p.take());
+ 
+     return false; // It's now pending so unavailable
+ }
+@@ -103,14 +104,15 @@ MHInteractionChannel::EResult
+ MHInteractionChannel::GetFile(const QString &csPath, QByteArray &data,
+         const QByteArray &cert /*=QByteArray()*/)
+ {
++    QUrl url(csPath);
+     QMutexLocker locker(&m_mutex);
+ 
+     // Is it pending?
+-    if (m_pending.contains(csPath))
++    if (m_pending.contains(url))
+         return kPending;
+ 
+     // Is it complete?
+-    QScopedPointer< NetStream > p(m_finished.take(csPath));
++    QScopedPointer< NetStream > p(m_finished.take(url));
+     if (p)
+     {
+         if (p->GetError() == QNetworkReply::NoError)
+@@ -125,13 +127,13 @@ MHInteractionChannel::GetFile(const QString &csPath, QByteArray &data,
+     }
+ 
+     // Is it in the cache?
+-    if (isCached(csPath))
++    if (isCached(url))
+     {
+         LOG(VB_MHEG, LOG_DEBUG, LOC + QString("GetFile cache read %1").arg(csPath) );
+ 
+         locker.unlock();
+ 
+-        NetStream req(csPath, NetStream::kAlwaysCache);
++        NetStream req(url, NetStream::kAlwaysCache);
+         if (req.WaitTillFinished(3000) && req.GetError() == QNetworkReply::NoError)
+         {
+             data = req.ReadAll();
+@@ -148,7 +150,7 @@ MHInteractionChannel::GetFile(const QString &csPath, QByteArray &data,
+ 
+     // Queue a download
+     LOG(VB_MHEG, LOG_DEBUG, LOC + QString("GetFile queue %1").arg(csPath) );
+-    p.reset(new NetStream(csPath, NetStream::kPreferCache, cert));
++    p.reset(new NetStream(url, NetStream::kPreferCache, cert));
+     if (!p || !p->IsOpen())
+     {
+         LOG(VB_MHEG, LOG_WARNING, LOC + QString("GetFile failed %1").arg(csPath) );
+@@ -156,7 +158,7 @@ MHInteractionChannel::GetFile(const QString &csPath, QByteArray &data,
+     }
+ 
+     connect(p.data(), SIGNAL(Finished(QObject*)), this, SLOT(slotFinished(QObject*)) );
+-    m_pending.insert(csPath, p.take());
++    m_pending.insert(url, p.take());
+ 
+     return kPending;
+ }
+@@ -168,11 +170,11 @@ void MHInteractionChannel::slotFinished(QObject *obj)
+     if (!p)
+         return;
+ 
+-    QByteArray url = p->Url().toEncoded();
++    QUrl url = p->Url();
+ 
+     if (p->GetError() == QNetworkReply::NoError)
+     {
+-        LOG(VB_MHEG, LOG_DEBUG, LOC + QString("Finished %1").arg(url.constData()) );
++        LOG(VB_MHEG, LOG_DEBUG, LOC + QString("Finished %1").arg(url.toString()) );
+     }
+     else
+     {
+@@ -183,9 +185,9 @@ void MHInteractionChannel::slotFinished(QObject *obj)
+ 
+     QMutexLocker locker(&m_mutex);
+ 
+-    if (m_pending.remove(url.constData()) < 1)
+-        LOG(VB_GENERAL, LOG_WARNING, LOC + QString("Finished %1 wasn't pending").arg(url.constData()) );
+-    m_finished.insert(url.constData(), p);
++    if (m_pending.remove(url) < 1)
++        LOG(VB_GENERAL, LOG_WARNING, LOC + QString("Finished %1 wasn't pending").arg(url.toString()) );
++    m_finished.insert(url, p);
+ }
+ 
+ /* End of file */
+diff --git a/mythtv/libs/libmythtv/mhegic.h b/mythtv/libs/libmythtv/mhegic.h
+index bcb73ef..cf2d59c 100644
+--- a/mythtv/libs/libmythtv/mhegic.h
++++ b/mythtv/libs/libmythtv/mhegic.h
+@@ -6,6 +6,7 @@
+ 
+ #include <QObject>
+ #include <QString>
++#include <QUrl>
+ #include <QMutex>
+ #include <QHash>
+ 
+@@ -43,7 +44,7 @@ private slots:
+ private:
+     Q_DISABLE_COPY(MHInteractionChannel)
+     mutable QMutex m_mutex;
+-    typedef QHash< QString, NetStream* > map_t;
++    typedef QHash< QUrl, NetStream* > map_t;
+     map_t m_pending; // Pending requests
+     map_t m_finished; // Completed requests
+ };
+diff --git a/mythtv/libs/libmythtv/netstream.cpp b/mythtv/libs/libmythtv/netstream.cpp
+index d6082d5..f342f8b 100644
+--- a/mythtv/libs/libmythtv/netstream.cpp
++++ b/mythtv/libs/libmythtv/netstream.cpp
+@@ -95,6 +95,7 @@ public:
+ NetStream::NetStream(const QUrl &url, EMode mode /*= kPreferCache*/,
+         const QByteArray &cert) :
+     m_id(s_nRequest.fetchAndAddRelaxed(1)),
++    m_url(url),
+     m_state(kClosed),
+     m_pending(0),
+     m_reply(0),
+@@ -709,7 +710,7 @@ bool NetStream::isAvailable()
+ 
+ // Time when URI was last written to cache or invalid if not cached.
+ // static
+-QDateTime NetStream::GetLastModified(const QString &url)
++QDateTime NetStream::GetLastModified(const QUrl &url)
+ {
+     return NAMThread::GetLastModified(url);
+ }
+@@ -912,7 +913,7 @@ bool NAMThread::isAvailable()
+ 
+ // Time when URI was last written to cache or invalid if not cached.
+ // static
+-QDateTime NAMThread::GetLastModified(const QString &url)
++QDateTime NAMThread::GetLastModified(const QUrl &url)
+ {
+     NAMThread &m = manager();
+ 
+@@ -925,11 +926,11 @@ QDateTime NAMThread::GetLastModified(const QString &url)
+     if (!cache)
+         return QDateTime(); // Invalid
+ 
+-    QNetworkCacheMetaData meta = cache->metaData(QUrl(url));
++    QNetworkCacheMetaData meta = cache->metaData(url);
+     if (!meta.isValid())
+     {
+         LOG(VB_FILE, LOG_DEBUG, LOC + QString("GetLastModified('%1') not in cache")
+-            .arg(url));
++            .arg(url.toString()));
+         return QDateTime(); // Invalid
+     }
+ 
+@@ -939,7 +940,7 @@ QDateTime NAMThread::GetLastModified(const QString &url)
+     if (expire.isValid() && expire.toLocalTime() < now)
+     {
+         LOG(VB_FILE, LOG_INFO, LOC + QString("GetLastModified('%1') past expiration %2")
+-            .arg(url).arg(expire.toString()));
++            .arg(url.toString()).arg(expire.toString()));
+         return QDateTime(); // Invalid
+     }
+ 
+@@ -959,8 +960,9 @@ QDateTime NAMThread::GetLastModified(const QString &url)
+             if (second == "no-cache" || second == "no-store")
+             {
+                 LOG(VB_FILE, LOG_INFO, LOC +
+-                    QString("GetLastModified('%1') Cache-Control disabled").arg(url));
+-                cache->remove(QUrl(url));
++                    QString("GetLastModified('%1') Cache-Control disabled")
++                        .arg(url.toString()) );
++                cache->remove(url);
+                 return QDateTime(); // Invalid
+             }
+         }
+@@ -980,7 +982,7 @@ QDateTime NAMThread::GetLastModified(const QString &url)
+     }
+ 
+     LOG(VB_FILE, LOG_DEBUG, LOC + QString("GetLastModified('%1') last modified %2")
+-        .arg(url).arg(lastMod.toString()));
++        .arg(url.toString()).arg(lastMod.toString()));
+     return lastMod;
+ }
+ 
+diff --git a/mythtv/libs/libmythtv/netstream.h b/mythtv/libs/libmythtv/netstream.h
+index 65ba262..dac5236 100644
+--- a/mythtv/libs/libmythtv/netstream.h
++++ b/mythtv/libs/libmythtv/netstream.h
+@@ -48,7 +48,7 @@ public:
+     qlonglong GetSize() const;
+ 
+     // Properties
+-    QUrl Url() const { return m_request.url(); }
++    const QUrl &Url() const { return m_url; }
+ 
+     // Synchronous interface
+     bool WaitTillReady(unsigned long millisecs);
+@@ -69,7 +69,7 @@ signals:
+ 
+ public:
+     // Time when a URI was last written to cache or invalid if not cached.
+-    static QDateTime GetLastModified(const QString &url);
++    static QDateTime GetLastModified(const QUrl &url);
+     // Is the network accessible
+     static bool isAvailable();
+ 
+@@ -91,6 +91,7 @@ private:
+     bool Request(const QUrl &);
+ 
+     const int m_id; // Unique request ID
++    const QUrl m_url;
+ 
+     mutable QMutex m_mutex; // Protects r/w access to the following data
+     QNetworkRequest m_request;
+@@ -126,7 +127,7 @@ public:
+     static inline QMutex* GetMutex() { return &manager().m_mutexNAM; }
+ 
+     static bool isAvailable(); // is network usable
+-    static QDateTime GetLastModified(const QString &url);
++    static QDateTime GetLastModified(const QUrl &url);
+ 
+ signals:
+      void requestStarted(int, QNetworkReply *);
+-- 
+1.7.9.5
+

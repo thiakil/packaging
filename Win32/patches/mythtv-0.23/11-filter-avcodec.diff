@@ -1,0 +1,13 @@
+diff --git a/mythtv/filters/filter-avcodec.pro b/mythtv/filters/filter-avcodec.pro
+index 545a037..653de01 100644
+--- mythtv/filters/filter-avcodec.pro
++++ mythtv/filters/filter-avcodec.pro
+@@ -1,7 +1,7 @@
+ # A few filters use routines from libavcodec. Include this in their .pro file
+ 
+ # This eliminates a linker warning
+-CONFIG += qt
++#CONFIG += qt
+ 
+ INCLUDEPATH += ../../libs/libavcodec ../../libs/libavutil ../../libs ../..
+ DEPENDPATH  += ../../libs/libavcodec ../../libs/libavutil

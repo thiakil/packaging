@@ -1,0 +1,67 @@
+From 7476207a2eebba5dcff4317a8c2fe7910cd63e9e Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 3 Feb 2012 20:17:11 +0100
+Subject: [PATCH 092/285] mythpreviewgen: Allow screengrab without seek table
+
+At present MythPlayer::SeekForScreenGrab deliberately fails if there's
+no seek table.  This causes blank preview images for recordings transcoded
+by libx264.  If hasFullPositionMap is ignored, then avformatdecoder makes
+a reasonable attempt at the seek without the table and gives a valid
+image.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |   30 ++----------------------------
+ 1 file changed, 2 insertions(+), 28 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index a3e5a10..5d0557f 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -4024,28 +4024,6 @@ char *MythPlayer::GetScreenGrabAtFrame(uint64_t frameNum, bool absolute,
+ void MythPlayer::SeekForScreenGrab(uint64_t &number, uint64_t frameNum,
+                                    bool absolute)
+ {
+-    if (!hasFullPositionMap)
+-    {
+-        VERBOSE(VB_IMPORTANT, LOC + "GetScreenGrabAtFrame: Recording does not "
+-                "have position map so we will be unable to grab the desired "
+-                "frame.\n");
+-        player_ctx->LockPlayingInfo(__FILE__, __LINE__);
+-        if (player_ctx->playingInfo)
+-        {
+-            VERBOSE(VB_IMPORTANT,
+-                    QString("Run 'mythcommflag --file %1 --rebuild' to fix.")
+-                    .arg(player_ctx->playingInfo->GetBasename()));
+-            VERBOSE(VB_IMPORTANT,
+-                    QString("If that does not work and this is a .mpg file, "
+-                            "try 'mythtranscode --mpeg2 --buildindex "
+-                            "--allkeys -c %1 -s %2'.")
+-                    .arg(player_ctx->playingInfo->GetChanID())
+-                    .arg(player_ctx->playingInfo->GetRecordingStartTime()
+-                         .toString("yyyyMMddhhmmss")));
+-        }
+-        player_ctx->UnlockPlayingInfo(__FILE__, __LINE__);
+-    }
+-
+     number = frameNum;
+     if (number >= totalFrames)
+     {
+@@ -4093,12 +4071,8 @@ void MythPlayer::SeekForScreenGrab(uint64_t &number, uint64_t frameNum,
+         }
+     }
+ 
+-    // Only do seek if we have position map
+-    if (hasFullPositionMap)
+-    {
+-        DiscardVideoFrame(videoOutput->GetLastDecodedFrame());
+-        DoFastForward(number);
+-    }
++    DiscardVideoFrame(videoOutput->GetLastDecodedFrame());
++    DoFastForward(number);
+ }
+ 
+ /** \fn MythPlayer::GetRawVideoFrame(long long)
+-- 
+1.7.9.5
+

@@ -1,0 +1,93 @@
+From 05b2330ae925431fcea1974d75729e2cf57b15ab Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 17 Jun 2013 15:03:12 +0100
+Subject: [PATCH 016/227] AFD: Reduce log output from seeks when playing fast
+ forward
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |   16 ++++++++--------
+ mythtv/libs/libmythtv/decoderbase.cpp     |    4 ++--
+ 2 files changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index 431ce80..7ae0ce2 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -557,12 +557,12 @@ long long AvFormatDecoder::GetChapter(int chapter)
+ 
+ bool AvFormatDecoder::DoRewind(long long desiredFrame, bool discardFrames)
+ {
+-    LOG(VB_PLAYBACK, LOG_INFO, LOC + QString("DoRewind(%1, %2 discard frames)")
+-            .arg(desiredFrame).arg( discardFrames ? "do" : "don't" ));
+-
+     if (recordingHasPositionMap || livetv)
+         return DecoderBase::DoRewind(desiredFrame, discardFrames);
+ 
++    LOG(VB_PLAYBACK, LOG_INFO, LOC + QString("DoRewind(%1, %2 discard frames)")
++            .arg(desiredFrame).arg( discardFrames ? "do" : "don't" ));
++
+     dorewind = true;
+ 
+     // avformat-based seeking
+@@ -571,14 +571,14 @@ bool AvFormatDecoder::DoRewind(long long desiredFrame, bool discardFrames)
+ 
+ bool AvFormatDecoder::DoFastForward(long long desiredFrame, bool discardFrames)
+ {
++    if (recordingHasPositionMap || livetv)
++        return DecoderBase::DoFastForward(desiredFrame, discardFrames);
++
+     LOG(VB_PLAYBACK, LOG_INFO, LOC +
+         QString("DoFastForward(%1 (%2), %3 discard frames)")
+             .arg(desiredFrame).arg(framesPlayed)
+             .arg((discardFrames) ? "do" : "don't"));
+ 
+-    if (recordingHasPositionMap || livetv)
+-        return DecoderBase::DoFastForward(desiredFrame, discardFrames);
+-
+     bool oldrawstate = getrawframes;
+     getrawframes = false;
+ 
+@@ -689,7 +689,7 @@ bool AvFormatDecoder::DoFastForward(long long desiredFrame, bool discardFrames)
+ void AvFormatDecoder::SeekReset(long long newKey, uint skipFrames,
+                                 bool doflush, bool discardFrames)
+ {
+-    LOG(VB_PLAYBACK, LOG_INFO, LOC +
++    LOG(VB_PLAYBACK, LOG_DEBUG, LOC +
+         QString("SeekReset(%1, %2, %3 flush, %4 discard)")
+             .arg(newKey).arg(skipFrames)
+             .arg((doflush) ? "do" : "don't")
+@@ -721,7 +721,7 @@ void AvFormatDecoder::SeekReset(long long newKey, uint skipFrames,
+         }
+ 
+         // Flush the avcodec buffers
+-        LOG(VB_PLAYBACK, LOG_INFO, LOC + "SeekReset() flushing");
++        LOG(VB_PLAYBACK, LOG_DEBUG, LOC + "SeekReset() flushing");
+         for (uint i = 0; i < ic->nb_streams; i++)
+         {
+             AVCodecContext *enc = ic->streams[i]->codec;
+diff --git a/mythtv/libs/libmythtv/decoderbase.cpp b/mythtv/libs/libmythtv/decoderbase.cpp
+index cc9b005..5053e75 100644
+--- a/mythtv/libs/libmythtv/decoderbase.cpp
++++ b/mythtv/libs/libmythtv/decoderbase.cpp
+@@ -418,7 +418,7 @@ bool DecoderBase::FindPosition(long long desired_value, bool search_adjusted,
+             upper_bound = i;
+             lower_bound = i;
+ 
+-            LOG(VB_PLAYBACK, LOG_INFO, LOC +
++            LOG(VB_PLAYBACK, LOG_DEBUG, LOC +
+                 QString("FindPosition(%1, search%2 adjusted)")
+                     .arg(desired_value).arg((search_adjusted) ? "" : " not") +
+                 QString(" --> [%1:%2(%3)]")
+@@ -457,7 +457,7 @@ bool DecoderBase::FindPosition(long long desired_value, bool search_adjusted,
+     upper_bound = upper;
+     lower_bound = lower;
+ 
+-    LOG(VB_PLAYBACK, LOG_INFO, LOC +
++    LOG(VB_PLAYBACK, LOG_DEBUG, LOC +
+         QString("FindPosition(%1, search%3 adjusted)")
+             .arg(desired_value).arg((search_adjusted) ? "" : " not") +
+         QString(" --> \n\t\t\t[%1:%2(%3),%4:%5(%6)]")
+-- 
+1.7.9.5
+

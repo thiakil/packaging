@@ -1,0 +1,28 @@
+From 644566a1b64e2062b920f5954cbaa407e5a8d180 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 7 Oct 2013 17:02:26 +0100
+Subject: [PATCH 201/207] Visualiser: Circles can be shown with any renderer
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../visualisations/videovisualcircles.cpp          |    6 +-----
+ 1 file changed, 1 insertion(+), 5 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/visualisations/videovisualcircles.cpp b/mythtv/libs/libmythtv/visualisations/videovisualcircles.cpp
+index 1140372..addb16a 100644
+--- a/mythtv/libs/libmythtv/visualisations/videovisualcircles.cpp
++++ b/mythtv/libs/libmythtv/visualisations/videovisualcircles.cpp
+@@ -61,9 +61,5 @@ static class VideoVisualCirclesFactory : public VideoVisualFactory
+         return new VideoVisualCircles(audio, render);
+     }
+ 
+-    virtual bool SupportedRenderer(RenderType type)
+-    {
+-        return (type == kRenderOpenGL2 ||
+-                type == kRenderOpenGL2ES);
+-    }
++    virtual bool SupportedRenderer(RenderType) { return true; }
+ } VideoVisualCirclesFactory;
+-- 
+1.7.9.5
+

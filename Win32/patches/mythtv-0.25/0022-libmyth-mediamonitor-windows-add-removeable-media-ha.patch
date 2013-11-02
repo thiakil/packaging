@@ -1,0 +1,110 @@
+From f9f03ca95e9e53bd89111c25705c6a08e0f75ae3 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 30 Jan 2012 20:45:29 +0100
+Subject: [PATCH 022/124] libmyth: mediamonitor-windows add removeable media
+ handling
+
+This patch adds handling for USB/removable drives to the Win32
+media monitor.  Currently it's restricted to CDs only.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/mediamonitor-windows.cpp |   70 ++++++++++++++++++--------
+ 1 file changed, 49 insertions(+), 21 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/mediamonitor-windows.cpp b/mythtv/libs/libmyth/mediamonitor-windows.cpp
+index a52905d..7d7ffc5 100644
+--- a/mythtv/libs/libmyth/mediamonitor-windows.cpp
++++ b/mythtv/libs/libmyth/mediamonitor-windows.cpp
+@@ -26,39 +26,67 @@ MediaMonitorWindows::MediaMonitorWindows(QObject* par,
+ {
+     char strDrives[128];
+     if (!::GetLogicalDriveStrings(sizeof(strDrives), strDrives))
++    {
++        LOG(VB_GENERAL, LOG_ERR,
++            "Error. MediaMonitorWindows failed at GetLogicalDriveStrings.");
+         return;
++    }
+ 
+     for (char *driveName = strDrives; *driveName;
+          driveName += strlen(driveName) + 1)
+     {
+-        uint type = ::GetDriveType(driveName);
+-        if (type != DRIVE_REMOVABLE && type != DRIVE_CDROM)
+-            continue;
+-
+         MythMediaDevice *media = NULL;
+-
+-        if (type == DRIVE_CDROM)
++        UINT type = ::GetDriveType(driveName);
++        switch (type)
++        {
++        case DRIVE_CDROM:
++            LOG(VB_MEDIA, LOG_DEBUG,
++                QString("MediaMonitorWindows found cdrom '%1'").arg(driveName));
+             media = MythCDROM::get(this, driveName, false, allowEject);
+-        else
++            break;
++        case DRIVE_REMOVABLE:
++            LOG(VB_MEDIA, LOG_DEBUG,
++                QString("MediaMonitorWindows found removeable '%1'")
++                    .arg(driveName));
+             media = MythHDD::Get(this, driveName, false, allowEject);
+-
+-        if (!media)
+-        {
+-            LOG(VB_GENERAL, LOG_ALERT,
+-                    "Error. Couldn't create MythMediaDevice.");
+-            return;
++            break;
++        case DRIVE_UNKNOWN:
++            LOG(VB_MEDIA, LOG_DEBUG,
++                QString("MediaMonitorWindows found unknown '%1'")
++                    .arg(driveName));
++            media = MythCDROM::get(this, driveName, false, allowEject);
++            break;
++        case DRIVE_NO_ROOT_DIR:
++            LOG(VB_MEDIA, LOG_DEBUG,
++                QString("MediaMonitorWindows found '%1' with no root dir")
++                    .arg(driveName));
++            media = MythCDROM::get(this, driveName, false, allowEject);
++            break;
++        default:
++            LOG(VB_MEDIA, LOG_INFO, QString("MediaMonitorWindows found '%1' type %2")
++                .arg(driveName).arg(type));
++        case DRIVE_FIXED:
++        case DRIVE_REMOTE:
++        case DRIVE_RAMDISK:
++            continue;
+         }
+ 
+-        // We store the volume name to improve
+-        // user activities like ChooseAndEjectMedia().
+-        char volumeName[MAX_PATH];
+-        if (GetVolumeInformation(driveName, volumeName, MAX_PATH,
+-                                 NULL, NULL, NULL, NULL, NULL))
++        if (media)
+         {
+-            media->setVolumeID(volumeName);
++            // We store the volume name to improve
++            // user activities like ChooseAndEjectMedia().
++            char volumeName[MAX_PATH];
++            if (GetVolumeInformation(driveName, volumeName, MAX_PATH,
++                                     NULL, NULL, NULL, NULL, NULL))
++            {
++                media->setVolumeID(volumeName);
++            }
++
++            AddDevice(media);
+         }
+-
+-        AddDevice(media);
++        else
++            LOG(VB_GENERAL, LOG_ALERT,
++                    "Error. Couldn't create MythMediaDevice.");
+     }
+ 
+     LOG(VB_MEDIA, LOG_INFO, "Initial device list: " + listDevices());
+-- 
+1.7.9.5
+

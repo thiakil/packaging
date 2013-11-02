@@ -1,0 +1,38 @@
+From 1f4af77123be93cea9079c4291dc009c2a15a7c2 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 22 Aug 2013 09:07:58 +0100
+Subject: [PATCH 176/207] NVR: Prevent a divide by 0 and arithmetic exception
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../libmythtv/recorders/NuppelVideoRecorder.cpp    |    5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/recorders/NuppelVideoRecorder.cpp b/mythtv/libs/libmythtv/recorders/NuppelVideoRecorder.cpp
+index c469a96..b673c77 100644
+--- a/mythtv/libs/libmythtv/recorders/NuppelVideoRecorder.cpp
++++ b/mythtv/libs/libmythtv/recorders/NuppelVideoRecorder.cpp
+@@ -1,6 +1,7 @@
+ #include <cstdio>
+ #include <cstdlib>
+ #include <fcntl.h>
++#include <limits.h>
+ #include <unistd.h>
+ #include <sys/types.h>
+ #include <sys/stat.h>
+@@ -3139,10 +3140,10 @@ void NuppelVideoRecorder::WriteAudio(unsigned char *buf, int fnum, int timecode)
+                                      // wrong guess ;-)
+         // need seconds instead of msec's
+         mt = (double)timecode;
+-        if (mt > 0.0)
++        if (mt > 0.0 && audio_bytes_per_sample)
+         {
+             eff = (abytes / mt) * (100000.0 / audio_bytes_per_sample);
+-            effectivedsp = (int)eff;
++            effectivedsp = (eff <= INT_MAX) ? (int)eff : INT_MAX;
+         }
+     }
+ 
+-- 
+1.7.9.5
+

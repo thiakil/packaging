@@ -1,0 +1,79 @@
+From 22530403a98072cb5669d740a203a38d09fb1577 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 9 Aug 2012 15:51:10 +0200
+Subject: [PATCH 111/124] Prevent an abort in AudioPlayer caused by calling a
+ pure virtual method
+
+While listening to a liveTV low bit rate audio stream, e.g. Planet Rock on
+FreeSat channel 730, then pressing escape to exit to the main menu causes
+an abort:
+	pure virtual method called
+	terminate called without an active exception
+backtrace:
+0  0xb7767424 in __kernel_vsyscall ()
+1  0xb27c8e71 in raise (sig=6) at ../nptl/sysdeps/unix/sysv/linux/raise.c:64
+2  0xb27cc34e in abort () at abort.c:92
+3  0xb29f10b5 in __gnu_cxx::__verbose_terminate_handler() ()
+   from /usr/lib/i386-linux-gnu/libstdc++.so.6
+4  0xb29eefa5 in ?? () from /usr/lib/i386-linux-gnu/libstdc++.so.6
+5  0xb29eefe2 in std::terminate() ()
+   from /usr/lib/i386-linux-gnu/libstdc++.so.6
+6  0xb29efbe5 in __cxa_pure_virtual ()
+   from /usr/lib/i386-linux-gnu/libstdc++.so.6
+7  0xb70c0a9c in AudioPlayer::AddAudioData (this=0x909a00c,
+    buffer=0xa9742020 "r\b\022\003\226\017\311\n\253\022[\017\231\025{\023\373\027\263\025C\025J\022\244\fU\n\027\003X\003\204\374\305\377\337\367\343\374\372\363O\371Q\363m\370k\367f\374=\374A\001!\375D\002\033\374\065\001\030\377B\003$\a\362\b!\017\023\016\227\022\060\020,\021\357\017*\f4\r\210\005\300\a~\001`\003\252\003g\005\205\t\337\f\032\f]\022r\b\"\021\252\002\377\v\310\377\326\a\\",
+    len=4608, timecode=58649502, frames=1152) at audioplayer.cpp:479
+8  0xb7122525 in AvFormatDecoder::ProcessAudioPacket (this=0x997e4078,
+    curstream=0x99906240, pkt=0x997781a8, decodetype=kDecodeAudio)
+    at avformatdecoder.cpp:4249
+9  0xb7124075 in AvFormatDecoder::GetFrame (this=0x997e4078,
+    decodetype=kDecodeAudio) at avformatdecoder.cpp:4496
+10 0xb70aaca1 in MythPlayer::DecoderGetFrame (this=0x907ec40,
+    decodetype=kDecodeAV, unsafe=false) at mythplayer.cpp:3239
+11 0xb70aa670 in MythPlayer::DecoderLoop (this=0x907ec40, pause=true)
+    at mythplayer.cpp:3163
+12 0xb70945fb in DecoderThread::run (this=0x90a36e0) at mythplayer.cpp:97
+13 0xb5f731ac in MThreadInternal::run (this=0x928a348) at mthread.cpp:78
+14 0xb2ab12e0 in QThreadPrivate::start (arg=0x928a348)
+    at thread/qthread_unix.cpp:266
+15 0xb2a33e99 in start_thread (arg=0x98efeb70) at pthread_create.c:304
+16 0xb286f9ee in clone () at ../sysdeps/unix/sysv/linux/i386/clone.S:130
+
+This is caused by MythPlayer::PauseDecoder timing out, leaving the
+decoder thread running, followed by the decoder being deleted.  The
+timeout is caused by AvFormatDecoder::GetFrame remaining in a loop.
+
+This patch adds a 100mS timeout to AvFormatDecoder::GetFrame.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |    6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index e90c04d..2a2e10d 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -10,6 +10,7 @@
+ using namespace std;
+ 
+ #include <QTextCodec>
++#include <QTime>
+ 
+ // MythTV headers
+ #include "mythtvexp.h"
+@@ -4335,7 +4336,10 @@ bool AvFormatDecoder::GetFrame(DecodeType decodetype)
+             ProcessVideoFrame(stream, &mpa_pic);
+     }
+ 
+-    while (!allowedquit)
++    // Must return in a timely fashion to check if decoder is pausing
++    // This is important for low bit rate streams like radio
++    QTime timer = QTime::currentTime();
++    while (!allowedquit && timer.elapsed() < 100)
+     {
+         if ((decodetype & kDecodeAudio) &&
+             ((currentTrack[kTrackTypeAudio] < 0) ||
+-- 
+1.7.9.5
+

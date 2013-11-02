@@ -1,0 +1,238 @@
+From 494c187c2ba4a49194b7e53c6f876d1bb06203cc Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 8 Feb 2012 18:53:57 +0100
+Subject: [PATCH 094/285] TV: Automatically select a free card when changing
+ channel
+
+This patch fixes a shortcoming in TV::ChangeChannel which presently doesn't
+detect when the new channel is unavialable on the current card due to
+a current recording or other other LiveTV access.  When the channel change
+is sent to the backend it detects the conflict and selects a different
+channel to view even when there are cards availab le that could receive
+the requested channel.
+
+This patch checks the current card for conflicts and switches to the next
+available card that can receive the channel.  It has most utility in
+systems with multiple tuners.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/tv_play.cpp      |   51 +++++++++++++--------------
+ mythtv/libs/libmythtv/tvremoteutil.cpp |   60 ++++++++++++++++++++++++++++++++
+ mythtv/libs/libmythtv/tvremoteutil.h   |    2 ++
+ 3 files changed, 87 insertions(+), 26 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/tv_play.cpp b/mythtv/libs/libmythtv/tv_play.cpp
+index 55dd02b..72515a7 100644
+--- a/mythtv/libs/libmythtv/tv_play.cpp
++++ b/mythtv/libs/libmythtv/tv_play.cpp
+@@ -1975,21 +1975,20 @@ void TV::HandleStateChange(PlayerContext *mctx, PlayerContext *ctx)
+             bool getit = ctx->recorder->ShouldSwitchToAnotherCard(
+                 QString::number(chanid));
+ 
+-            if (getit)
+-                reclist = ChannelUtil::GetValidRecorderList(chanid, channum);
++            if (!getit)
++                getit = !RemoteIsTuneable(ctx->GetCardID(), chanid);
+ 
+-            if (reclist.size())
++            if (getit)
+             {
+-                RemoteEncoder *testrec = NULL;
+-                testrec = RemoteRequestFreeRecorderFromList(reclist);
++                RemoteEncoder *testrec = RemoteRequestFreeRecorder(chanid);
+                 if (testrec && testrec->IsValidRecorder())
+                 {
+                     ctx->SetRecorder(testrec);
+                     ctx->recorder->Setup();
+                 }
++                else
++                    chanid = 0;
+             }
+-            else if (getit)
+-                chanid = 0;
+         }
+ 
+         VERBOSE(VB_IMPORTANT, "Spawning LiveTV Recorder -- begin");
+@@ -6273,24 +6272,24 @@ void TV::SwitchCards(PlayerContext *ctx,
+     }
+ 
+     uint input_cardid = 0;
+-    QStringList reclist;
+     if (inputid)
+     {
+         // If we are switching to a specific input..
+         input_cardid = CardUtil::GetCardID(inputid);
++        QStringList reclist;
+         if (input_cardid)
++        {
+             reclist.push_back(QString::number(input_cardid));
++            testrec = RemoteRequestFreeRecorderFromList(reclist);
++        }
+     }
+     else if (!channum.isEmpty())
+     {
+         // If we are switching to a channel not on the current recorder
+         // we need to find the next free recorder with that channel.
+-        reclist = ChannelUtil::GetValidRecorderList(chanid, channum);
++        testrec = RemoteRequestFreeRecorder(chanid, channum);
+     }
+ 
+-    if (!reclist.empty())
+-        testrec = RemoteRequestFreeRecorderFromList(reclist);
+-
+     if (testrec && testrec->IsValidRecorder())
+     {
+         uint cardid = testrec->GetRecorderNumber();
+@@ -6814,7 +6813,6 @@ void TV::ChangeChannel(PlayerContext *ctx, uint chanid, const QString &chan)
+         return;
+ 
+     QString channum = chan;
+-    QStringList reclist;
+ 
+     QString oldinputname = ctx->recorder->GetInput();
+ 
+@@ -6823,14 +6821,12 @@ void TV::ChangeChannel(PlayerContext *ctx, uint chanid, const QString &chan)
+         channum = ChannelUtil::GetChanNum(chanid);
+     }
+ 
+-    bool getit = false;
+-    if (ctx->recorder)
++    bool getit = true;
++    if (ctx->pseudoLiveTVState == kPseudoRecording)
++        ;
++    else if (ctx->recorder)
+     {
+-        if (ctx->pseudoLiveTVState == kPseudoRecording)
+-        {
+-            getit = true;
+-        }
+-        else if (chanid)
++        if (chanid)
+         {
+             getit = ctx->recorder->ShouldSwitchToAnotherCard(
+                 QString::number(chanid));
+@@ -6841,7 +6837,6 @@ void TV::ChangeChannel(PlayerContext *ctx, uint chanid, const QString &chan)
+             uint pref_cardid;
+             uint cardid = ctx->GetCardID();
+             bool dummy;
+-
+             ctx->recorder->CheckChannelPrefix(chan,  pref_cardid,
+                                               dummy, needed_spacer);
+ 
+@@ -6849,14 +6844,18 @@ void TV::ChangeChannel(PlayerContext *ctx, uint chanid, const QString &chan)
+             getit = (pref_cardid != cardid);
+         }
+ 
+-        if (getit)
+-            reclist = ChannelUtil::GetValidRecorderList(chanid, channum);
++        // If the channel is available on the current card then check for
++        // conflicts in case a common input group restricts tuning
++        if (!getit)
++            getit = !RemoteIsTuneable(ctx->GetCardID(), chanid, channum);
+     }
+ 
+-    if (reclist.size())
++    if (getit)
+     {
+-        RemoteEncoder *testrec = NULL;
+-        testrec = RemoteRequestFreeRecorderFromList(reclist);
++        if (!ctx->recorder->CheckChannel(channum))
++            return;
++
++        RemoteEncoder *testrec = RemoteRequestFreeRecorder(chanid, channum);
+         if (!testrec || !testrec->IsValidRecorder())
+         {
+             ClearInputQueues(ctx, true);
+diff --git a/mythtv/libs/libmythtv/tvremoteutil.cpp b/mythtv/libs/libmythtv/tvremoteutil.cpp
+index 72bdba8..320e1b8 100644
+--- a/mythtv/libs/libmythtv/tvremoteutil.cpp
++++ b/mythtv/libs/libmythtv/tvremoteutil.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include "tvremoteutil.h"
+ #include "cardutil.h"
++#include "channelutil.h"
+ #include "inputinfo.h"
+ #include "programinfo.h"
+ #include "mythcorecontext.h"
+@@ -370,4 +371,63 @@ bool RemoteGetRecordingStatus(
+     return isRecording;
+ }
+ 
++bool RemoteIsTuneable(uint cardid, uint chanid, const QString &channum)
++{
++    if (!chanid)
++    {
++        vector<uint> c = ChannelUtil::GetConflicting(channum);
++        if (c.size() == 0)
++            return false;
++        chanid = c[0];
++    }
++
++    const uint mplexid = ChannelUtil::GetMplexID(chanid);
++    const uint sourceid = ChannelUtil::GetSourceIDForChannel(chanid);
++    QStringList const inputs = CardUtil::GetInputNames(cardid, sourceid);
++    if (inputs.size() == 0)
++        return false;
++    const uint inputid = CardUtil::GetInputID(cardid, inputs[0]);
++
++    // Enumerate cards with the same inputgroup
++    vector<uint> const cards = CardUtil::GetConflictingCards(inputid, cardid);
++    for (vector<uint>::const_iterator it = cards.begin();
++        it != cards.end(); ++it)
++    {
++        // Check if card is busy
++        TunedInputInfo busy_input;
++        if (!RemoteIsBusy(*it, busy_input))
++            continue;
++
++        // Check for conflicting source and multiplex IDs
++        if (busy_input.mplexid != mplexid || busy_input.sourceid != sourceid)
++            return false;
++    }
++
++    return true;
++}
++
++RemoteEncoder *RemoteRequestFreeRecorder(uint chanid, const QString &channum)
++{
++    QStringList strlist( "GET_FREE_RECORDER_LIST" );
++
++    if (!gCoreContext->SendReceiveStringList(strlist, true))
++        return NULL;
++
++    QStringList reclist = ChannelUtil::GetValidRecorderList(chanid, channum);
++    for (QStringList::const_iterator recIter = reclist.begin();
++         recIter != reclist.end(); ++recIter)
++    {
++        if (strlist.contains(*recIter))
++        {
++            RemoteEncoder *rec = RemoteGetExistingRecorder((*recIter).toInt());
++            if (rec && RemoteIsTuneable(rec->GetRecorderNumber(), chanid, channum))
++                return rec;
++
++            delete rec;
++        }
++    }
++    // didn't find anything. just return NULL.
++    return NULL;
++}
++
+ /* vim: set expandtab tabstop=4 shiftwidth=4: */
+diff --git a/mythtv/libs/libmythtv/tvremoteutil.h b/mythtv/libs/libmythtv/tvremoteutil.h
+index da12bc1..9e2f33a 100644
+--- a/mythtv/libs/libmythtv/tvremoteutil.h
++++ b/mythtv/libs/libmythtv/tvremoteutil.h
+@@ -46,6 +46,8 @@ MPUBLIC vector<InputInfo> RemoteRequestFreeInputList(
+     uint cardid, const vector<uint> &excluded_cardids);
+ MPUBLIC InputInfo RemoteRequestBusyInputID(uint cardid);
+ MPUBLIC bool RemoteIsBusy(uint cardid, TunedInputInfo &busy_input);
++MPUBLIC bool RemoteIsTuneable(uint cardid, uint chanid, const QString &channum = QString());
++MPUBLIC RemoteEncoder *RemoteRequestFreeRecorder(uint chanid, const QString &channum = QString());
+ 
+ MPUBLIC bool RemoteGetRecordingStatus(
+     vector<TunerStatus> *tunerList, bool list_inactive);
+-- 
+1.7.9.5
+

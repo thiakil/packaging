@@ -1,0 +1,35 @@
+From 9de1dac6d76918ec6d11521c9b27fe84bf3a44f5 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 9 Mar 2013 10:25:43 +0000
+Subject: [PATCH 083/227] FE: Channel record priority settings gets channel
+ icons from master BE
+
+Channel icon paths are relative to the master BE.  When a remote frontend
+shows a channel icon the image is loaded locally which normally fails.
+
+Aside: the TV guide correctly handles channel icons.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../programs/mythfrontend/channelrecpriority.cpp   |    5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/programs/mythfrontend/channelrecpriority.cpp b/mythtv/programs/mythfrontend/channelrecpriority.cpp
+index 085ed0f..b996a98 100644
+--- a/mythtv/programs/mythfrontend/channelrecpriority.cpp
++++ b/mythtv/programs/mythfrontend/channelrecpriority.cpp
+@@ -272,7 +272,10 @@ void ChannelRecPriority::FillList(void)
+             chaninfo->chanstr = result.value(1).toString();
+             chaninfo->sourceid = result.value(2).toInt();
+             chaninfo->callsign = result.value(3).toString();
+-            chaninfo->iconpath = result.value(4).toString();
++            QString iconurl = result.value(4).toString();
++            if (!iconurl.isEmpty())
++                iconurl = gCoreContext->GetMasterHostPrefix( "ChannelIcons", iconurl);
++            chaninfo->iconpath = iconurl;
+             chaninfo->recpriority = result.value(5).toString();
+             chaninfo->channame = result.value(6).toString();
+             if (result.value(7).toInt() > 0)
+-- 
+1.7.9.5
+

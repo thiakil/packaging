@@ -1,0 +1,39 @@
+From 47c9c6be753c05f2242bc7bc6f1de383ba63d0b4 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 16 May 2012 13:28:18 +0200
+Subject: [PATCH 079/124] Themes: Fix checkbox background selected image
+
+Remove the alpha channel from the checkbox background selected image.
+This enables the green highlighting in the image to show and enables
+the user to identify the currently selected checkbox.
+
+This fix permits the user to navigate the 'Change View' dialog
+in the recordings menu and other dialogs using MythUI checkboxes.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../default/checkbox_background_selected.png       |  Bin 301 -> 336 bytes
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+
+diff --git a/mythtv/themes/default/checkbox_background_selected.png b/mythtv/themes/default/checkbox_background_selected.png
+index bb924a9dad50c2f9993f43360857a599f97f7f5c..3117acc1edd2a5af9192f9a941aad88e97b87d0c 100644
+GIT binary patch
+delta 299
+zcmV+`0o4Aj0?-1G87Be&006X7IrRVl00DDSM?wIu&K&6g000JJOGiWiUjWYlIPvj{
+zhLJHCe+P6)O+^RX1rQ4w9qzB!_y7O^&`Cr=R7l5Tj6ZLo!DHki5@N`2$IQsgKpFV^
+z|L^&ahxWW#bK}c7hW6W8|7if)Z)dT%h=edOFzh|CbH=JkZ$7-D(A6RWVi{q1&KB-2
+zA|Z@_{{3NQWDYIzrrcb(>8ty;{{8=#2@<~4c`_Gn6f+|;69dh_sL`WFj~YE{^r+FJ
+zMvoeeX7u0xe<3wIwM>K<_4of@rt=>UF)%P>gym7ibVw72fq~)t$3rx1m@&&FG2i%d
+xo`Z=?oL!EIk<y_5`~UB`j|Ue$>ACUc8~{4;^W3VI8|eT5002ovPDHLkV1m#}jAH-*
+
+delta 264
+zcmcb>w3catqy!rS1B11}x<x>WrP#?cgaZg_I8r($I!M$@mbgZg1m~xflqVLYGL)B>
+z>t*I;7bhncr0V4trO$q6BL&p8%G1R$#G~`=^^Kg(0TM?(?*G(vMxcPfy<)DS@Q(Jc
+z(uX3M9x*5`RZd}0G-eUea}`mU@agii-S1Y#SGTLEgigwvq;@kks>e%c<`S-o4f%SE
+z84PWS6<c$E%cLIvn5!u2TIi)Y)$o|{g_KEZ3Rg;Nw>xdGxLz8baITRdq4%GJ;`U?z
+zjwZItmfZjo4{IMt?z?<h>b68N-xmhWrI&=_+5ZOpKCH*%K6e}c%NY{QUDsJffX-&{
+MboFyt=akR{0Mo;1kpKVy
+
+-- 
+1.7.9.5
+

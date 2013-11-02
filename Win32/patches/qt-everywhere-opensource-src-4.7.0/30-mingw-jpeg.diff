@@ -1,0 +1,12 @@
+--- qt-everywhere-opensource-src-4.7.0.orig/src/gui/image/qjpeghandler.cpp	2010-09-10 11:05:24.000000000 +0200
++++ qt-everywhere-opensource-src-4.7.0/src/gui/image/qjpeghandler.cpp	2010-12-11 18:22:58.000000000 +0100
+@@ -71,6 +71,9 @@ extern "C" {
+ #ifdef const
+ #  undef const          // remove crazy C hackery in jconfig.h
+ #endif
++#ifndef HAVE_BOOLEAN
++   typedef int boolean;
++#endif
+ }
+ 
+ QT_BEGIN_NAMESPACE

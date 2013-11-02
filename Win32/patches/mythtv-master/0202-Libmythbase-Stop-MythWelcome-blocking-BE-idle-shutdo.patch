@@ -1,0 +1,39 @@
+From 0de063b9c711552e8bdea2edf5a1192cddb8d181 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 23 Oct 2013 19:42:46 +0100
+Subject: [PATCH 202/202] Libmythbase: Stop MythWelcome blocking BE idle
+ shutdown
+
+MythWelcome connects to the backend server using a "Monitor"
+announcement so as not to block backend idle shutdown.  However,
+if the connection is broken for whatever reason e.g. if the
+backend is stopped during STR, then when the connection is
+re-established it currently uses "Playback" mode if the idle
+shutdown time is > 0.  This causes the MythWelcome connection
+to block further idle shutdowns.
+
+This fix passes the original blocking mode to ConnectToMasterServer
+rather than idleTimeoutSecs > 0
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythbase/mythcorecontext.cpp |    3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythbase/mythcorecontext.cpp b/mythtv/libs/libmythbase/mythcorecontext.cpp
+index 20430fe..d23c856 100644
+--- a/mythtv/libs/libmythbase/mythcorecontext.cpp
++++ b/mythtv/libs/libmythbase/mythcorecontext.cpp
+@@ -983,8 +983,7 @@ bool MythCoreContext::SendReceiveStringList(
+                 d->m_eventSock = NULL;
+             }
+ 
+-            bool blockingClient = GetNumSetting("idleTimeoutSecs",0);
+-            ConnectToMasterServer(blockingClient);
++            ConnectToMasterServer(d->m_blockingClient);
+ 
+             if (d->m_serverSock)
+             {
+-- 
+1.7.9.5
+

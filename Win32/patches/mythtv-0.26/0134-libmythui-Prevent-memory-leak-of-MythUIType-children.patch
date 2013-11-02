@@ -1,0 +1,46 @@
+From 584d40801941b8622b9025d8b0cdb81dbb8f9464 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 5 Jun 2012 20:01:01 +0200
+Subject: [PATCH 134/227] libmythui: Prevent memory leak of MythUIType
+ children
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythui/mythuitype.cpp |   14 +++++---------
+ 1 file changed, 5 insertions(+), 9 deletions(-)
+
+diff --git a/mythtv/libs/libmythui/mythuitype.cpp b/mythtv/libs/libmythui/mythuitype.cpp
+index 754af0d..b1af66e 100644
+--- a/mythtv/libs/libmythui/mythuitype.cpp
++++ b/mythtv/libs/libmythui/mythuitype.cpp
+@@ -50,15 +50,10 @@ MythUIType::MythUIType(QObject *parent, const QString &name)
+     m_IsDependDefault = false;
+     m_ReverseDepend = false;
+ 
+-    m_Parent = NULL;
+-
+-    if (parent)
+-    {
+-        m_Parent = dynamic_cast<MythUIType *>(parent);
+-
+-        if (m_Parent)
+-            m_Parent->AddChild(this);
+-    }
++    // NB C++ 0X 5.2.7.4: cast of null = null
++    m_Parent = dynamic_cast<MythUIType * >(parent);
++    if (m_Parent)
++        m_Parent->AddChild(this);
+ 
+     m_DirtyRegion = QRegion(QRect(0, 0, 0, 0));
+ 
+@@ -71,6 +66,7 @@ MythUIType::MythUIType(QObject *parent, const QString &name)
+ 
+ MythUIType::~MythUIType()
+ {
++    DeleteAllChildren();
+     delete m_Fonts;
+     qDeleteAll(m_animations);
+ }
+-- 
+1.7.9.5
+

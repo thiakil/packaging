@@ -1,0 +1,108 @@
+From b3552f45a2762dfbcd6457d2d2f89080c95c19b7 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 10 Oct 2012 20:47:33 +0200
+Subject: [PATCH 003/227] Fix Windows cross-compile on Linux
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/configure                    |    3 +++
+ mythtv/external/Makefile            |   14 +++++++++++---
+ mythtv/external/nzmqt/src/nzmqt.pro |    5 +++++
+ mythtv/external/qjson/src/src.pro   |    8 +++++++-
+ 4 files changed, 26 insertions(+), 4 deletions(-)
+
+diff --git a/mythtv/configure b/mythtv/configure
+index 482cbce..329ec04 100755
+--- a/mythtv/configure
++++ b/mythtv/configure
+@@ -5429,6 +5429,9 @@ QMAKE_LIBDIR-=${sysroot}${libdir}
+ LATE_LIBS+=-L${sysroot}${libdir}
+ EOF
+ 
++# Save the cross-prefix for external configure scripts
++[ -n "$cross_prefix" ] && echo "XPREFIX=${cross_prefix%-}" >> $TMPMAK
++
+ #echo "endif # FFMPEG_CONFIG_MAK" >> $TMPMAK
+ 
+ # Should be done on all platforms, but for the time being limit it to mac only
+diff --git a/mythtv/external/Makefile b/mythtv/external/Makefile
+index 6fc0c2e..0323f2a 100644
+--- a/mythtv/external/Makefile
++++ b/mythtv/external/Makefile
+@@ -8,6 +8,16 @@ SUBDIRS_UNINSTALL = $(addsuffix -uninstall, ${SUBDIRS})
+ SUBDIRS_CLEAN = $(addsuffix -clean, ${SUBDIRS})
+ SUBDIRS_DISTCLEAN = $(addsuffix -distclean, ${SUBDIRS})
+ 
++ZEROMQ_CONFIG = --prefix=${PREFIX}
++ZEROMQ_CONFIG += --includedir=${PREFIX}/include/mythtv/zeromq
++ZEROMQ_CONFIG += --without-documentation
++ifdef XBUILD
++ZEROMQ_CONFIG += --build=${XBUILD}
++endif
++ifdef XPREFIX
++ZEROMQ_CONFIG += --host=${XPREFIX}
++endif
++
+ default:	all
+ all:		${SUBDIRS_ALL}
+ install:	${SUBDIRS_INSTALL}
+@@ -23,9 +33,7 @@ zeromq-all:	zeromq/Makefile
+ 	${MAKE} -C zeromq all
+ 
+ zeromq/Makefile:	zeromq/configure
+-	(cd zeromq ; \
+-	 ./configure --without-documentation --prefix=${PREFIX} \
+-	             --includedir=${PREFIX}/include/mythtv/zeromq)
++	(cd zeromq ; ./configure ${ZEROMQ_CONFIG} )
+ 
+ zeromq-install zeromq-uninstall zeromq-clean zeromq-distclean:
+ 	${MAKE} -C zeromq ${@:zeromq-%=%} DESTDIR=${INSTALL_ROOT}
+diff --git a/mythtv/external/nzmqt/src/nzmqt.pro b/mythtv/external/nzmqt/src/nzmqt.pro
+index 45dc1d4..947457f 100644
+--- a/mythtv/external/nzmqt/src/nzmqt.pro
++++ b/mythtv/external/nzmqt/src/nzmqt.pro
+@@ -13,6 +13,11 @@ INSTALLS = target
+ 
+ TEMPLATE = lib
+ 
++# Windows doesn't have a nice variable like LD_LIBRARY_PATH,
++# which means make install would be broken without extra steps.
++# As a workaround, we store dlls with exes. Also improves debugging!
++windows: target.path = $${PREFIX}/bin
++
+ QMAKE_CLEAN += $(TARGET) $(TARGETA) $(TARGETD) $(TARGET0) $(TARGET1) $(TARGET2)
+ 
+ SOURCES += \
+diff --git a/mythtv/external/qjson/src/src.pro b/mythtv/external/qjson/src/src.pro
+index 7859c38..8cd25e1 100644
+--- a/mythtv/external/qjson/src/src.pro
++++ b/mythtv/external/qjson/src/src.pro
+@@ -9,6 +9,7 @@ TARGET   = mythqjson
+ target.path = $${LIBDIR}
+ DESTDIR  = $$QJSON_BASE/lib
+ #CONFIG += create_prl
++CONFIG += dll
+ INSTALLS = target
+ 
+ !mingw {
+@@ -17,6 +18,12 @@ INSTALLS = target
+ 
+ windows: {
+   DEFINES += QJSON_MAKEDLL
++
++    # Windows doesn't have a nice variable like LD_LIBRARY_PATH,
++    # which means make install would be broken without extra steps.
++    # As a workaround, we store dlls with exes. Also improves debugging!
++    #
++    target.path = $${PREFIX}/bin
+ }
+ 
+ # MythTV OS X build fix. We want a dynamic library (like all our other libs),
+@@ -96,4 +103,3 @@ cppinc.files += $${PUBLIC_CPPHEADERS}
+ cppinc.path  += $${PREFIX}/include/mythtv/QJson/
+ 
+ INSTALLS += cppinc
+-
+-- 
+1.7.9.5
+

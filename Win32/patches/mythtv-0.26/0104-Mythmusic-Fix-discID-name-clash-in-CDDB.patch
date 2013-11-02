@@ -1,0 +1,29 @@
+From 3a63b43c1994db302d92b71317dae0b507c1c471 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 14 Mar 2011 23:11:57 +0100
+Subject: [PATCH 104/227] Mythmusic: Fix discID name clash in CDDB
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/mythmusic/mythmusic/cddb.cpp |    4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/mythplugins/mythmusic/mythmusic/cddb.cpp b/mythplugins/mythmusic/mythmusic/cddb.cpp
+index f7657d6..4569947 100644
+--- a/mythplugins/mythmusic/mythmusic/cddb.cpp
++++ b/mythplugins/mythmusic/mythmusic/cddb.cpp
+@@ -375,9 +375,9 @@ Cddb::Album& Cddb::Album::operator =(const QString& rhs)
+             if (line.startsWith("DISCID="))
+             {
+                 bool isValid = false;
+-                ulong discID = value.toULong(&isValid,16);
++                ulong newID = value.toULong(&isValid,16);
+                 if (isValid)
+-                    discID = discID;
++                    discID = newID;
+             }
+             else if (line.startsWith("DTITLE="))
+             {
+-- 
+1.7.9.5
+

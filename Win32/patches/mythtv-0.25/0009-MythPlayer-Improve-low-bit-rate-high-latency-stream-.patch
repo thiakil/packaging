@@ -1,0 +1,432 @@
+From 9bd9e044f67dad10a1cbcbf18d176a4f266015c5 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 2 Jun 2011 12:55:13 +0200
+Subject: [PATCH 009/124] MythPlayer: Improve low bit rate / high latency
+ stream playback
+
+DVB-S radio programs are low bit rate (64Kbps..256Kbps) and suffer
+occasional latency.
+
+MHEG interaction streams are internet sourced and often suffer congestion
+resulting in high latency for some packets.
+
+- Fix a number of issues to do with changing program to DVB-S radio and
+  the lack of video stream causing garbage video display.
+
+- Make FileRingBuffer::safe_read retry if reading from a remote file.
+  Low bit rate sources such as radio can have considerable latency.
+
+- FileRingBuffer::OpenFile reduce the initial rawbitrate from 8 Mbps to
+  1 Mbps, otherwise considerable delay can be caused during
+  radio program startup.
+
+- Increase the wait period in MythPlayer::OpenFile from 1 to 30 secs
+  while reading the probe buffer. This allows for typical http stream
+  startup latency.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |   13 ++++
+ mythtv/libs/libmythtv/fileringbuffer.cpp  |   45 ++++++++-----
+ mythtv/libs/libmythtv/mythplayer.cpp      |  102 +++++++++++++++++------------
+ mythtv/libs/libmythtv/tv_play.cpp         |    4 +-
+ 4 files changed, 106 insertions(+), 58 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index 52323fc..f4e6f0b 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -4387,6 +4387,9 @@ bool AvFormatDecoder::GetFrame(DecodeType decodetype)
+                 av_init_packet(pkt);
+             }
+ 
++            // NB av_read_frame will block until
++            // either a frame is read or an error occurs
++            // so MythPlayer::DecoderLoop will be unable to pause or stop
+             int retval = 0;
+             if (!ic || ((retval = av_read_frame(ic, pkt)) < 0))
+             {
+@@ -4498,7 +4501,17 @@ bool AvFormatDecoder::GetFrame(DecodeType decodetype)
+             case CODEC_TYPE_AUDIO:
+             {
+                 if (!ProcessAudioPacket(curstream, pkt, decodetype))
++                {
+                     have_err = true;
++                    if (!hasVideo)
++                    {
++                        LOG(VB_PLAYBACK, LOG_INFO, LOC +
++                            "GetFrame: exiting due to audio decode error");
++                        av_free_packet(pkt);
++                        delete pkt;
++                        return false;
++                    }
++                }
+                 else
+                     GenerateDummyVideoFrames();
+                 break;
+diff --git a/mythtv/libs/libmythtv/fileringbuffer.cpp b/mythtv/libs/libmythtv/fileringbuffer.cpp
+index 2985f57..86c989e 100644
+--- a/mythtv/libs/libmythtv/fileringbuffer.cpp
++++ b/mythtv/libs/libmythtv/fileringbuffer.cpp
+@@ -357,7 +357,12 @@ bool FileRingBuffer::OpenFile(const QString &lfilename, uint retry_ms)
+     commserror = false;
+     numfailures = 0;
+ 
+-    rawbitrate = 8000;
++    // The initial bitrate needs to be set with consideration for low bit rate
++    // streams (e.g. radio @ 64Kbps) such that fill_min bytes are received
++    // in a reasonable time period to enable decoders to peek the first few KB
++    // to determine type & settings.
++    rawbitrate = 1000; // Allow for radio
++
+     CalcReadAheadThresh();
+ 
+     bool ok = fd2 >= 0 || remotefile;
+@@ -488,24 +493,32 @@ int FileRingBuffer::safe_read(int fd, void *data, uint sz)
+  */
+ int FileRingBuffer::safe_read(RemoteFile *rf, void *data, uint sz)
+ {
+-    int ret = rf->Read(data, sz);
+-    if (ret < 0)
+-    {
+-        LOG(VB_GENERAL, LOG_ERR, LOC +
+-            "safe_read(RemoteFile* ...): read failed");
+-            
+-        poslock.lockForRead();
+-        rf->Seek(internalreadpos - readAdjust, SEEK_SET);
+-        poslock.unlock();
+-        numfailures++;
+-    }
+-    else if (ret == 0)
++    for (int retries = 0; ; ++retries)
+     {
+-        LOG(VB_FILE, LOG_INFO, LOC +
+-            "safe_read(RemoteFile* ...): at EOF");
++        int ret = rf->Read(data, sz);
++        if (ret > 0)
++            return ret;
++        else if (ret < 0)
++        {
++            LOG(VB_GENERAL, LOG_ERR, LOC +
++                "safe_read(RemoteFile* ...): read failed");
++
++            poslock.lockForRead();
++            rf->Seek(internalreadpos - readAdjust, SEEK_SET);
++            poslock.unlock();
++            numfailures++;
++            return ret;
++        }
++        // Retry for 300mS if liveTV for low bit rate (radio) streams
++        else if (!livetvchain || retries >= 5)
++            break;
++
++        usleep(60000);
+     }
+ 
+-    return ret;
++    LOG(VB_FILE, LOG_INFO, LOC +
++        "safe_read(RemoteFile* ...): at EOF");
++    return 0;
+ }
+ 
+ long long FileRingBuffer::GetReadPosition(void) const
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 6173ba9..d4c562a 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -372,7 +372,7 @@ bool MythPlayer::Pause(void)
+ 
+ bool MythPlayer::Play(float speed, bool normal, bool unpauseaudio)
+ {
+-    pauseLock.lock();
++    QMutexLocker locker(&pauseLock);
+     LOG(VB_PLAYBACK, LOG_INFO, LOC +
+         QString("Play(%1, normal %2, unpause audio %3)")
+             .arg(speed,5,'f',1).arg(normal).arg(unpauseaudio));
+@@ -380,7 +380,6 @@ bool MythPlayer::Play(float speed, bool normal, bool unpauseaudio)
+     if (deleteMap.IsEditing())
+     {
+         LOG(VB_GENERAL, LOG_ERR, LOC + "Ignoring Play(), in edit mode.");
+-        pauseLock.unlock();
+         return false;
+     }
+ 
+@@ -392,7 +391,6 @@ bool MythPlayer::Play(float speed, bool normal, bool unpauseaudio)
+     allpaused = false;
+     next_play_speed   = speed;
+     next_normal_speed = normal;
+-    pauseLock.unlock();
+     return true;
+ }
+ 
+@@ -910,7 +908,8 @@ int MythPlayer::OpenFile(uint retries)
+         MythTimer peekTimer; peekTimer.start();
+         while (player_ctx->buffer->Peek(testbuf, testreadsize) != testreadsize)
+         {
+-            if (peekTimer.elapsed() > 1000 || bigTimer.elapsed() > timeout)
++            // NB need to allow for streams encountering network congestion
++            if (peekTimer.elapsed() > 30000 || bigTimer.elapsed() > timeout)
+             {
+                 LOG(VB_GENERAL, LOG_ERR, LOC +
+                     QString("OpenFile(): Could not read first %1 bytes of '%2'")
+@@ -920,7 +919,7 @@ int MythPlayer::OpenFile(uint retries)
+                 return -1;
+             }
+             LOG(VB_GENERAL, LOG_WARNING, LOC + "OpenFile() waiting on data");
+-            usleep(50 * 1000);
++            usleep(150 * 1000);
+         }
+ 
+         player_ctx->LockPlayingInfo(__FILE__, __LINE__);
+@@ -2097,7 +2096,7 @@ bool MythPlayer::PrebufferEnoughFrames(int min_buffers)
+             // to recover from serious problems if frames get leaked.
+             DiscardVideoFrames(true);
+         }
+-        if (waited_for > 20000) // 20 seconds
++        if (waited_for > 30000) // 30 seconds for internet streamed media
+         {
+             LOG(VB_GENERAL, LOG_ERR, LOC +
+                 "Waited too long for decoder to fill video buffers. Exiting..");
+@@ -2141,7 +2140,10 @@ void MythPlayer::DisplayNormalFrame(bool check_prebuffer)
+     SetBuffering(false);
+ 
+     // retrieve the next frame
+-    videoOutput->StartDisplayingFrame();
++    bool const bDisplayFrame = videoOutput->ValidVideoFrames() > 0;
++    if (bDisplayFrame)
++        videoOutput->StartDisplayingFrame();
++
+     VideoFrame *frame = videoOutput->GetLastShownFrame();
+ 
+     // Check aspect ratio
+@@ -2150,9 +2152,12 @@ void MythPlayer::DisplayNormalFrame(bool check_prebuffer)
+     // Player specific processing (dvd, bd, mheg etc)
+     PreProcessNormalFrame();
+ 
+-    // handle scan type changes
+-    AutoDeint(frame);
+-    detect_letter_box->SwitchTo(frame);
++    if (GetTrackCount(kTrackTypeVideo))
++    {
++        // handle scan type changes
++        AutoDeint(frame);
++        detect_letter_box->SwitchTo(frame);
++    }
+ 
+     FrameScanType ps = m_scan;
+     if (kScan_Detect == m_scan || kScan_Ignore == m_scan)
+@@ -2165,7 +2170,8 @@ void MythPlayer::DisplayNormalFrame(bool check_prebuffer)
+     osdLock.unlock();
+ 
+     AVSync(frame, 0);
+-    videoOutput->DoneDisplayingFrame(frame);
++    if (bDisplayFrame)
++        videoOutput->DoneDisplayingFrame(frame);
+ }
+ 
+ void MythPlayer::PreProcessNormalFrame(void)
+@@ -2174,10 +2180,12 @@ void MythPlayer::PreProcessNormalFrame(void)
+     // handle Interactive TV
+     if (GetInteractiveTV())
+     {
+-        osdLock.lock();
+-        itvLock.lock();
++        QMutexLocker lk1(&osdLock);
++
+         if (osd && videoOutput->GetOSDPainter())
+         {
++            QMutexLocker lk2(&itvLock);
++
+             InteractiveScreen *window =
+                 (InteractiveScreen*)osd->GetWindow(OSD_WIN_INTERACT);
+             if ((interactiveTV->ImageHasChanged() || !itvVisible) && window)
+@@ -2186,8 +2194,6 @@ void MythPlayer::PreProcessNormalFrame(void)
+                 itvVisible = true;
+             }
+         }
+-        itvLock.unlock();
+-        osdLock.unlock();
+     }
+ #endif // USING_MHEG
+ }
+@@ -2330,7 +2336,7 @@ bool MythPlayer::VideoLoop(void)
+         DisplayPauseFrame();
+     }
+     else
+-        DisplayNormalFrame();
++        DisplayNormalFrame(GetTrackCount(kTrackTypeVideo));
+ 
+     if (FlagIsSet(kVideoIsNull) && decoder)
+         decoder->UpdateFramesPlayed();
+@@ -2445,7 +2451,10 @@ void MythPlayer::SwitchToProgram(void)
+     ProgramInfo *pginfo = player_ctx->tvchain->GetSwitchProgram(
+         discontinuity, newtype, newid);
+     if (!pginfo)
++    {
++        LOG(VB_GENERAL, LOG_ERR, LOC + "SwitchToProgram - No ProgramInfo");
+         return;
++    }
+ 
+     bool newIsDummy = player_ctx->tvchain->GetCardType(newid) == "DUMMY";
+ 
+@@ -2579,7 +2588,10 @@ void MythPlayer::JumpToProgram(void)
+     ProgramInfo *pginfo = player_ctx->tvchain->GetSwitchProgram(
+         discontinuity, newtype, newid);
+     if (!pginfo)
++    {
++        LOG(VB_GENERAL, LOG_ERR, LOC + "JumpToProgram - No ProgramInfo");
+         return;
++    }
+ 
+     inJumpToProgramPause = true;
+ 
+@@ -2587,7 +2599,6 @@ void MythPlayer::JumpToProgram(void)
+     SetPlayingInfo(*pginfo);
+ 
+     Pause();
+-    ChangeSpeed();
+     ResetCaptions();
+     player_ctx->tvchain->SetProgram(*pginfo);
+     player_ctx->buffer->Reset(true);
+@@ -2798,12 +2809,12 @@ void MythPlayer::EventLoop(void)
+         player_ctx->tvchain->JumpToNext(true, 1);
+         JumpToProgram();
+     }
+-    else if ((!allpaused || GetEof()) && player_ctx->tvchain &&
+-             (decoder && !decoder->GetWaitForChange()))
++    else if ((!allpaused || GetEof()) &&
++             decoder && !decoder->GetWaitForChange() &&
++             player_ctx->tvchain && player_ctx->tvchain->NeedsToSwitch())
+     {
+         // Switch to the next program in livetv
+-        if (player_ctx->tvchain->NeedsToSwitch())
+-            SwitchToProgram();
++        SwitchToProgram();
+     }
+ 
+     // Jump to the next program in livetv
+@@ -2971,49 +2982,47 @@ void MythPlayer::AudioEnd(void)
+ 
+ bool MythPlayer::PauseDecoder(void)
+ {
+-    decoderPauseLock.lock();
++    QMutexLocker locker(&decoderPauseLock);
+     if (is_current_thread(decoderThread))
+     {
++        pauseDecoder = false;
+         decoderPaused = true;
+         decoderThreadPause.wakeAll();
+-        decoderPauseLock.unlock();
+-        return decoderPaused;
++        return true;
+     }
+ 
+-    int tries = 0;
+     pauseDecoder = true;
+-    while (decoderThread && !killdecoder && (tries++ < 100) &&
+-           !decoderThreadPause.wait(&decoderPauseLock, 100))
++    int tries = 0;
++    while (!decoderPaused && decoderThread && !killdecoder && (tries++ < 10) &&
++          !decoderThreadPause.wait(locker.mutex(), 100))
+     {
+         LOG(VB_GENERAL, LOG_WARNING, LOC + "Waited 100ms for decoder to pause");
+     }
+     pauseDecoder = false;
+-    decoderPauseLock.unlock();
+     return decoderPaused;
+-}
++ }
+ 
+ void MythPlayer::UnpauseDecoder(void)
+ {
+-    decoderPauseLock.lock();
++    QMutexLocker locker(&decoderPauseLock);
+ 
+     if (is_current_thread(decoderThread))
+     {
++        unpauseDecoder = false;
+         decoderPaused = false;
+         decoderThreadUnpause.wakeAll();
+-        decoderPauseLock.unlock();
+         return;
+     }
+ 
+-    int tries = 0;
+     unpauseDecoder = true;
+-    while (decoderThread && !killdecoder && (tries++ < 100) &&
+-          !decoderThreadUnpause.wait(&decoderPauseLock, 100))
++    int tries = 0;
++    while (decoderPaused && decoderThread && !killdecoder && (tries++ < 10) &&
++          !decoderThreadUnpause.wait(locker.mutex(), 100))
+     {
+         LOG(VB_GENERAL, LOG_WARNING, LOC +
+             "Waited 100ms for decoder to unpause");
+     }
+     unpauseDecoder = false;
+-    decoderPauseLock.unlock();
+ }
+ 
+ void MythPlayer::DecoderStart(bool start_paused)
+@@ -3039,7 +3048,7 @@ void MythPlayer::DecoderEnd(void)
+     SetPlaying(false);
+     killdecoder = true;
+     int tries = 0;
+-    while (decoderThread && !decoderThread->wait(100) && (tries++ < 50))
++    while (decoderThread && !decoderThread->wait(100) && (tries++ < 20))
+         LOG(VB_PLAYBACK, LOG_INFO, LOC +
+             "Waited 100ms for decoder loop to stop");
+ 
+@@ -3051,12 +3060,23 @@ void MythPlayer::DecoderEnd(void)
+ 
+ void MythPlayer::DecoderPauseCheck(void)
+ {
+-    if (is_current_thread(decoderThread))
++    if (!is_current_thread(decoderThread))
++        return;
++
++    QMutexLocker locker(&decoderPauseLock);
++
++    if (pauseDecoder)
++    {
++        pauseDecoder = false;
++        decoderPaused = true;
++        decoderThreadPause.wakeAll();
++    }
++
++    if (unpauseDecoder)
+     {
+-        if (pauseDecoder)
+-            PauseDecoder();
+-        if (unpauseDecoder)
+-            UnpauseDecoder();
++        unpauseDecoder = false;
++        decoderPaused = false;
++        decoderThreadUnpause.wakeAll();
+     }
+ }
+ 
+diff --git a/mythtv/libs/libmythtv/tv_play.cpp b/mythtv/libs/libmythtv/tv_play.cpp
+index d29937a..0d1e5d4 100644
+--- a/mythtv/libs/libmythtv/tv_play.cpp
++++ b/mythtv/libs/libmythtv/tv_play.cpp
+@@ -7175,7 +7175,8 @@ void TV::ChangeChannel(PlayerContext *ctx, uint chanid, const QString &chan)
+     if (ctx->prevChan.empty())
+         ctx->PushPreviousChannel();
+ 
+-    PauseAudioUntilBuffered(ctx);
++    if (ctx->player)
++        ctx->player->GetAudio()->Pause(true);
+     PauseLiveTV(ctx);
+ 
+     ctx->LockDeletePlayer(__FILE__, __LINE__);
+@@ -7192,6 +7193,7 @@ void TV::ChangeChannel(PlayerContext *ctx, uint chanid, const QString &chan)
+         ctx->player->GetAudio()->Reset();
+ 
+     UnpauseLiveTV(ctx, chanid && GetQueuedChanID());
++    PauseAudioUntilBuffered(ctx);
+ 
+     if (oldinputname != ctx->recorder->GetInput())
+         UpdateOSDInput(ctx);
+-- 
+1.7.9.5
+

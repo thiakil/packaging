@@ -1,0 +1,45 @@
+From 9f7c8d712eb97a6dc0989916c7e338363649f175 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 6 May 2012 12:33:35 +0200
+Subject: [PATCH 075/124] libmythui: Fix a redraw bug in MythUIType
+
+While evaluating the ATI Catalyst 'TearFree Desktop' option I noticed
+that sometimes a keypress was apparently being held up until the time
+on the main menu was updated.  Initially I thought that this was a lirc
+or fglrx issue, but on investigation it turned out that MythMainWindow::animate
+was requesting updates for empty repaint regions.  Delving further
+showed that MythUIType::Draw was resetting m_DirtyRegion to empty
+even if the clipRect was smaller, thus leaving unpainted regions.
+
+m_DirtyRegion may be extended by HandleMovementPulse, SetRedraw
+or SetChildNeedsRedraw etc AFTER GetDirtyArea is called.
+So when MythUIType::Draw is called, clipRect may not include the whole
+of m_DirtyRegion.
+
+This patch subtracts the Draw clipRect from m_DirtyRegion instead of
+simply emtying it.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythui/mythuitype.cpp |    5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythui/mythuitype.cpp b/mythtv/libs/libmythui/mythuitype.cpp
+index 4d6759b..754af0d 100644
+--- a/mythtv/libs/libmythui/mythuitype.cpp
++++ b/mythtv/libs/libmythui/mythuitype.cpp
+@@ -478,7 +478,10 @@ void MythUIType::DrawSelf(MythPainter *, int, int, int, QRect)
+ void MythUIType::Draw(MythPainter *p, int xoffset, int yoffset, int alphaMod,
+                       QRect clipRect)
+ {
+-    m_DirtyRegion = QRegion(QRect(0, 0, 0, 0));
++    // NB m_DirtyRegion may be extended by HandleMovementPulse, SetRedraw
++    // or SetChildNeedsRedraw etc _AFTER_ GetDirtyArea is called.
++    // So clipRect may not include the whole of m_DirtyRegion
++    m_DirtyRegion -= QRegion(clipRect); // NB Qt >= 4.2
+ 
+     if (!m_Visible || m_Vanished)
+         return;
+-- 
+1.7.9.5
+

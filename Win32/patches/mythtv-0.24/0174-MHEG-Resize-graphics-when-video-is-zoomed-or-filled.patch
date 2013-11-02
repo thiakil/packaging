@@ -1,0 +1,275 @@
+From ffdc06a3e5e6f15a8f6d702cd9569d4277c59e48 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 7 Mar 2013 17:49:13 +0000
+Subject: [PATCH 174/285] MHEG: Resize graphics when video is zoomed or filled
+
+Currently when video is zoomed or letterbox filled, the MHEG graphics are
+drawn outside of the visible rectangle.  This patch resizes the graphics to
+fit the visible display window.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/DetectLetterbox.cpp |   18 +-----------
+ mythtv/libs/libmythtv/interactivetv.cpp   |    4 +--
+ mythtv/libs/libmythtv/interactivetv.h     |    2 +-
+ mythtv/libs/libmythtv/mhi.cpp             |   43 ++++++++++++++++++++++-------
+ mythtv/libs/libmythtv/mhi.h               |    5 +++-
+ mythtv/libs/libmythtv/mythplayer.cpp      |   10 +++----
+ mythtv/libs/libmythtv/videooutbase.cpp    |   10 -------
+ mythtv/libs/libmythtv/videooutbase.h      |    1 -
+ mythtv/libs/libmythtv/videooutwindow.cpp  |    4 +--
+ 9 files changed, 47 insertions(+), 50 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/DetectLetterbox.cpp b/mythtv/libs/libmythtv/DetectLetterbox.cpp
+index 50a846c..acae059 100644
+--- a/mythtv/libs/libmythtv/DetectLetterbox.cpp
++++ b/mythtv/libs/libmythtv/DetectLetterbox.cpp
+@@ -85,10 +85,7 @@ void DetectLetterbox::Detect(VideoFrame *frame)
+             return;
+     }
+ 
+-
+-    // If the OSD interactive (MHEG) window is visible then always show fullframe
+-    // NB this benefits from a mod to MHIContext::UpdateOSD to make the
+-    // interactive window invisible if there's nothing on screen
++    // Don't auto detect if the OSD interactive (MHEG) window is visible
+     if (m_player->itvVisible)
+     {
+         m_player->LockOSD();
+@@ -97,20 +94,7 @@ void DetectLetterbox::Detect(VideoFrame *frame)
+         m_player->UnlockOSD();
+ 
+         if (vis)
+-        {
+-            if (detectLetterboxDetectedMode != kAdjustFill_Off)
+-            {
+-                VERBOSE(VB_PLAYBACK, "Detect Letterbox: OSD forcing full frame");
+-                detectLetterboxConsecutiveCounter = CONSECUTIVE_COUNTS;
+-                detectLetterboxDetectedMode = kAdjustFill_Off;
+-                detectLetterboxSwitchFrame = frameNumber;
+-            }
+-            else
+-            {
+-                detectLetterboxConsecutiveCounter++;
+-            }
+             return;
+-        }
+     }
+ 
+     unsigned char * const buf = frame->buf;
+diff --git a/mythtv/libs/libmythtv/interactivetv.cpp b/mythtv/libs/libmythtv/interactivetv.cpp
+index a745215..1e37dd1 100644
+--- a/mythtv/libs/libmythtv/interactivetv.cpp
++++ b/mythtv/libs/libmythtv/interactivetv.cpp
+@@ -60,9 +60,9 @@ void InteractiveTV::ProcessDSMCCSection(
+                                 carouselId, dataBroadcastId);
+ }
+ 
+-void InteractiveTV::Reinit(const QRect &display)
++void InteractiveTV::Reinit(const QRect &videoRect, const QRect &dispRect)
+ {
+-    m_context->Reinit(display);
++    m_context->Reinit(videoRect, dispRect);
+ }
+ 
+ bool InteractiveTV::OfferKey(QString key)
+diff --git a/mythtv/libs/libmythtv/interactivetv.h b/mythtv/libs/libmythtv/interactivetv.h
+index ba426de..a527ded 100644
+--- a/mythtv/libs/libmythtv/interactivetv.h
++++ b/mythtv/libs/libmythtv/interactivetv.h
+@@ -31,7 +31,7 @@ class InteractiveTV
+     // Draw the (updated) image.
+     void UpdateOSD(InteractiveScreen *osdWindow, MythPainter *osdPainter);
+     // Called when the visible display area has changed.
+-    void Reinit(const QRect &display);
++    void Reinit(const QRect &videoRect, const QRect &dispRect);
+ 
+     // Offer a key press.  Returns true if it accepts it.
+     // This will depend on the current profile.
+diff --git a/mythtv/libs/libmythtv/mhi.cpp b/mythtv/libs/libmythtv/mhi.cpp
+index 9006ba7..1e6c003 100644
+--- a/mythtv/libs/libmythtv/mhi.cpp
++++ b/mythtv/libs/libmythtv/mhi.cpp
+@@ -552,10 +552,16 @@ bool MHIContext::OfferKey(QString key)
+ }
+ 
+ // Called from MythPlayer::VideoStart and MythPlayer::ReinitOSD
+-void MHIContext::Reinit(const QRect &display)
++void MHIContext::Reinit(const QRect &videoRect, const QRect &dispRect)
+ {
+-    m_videoDisplayRect = m_videoRect = QRect();
+-    m_displayRect = display;
++    VERBOSE(VB_MHEG, QString("[mhi] Reinit video(y:%1 x:%2 w:%3 h:%4) vis(y:%5 x:%6 w:%7 h:%8)")
++        .arg(videoRect.y()).arg(videoRect.x())
++        .arg(videoRect.width()).arg(videoRect.height())
++        .arg(dispRect.y()).arg(dispRect.x())
++        .arg(dispRect.width()).arg(dispRect.height()));
++    m_videoDisplayRect = QRect();
++    m_videoRect = videoRect;
++    m_displayRect = dispRect;
+ }
+ 
+ void MHIContext::SetInputRegister(int num)
+@@ -678,11 +684,28 @@ inline int MHIContext::ScaleY(int n, bool roundup) const
+ 
+ inline QRect MHIContext::Scale(const QRect &r) const
+ {
+-    return QRect( m_displayRect.topLeft() +
++    return QRect( //m_displayRect.topLeft() +
+         QPoint(ScaleX(r.x()), ScaleY(r.y())),
+         QSize(ScaleX(r.width(), true), ScaleY(r.height(), true)) );
+ }
+ 
++inline int MHIContext::ScaleVideoX(int n, bool roundup) const
++{
++    return (n * m_videoRect.width() + (roundup ? StdDisplayWidth - 1 : 0)) / StdDisplayWidth;
++}
++
++inline int MHIContext::ScaleVideoY(int n, bool roundup) const
++{
++    return (n * m_videoRect.height() + (roundup ? StdDisplayHeight - 1 : 0)) / StdDisplayHeight;
++}
++
++inline QRect MHIContext::ScaleVideo(const QRect &r) const
++{
++    return QRect( m_videoRect.topLeft() +
++        QPoint(ScaleVideoX(r.x()), ScaleVideoY(r.y())),
++        QSize(ScaleVideoX(r.width(), true), ScaleVideoY(r.height(), true)) );
++}
++
+ void MHIContext::AddToDisplay(const QImage &image, const QRect &displayRect, bool bUnder /*=false*/)
+ {
+     const QRect scaledRect = Scale(displayRect);
+@@ -732,14 +755,14 @@ void MHIContext::DrawVideo(const QRect &videoRect, const QRect &dispRect)
+     // tell the video player to resize the video stream
+     if (m_parent->GetNVP())
+     {
+-        QRect vidRect = Scale(videoRect);
+-        vidRect.setWidth(Roundup(vidRect.width(), 2));
+-        vidRect.setHeight(Roundup(vidRect.height(), 2));
+-        if (m_videoRect != vidRect)
++        QRect vidRect;
++        if (videoRect != QRect(QPoint(0,0),QSize(StdDisplayWidth,StdDisplayHeight)))
+         {
+-            m_parent->GetNVP()->SetVideoResize(vidRect);
+-            m_videoRect = vidRect;
++            vidRect = ScaleVideo(videoRect);
++            vidRect.setWidth(Roundup(vidRect.width(), 2));
++            vidRect.setHeight(Roundup(vidRect.height(), 2));
+         }
++        m_parent->GetNVP()->SetVideoResize(vidRect);
+     }
+ 
+     m_videoDisplayRect = Scale(dispRect);
+diff --git a/mythtv/libs/libmythtv/mhi.h b/mythtv/libs/libmythtv/mhi.h
+index 3dd6fc8..ec586f1 100644
+--- a/mythtv/libs/libmythtv/mhi.h
++++ b/mythtv/libs/libmythtv/mhi.h
+@@ -61,7 +61,7 @@ class MHIContext : public MHContext
+     /// Update the display
+     void UpdateOSD(InteractiveScreen *osdWindow, MythPainter *osdPainter);
+     /// The display area has changed.
+-    void Reinit(const QRect &display);
++    void Reinit(const QRect &videoRect, const QRect &dispRect);
+ 
+     /// Stop the MHEG engine if it's running and waits until it has.
+     void StopEngine(void);
+@@ -150,6 +150,9 @@ class MHIContext : public MHContext
+     int ScaleX(int, bool roundup = false) const;
+     int ScaleY(int, bool roundup = false) const;
+     QRect Scale(const QRect &r) const;
++    int ScaleVideoX(int, bool roundup = false) const;
++    int ScaleVideoY(int, bool roundup = false) const;
++    QRect ScaleVideo(const QRect &r) const;
+ 
+     FT_Face GetFontFace(void) { return m_face; }
+     bool IsFaceLoaded(void) { return m_face_loaded; }
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 790147a..e261ed0 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -555,11 +555,11 @@ void MythPlayer::ReinitOSD(void)
+         }
+         QRect visible, total;
+         float aspect, scaling;
++        videoOutput->GetOSDBounds(total, visible, aspect,
++                                  scaling, 1.0f);
+         if (osd)
+         {
+             osd->SetPainter(videoOutput->GetOSDPainter());
+-            videoOutput->GetOSDBounds(total, visible, aspect,
+-                                      scaling, 1.0f);
+             if (osd->Bounds() != visible)
+             {
+                 uint old = textDisplayMode;
+@@ -573,8 +573,7 @@ void MythPlayer::ReinitOSD(void)
+         if (GetInteractiveTV())
+         {
+             QMutexLocker locker(&itvLock);
+-            total = videoOutput->GetMHEGBounds();
+-            interactiveTV->Reinit(total);
++            interactiveTV->Reinit(total, visible);
+             itvVisible = false;
+         }
+ #endif // USING_MHEG
+@@ -2028,8 +2027,7 @@ void MythPlayer::VideoStart(void)
+         if (GetInteractiveTV())
+         {
+             QMutexLocker locker(&itvLock);
+-            total = videoOutput->GetMHEGBounds();
+-            interactiveTV->Reinit(total);
++            interactiveTV->Reinit(total, visible);
+         }
+ #endif // USING_MHEG
+ 
+diff --git a/mythtv/libs/libmythtv/videooutbase.cpp b/mythtv/libs/libmythtv/videooutbase.cpp
+index 9b9871c..a5f7052 100644
+--- a/mythtv/libs/libmythtv/videooutbase.cpp
++++ b/mythtv/libs/libmythtv/videooutbase.cpp
+@@ -773,16 +773,6 @@ QRect VideoOutput::GetTotalOSDBounds(void) const
+     return QRect(QPoint(0,0), dvr2);
+ }
+ 
+-QRect VideoOutput::GetMHEGBounds(void)
+-{
+-    if (!hasFullScreenOSD())
+-        return window.GetTotalOSDBounds();
+-
+-    QRect dvr = window.GetDisplayVideoRect();
+-    return QRect(QPoint(dvr.left() & ~0x1, dvr.top()  & ~0x1),
+-                 QSize(dvr.width() & ~0x1, dvr.height() & ~0x1));
+-}
+-
+ bool VideoOutput::AllowPreviewEPG(void) const
+ {
+     return window.IsPreviewEPGAllowed();
+diff --git a/mythtv/libs/libmythtv/videooutbase.h b/mythtv/libs/libmythtv/videooutbase.h
+index 640fe2e..7ce6abb 100644
+--- a/mythtv/libs/libmythtv/videooutbase.h
++++ b/mythtv/libs/libmythtv/videooutbase.h
+@@ -98,7 +98,6 @@ class VideoOutput
+     virtual void GetOSDBounds(QRect &total, QRect &visible,
+                               float &visibleAspect, float &fontScale,
+                               float themeAspect) const;
+-    QRect        GetMHEGBounds(void);
+     virtual void DrawSlice(VideoFrame *frame, int x, int y, int w, int h);
+ 
+     /// \brief Draws non-video portions of the screen
+diff --git a/mythtv/libs/libmythtv/videooutwindow.cpp b/mythtv/libs/libmythtv/videooutwindow.cpp
+index b10b3e3..92671ca 100644
+--- a/mythtv/libs/libmythtv/videooutwindow.cpp
++++ b/mythtv/libs/libmythtv/videooutwindow.cpp
+@@ -732,8 +732,8 @@ QRect VideoOutWindow::GetVisibleOSDBounds(
+     }
+ 
+     // top left and bottom right corners respecting letterboxing
+-    QPoint tl = QPoint((uint) ceil(max(-display_video_rect.left(),0)*dv_w),
+-                       (uint) ceil(max(-display_video_rect.top(),0)*dv_h));
++    QPoint tl = QPoint(((uint) (max(-display_video_rect.left(),0)*dv_w)) & ~1,
++                       ((uint) (max(-display_video_rect.top(),0)*dv_h)) & ~1);
+     QPoint br = QPoint(
+         (uint) floor(video_disp_dim.width()  - (right_overflow * dv_w)),
+         (uint) floor(video_disp_dim.height() - (lower_overflow * dv_h)));
+-- 
+1.7.9.5
+

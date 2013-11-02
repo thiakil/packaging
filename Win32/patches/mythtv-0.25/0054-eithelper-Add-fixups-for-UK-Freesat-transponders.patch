@@ -1,0 +1,65 @@
+From ebf7ccc7651c989f7de0d0ae07ed41be08bf058f Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 9 Dec 2011 12:48:50 +0100
+Subject: [PATCH 054/124] eithelper: Add fixups for UK Freesat transponders
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/eithelper.cpp |   25 ++++++++++++++++++++++---
+ 1 file changed, 22 insertions(+), 3 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/eithelper.cpp b/mythtv/libs/libmythtv/eithelper.cpp
+index 9fc27e1..e5a1ff2 100644
+--- a/mythtv/libs/libmythtv/eithelper.cpp
++++ b/mythtv/libs/libmythtv/eithelper.cpp
+@@ -793,7 +793,7 @@ static void init_fixup(QMap<uint64_t,uint> &fix)
+ 
+     // United Kingdom
+     fix[ 9018U << 16] = EITFixUp::kFixUK;
+-    // UK Freesat
++    // UK BBC
+     fix[ 2013LL << 32 | 2U << 16] = EITFixUp::kFixUK;
+     fix[ 2017LL << 32 | 2U << 16] = EITFixUp::kFixUK;
+     fix[ 2018LL << 32 | 2U << 16] = EITFixUp::kFixUK;
+@@ -808,10 +808,8 @@ static void init_fixup(QMap<uint64_t,uint> &fix)
+     fix[ 2048LL << 32 | 2U << 16] = EITFixUp::kFixUK;
+     fix[ 2049LL << 32 | 2U << 16] = EITFixUp::kFixUK;
+     fix[ 2050LL << 32 | 2U << 16] = EITFixUp::kFixUK;
+-    fix[ 2051LL << 32 | 2U << 16] = EITFixUp::kFixUK;
+     fix[ 2053LL << 32 | 2U << 16] = EITFixUp::kFixUK;
+     fix[ 2054LL << 32 | 2U << 16] = EITFixUp::kFixUK;
+-    fix[ 2056LL << 32 | 2U << 16] = EITFixUp::kFixUK;
+     fix[ 2057LL << 32 | 2U << 16] = EITFixUp::kFixUK;
+     fix[ 2063LL << 32 | 2U << 16] = EITFixUp::kFixUK;
+     fix[ 2068LL << 32 | 2U << 16] = EITFixUp::kFixUK;
+@@ -830,6 +828,27 @@ static void init_fixup(QMap<uint64_t,uint> &fix)
+     fix[ 2413LL << 32 | 2U << 16] = EITFixUp::kFixUK;
+     fix[ 2602LL << 32 | 2U << 16] = EITFixUp::kFixUK;
+     fix[ 2612LL << 32 | 2U << 16] = EITFixUp::kFixUK;
++    // R.caroline
++    fix[ 2315LL << 32 | 59U << 16] = EITFixUp::kFixUK;
++    // UK Sky
++    fix[ 2051LL << 32 | 2U << 16] = EITFixUp::kFixUK;
++    fix[ 2052LL << 32 | 2U << 16] = EITFixUp::kFixUK;
++    fix[ 2055LL << 32 | 2U << 16] = EITFixUp::kFixUK;
++    fix[ 2056LL << 32 | 2U << 16] = EITFixUp::kFixUK;
++    fix[ 2315LL << 32 | 2U << 16] = EITFixUp::kFixUK;
++    fix[ 2316LL << 32 | 2U << 16] = EITFixUp::kFixUK;
++    for (int i = 2402; i <= 2412; ++i)
++        fix[ (long long)i << 32 | 2U << 16] = EITFixUp::kFixUK;
++    for (int i = 2001; i <= 2012; ++i)
++       fix[ (long long)i << 32 | 2U << 16] = EITFixUp::kFixUK;
++    for (int i = 2014; i <= 2040; ++i)
++       fix[ (long long)i << 32 | 2U << 16] = EITFixUp::kFixUK;
++    fix[ 2611LL << 32 | 2U << 16] = EITFixUp::kFixUK;
++    fix[ 2601LL << 32 | 2U << 16] = EITFixUp::kFixUK;
++    fix[ 2602LL << 32 | 2U << 16] = EITFixUp::kFixUK;
++    fix[ 2613LL << 32 | 2U << 16] = EITFixUp::kFixUK;
++    fix[ 2603LL << 32 | 2U << 16] = EITFixUp::kFixUK;
++    fix[ 2604LL << 32 | 2U << 16] = EITFixUp::kFixUK;
+ 
+     // ComHem Sweden
+     fix[40999U << 16       ] = EITFixUp::kFixComHem;
+-- 
+1.7.9.5
+

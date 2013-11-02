@@ -1,0 +1,56 @@
+From 7e9bd32d3d3091bc9af6394b33e299b90355e9ac Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 9 Mar 2013 10:25:43 +0000
+Subject: [PATCH 176/285] FE: Channel record priority settings gets channel
+ icons from master BE
+
+Channel icon paths are relative to the master BE.  When a remote frontend
+shows a channel icon the image is loaded locally which normally fails.
+
+Aside: the TV guide correctly handles channel icons.
+
+This patch to loads the icon from the local cache (channels/) if present,
+if not it fetches the icon from the master BE and saves it to the cache.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../programs/mythfrontend/channelrecpriority.cpp   |   16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/mythtv/programs/mythfrontend/channelrecpriority.cpp b/mythtv/programs/mythfrontend/channelrecpriority.cpp
+index f1ad5c2..bfe6a2c 100644
+--- a/mythtv/programs/mythfrontend/channelrecpriority.cpp
++++ b/mythtv/programs/mythfrontend/channelrecpriority.cpp
+@@ -336,8 +336,13 @@ void ChannelRecPriority::updateList()
+         else
+             item->DisplayState("disabled", "status");
+ 
+-        item->SetImage(chanInfo->iconpath, "icon");
+-        item->SetImage(chanInfo->iconpath);
++        QString iconpath = chanInfo->iconpath;
++        PixmapChannel c(DBChannel("","",0,0,0,0,false,"",iconpath));
++        if (c.CacheChannelIcon())
++            iconpath = c.m_localIcon;
++
++        item->SetImage(iconpath, "icon");
++        item->SetImage(iconpath);
+ 
+         item->SetText(chanInfo->recpriority, "priority", fontState);
+ 
+@@ -419,7 +424,12 @@ void ChannelRecPriority::updateInfo(MythUIButtonListItem *item)
+         QString rectype;
+         if (m_iconImage)
+         {
+-            m_iconImage->SetFilename(channelItem->iconpath);
++            QString iconpath = channelItem->iconpath;
++            PixmapChannel c(DBChannel("","",0,0,0,0,false,"",iconpath));
++            if (c.CacheChannelIcon())
++                iconpath = c.m_localIcon;
++
++            m_iconImage->SetFilename(iconpath);
+             m_iconImage->Load();
+         }
+ 
+-- 
+1.7.9.5
+

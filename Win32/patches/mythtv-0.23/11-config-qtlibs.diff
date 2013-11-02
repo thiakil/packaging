@@ -1,0 +1,12 @@
+diff --git a/mythtv/configure b/mythtv/configure
+index ae4c1ea..304bc68 100755
+--- mythtv/configure
++++ mythtv/configure
+@@ -4805,6 +4812,7 @@ cat <<EOF >> $MYTH_CONFIG_MAK
+ # Note: Qt uses QMAKE_INCDIR_QT to build an absolute path for include
+ #       directories, it cannot be modified.
+ QMAKE_LIBDIR_QT -= $libdir
++QMAKE_LIBDIR-=${libdir}
+ LATE_LIBS            += -L$libdir
+ EOF
+ 

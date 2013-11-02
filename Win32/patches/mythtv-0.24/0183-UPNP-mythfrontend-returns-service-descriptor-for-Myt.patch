@@ -1,0 +1,49 @@
+From c6e4f516cb242d3523be1f9c1673c27eb26f6cb2 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 6 May 2013 11:01:27 +0100
+Subject: [PATCH 183/285] UPNP: mythfrontend returns service descriptor for
+ MythTv service
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythfrontend/mythfexml.cpp |    2 ++
+ mythtv/programs/mythfrontend/mythfexml.h   |    3 ++-
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/programs/mythfrontend/mythfexml.cpp b/mythtv/programs/mythfrontend/mythfexml.cpp
+index 02feb47..9a55774 100644
+--- a/mythtv/programs/mythfrontend/mythfexml.cpp
++++ b/mythtv/programs/mythfrontend/mythfexml.cpp
+@@ -54,6 +54,7 @@ MythFEXML::~MythFEXML()
+ 
+ MythFEXMLMethod MythFEXML::GetMethod( const QString &sURI )
+ {
++    if (sURI == "GetServDesc"  ) return MFEXML_GetServiceDescription;
+     if (sURI == "GetScreenShot") return MFEXML_GetScreenShot;
+ 
+     return( MFEXML_Unknown );
+@@ -78,6 +79,7 @@ bool MythFEXML::ProcessRequest( HttpWorkerThread *pThread, HTTPRequest *pRequest
+ 
+             switch( GetMethod( pRequest->m_sMethod ))
+             {
++                case MFEXML_GetServiceDescription: pRequest->FormatFileResponse( m_sServiceDescFileName ); return true;
+                 case MFEXML_GetScreenShot      : GetScreenShot    ( pRequest ); return true;
+ 
+ 
+diff --git a/mythtv/programs/mythfrontend/mythfexml.h b/mythtv/programs/mythfrontend/mythfexml.h
+index 87b7680..20ecfd0 100644
+--- a/mythtv/programs/mythfrontend/mythfexml.h
++++ b/mythtv/programs/mythfrontend/mythfexml.h
+@@ -17,7 +17,8 @@
+ typedef enum 
+ {
+     MFEXML_Unknown                =  0,
+-    MFEXML_GetScreenShot          =  1
++    MFEXML_GetServiceDescription,
++    MFEXML_GetScreenShot
+ 
+ } MythFEXMLMethod;
+ 
+-- 
+1.7.9.5
+

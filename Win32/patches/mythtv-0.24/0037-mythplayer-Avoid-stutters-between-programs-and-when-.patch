@@ -1,0 +1,211 @@
+From 437955603af672fe60a10383be2ed89b853df039 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 27 May 2011 20:15:15 +0200
+Subject: [PATCH 037/285] mythplayer: Avoid stutters between programs and when
+ changing channel.
+
+This reverts part of commit 08a8a65535638de185e68f76898c118161d4bf88
+(Force reload of context and stream properties when switching between LiveTV)
+and reorders some code to reduce interference with RingBuffer prefetching
+and decoding.
+
+I can't reproduce (on DVB-S) the problems that commit 08a8a655 is supposed to
+fix and the disruption to program switching it causes is very annoying.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |   81 ++++++++++++++--------------------
+ 1 file changed, 33 insertions(+), 48 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 6fc8056..0e3c6ec 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -2194,23 +2194,20 @@ void MythPlayer::SwitchToProgram(void)
+     VERBOSE(VB_PLAYBACK, LOC + "SwitchToProgram - start");
+     bool discontinuity = false, newtype = false;
+     int newid = -1;
+-    ProgramInfo *pginfo = player_ctx->tvchain->GetSwitchProgram(
+-        discontinuity, newtype, newid);
++    QSharedPointer<ProgramInfo> pginfo(player_ctx->tvchain->GetSwitchProgram(
++        discontinuity, newtype, newid));
+     if (!pginfo)
+         return;
+ 
+     bool newIsDummy = player_ctx->tvchain->GetCardType(newid) == "DUMMY";
+ 
+     SetPlayingInfo(*pginfo);
+-    Pause();
+-    ChangeSpeed();
+ 
+     if (newIsDummy)
+     {
+         OpenDummy();
+         ResetPlaying();
+         SetEof(false);
+-        delete pginfo;
+         return;
+     }
+ 
+@@ -2225,15 +2222,11 @@ void MythPlayer::SwitchToProgram(void)
+         VERBOSE(VB_IMPORTANT, QString("\n") + player_ctx->tvchain->toString());
+         SetEof(true);
+         SetErrored(QObject::tr("Error opening switch program buffer"));
+-        delete pginfo;
+         return;
+     }
+ 
+     if (GetEof())
+-    {
+         discontinuity = true;
+-        ResetCaptions();
+-    }
+ 
+     VERBOSE(VB_PLAYBACK, LOC + QString("SwitchToProgram(void) "
+             "discont: %1 newtype: %2 newid: %3 decoderEof: %4")
+@@ -2241,11 +2234,13 @@ void MythPlayer::SwitchToProgram(void)
+ 
+     if (discontinuity || newtype)
+     {
+-        player_ctx->tvchain->SetProgram(*pginfo);
+-        if (decoder)
+-            decoder->SetProgramInfo(*pginfo);
++        Pause();
++        ChangeSpeed();
++        ResetCaptions();
+ 
++        player_ctx->tvchain->SetProgram(*pginfo);
+         player_ctx->buffer->Reset(true);
++
+         if (newtype)
+         {
+             if (OpenFile() < 0)
+@@ -2253,39 +2248,39 @@ void MythPlayer::SwitchToProgram(void)
+         }
+         else
+             ResetPlaying();
++
++        if (IsErrored())
++        {
++            VERBOSE(VB_IMPORTANT, LOC_ERR + "SwitchToProgram failed.");
++            SetEof(true);
++            return;
++        }
++
++        SetEof(false);
++
++        if (decoder)
++        {
++            // the bitrate is reset by player_ctx->buffer->OpenFile()...
++            player_ctx->buffer->UpdateRawBitrate(decoder->GetRawBitrate());
++            decoder->SetProgramInfo(*pginfo);
++        }
++
++        CheckTVChain();
++        forcePositionMapSync = true;
++        Play();
+     }
+     else
+     {
+         player_ctx->SetPlayerChangingBuffers(true);
+         if (decoder)
+         {
++            // the bitrate is reset by player_ctx->buffer->OpenFile()...
++            player_ctx->buffer->UpdateRawBitrate(decoder->GetRawBitrate());
+             decoder->SetReadAdjust(player_ctx->buffer->SetAdjustFilesize());
+             decoder->SetWaitForChange();
+         }
+     }
+-    delete pginfo;
+-
+-    if (IsErrored())
+-    {
+-        VERBOSE(VB_IMPORTANT, LOC_ERR + "SwitchToProgram failed.");
+-        SetEof(true);
+-        return;
+-    }
+-
+-    SetEof(false);
+-
+-    // the bitrate is reset by player_ctx->buffer->OpenFile()...
+-    if (decoder)
+-        player_ctx->buffer->UpdateRawBitrate(decoder->GetRawBitrate());
+-    player_ctx->buffer->Unpause();
+-
+-    if (discontinuity || newtype)
+-    {
+-        CheckTVChain();
+-        forcePositionMapSync = true;
+-    }
+ 
+-    Play();
+     VERBOSE(VB_PLAYBACK, LOC + "SwitchToProgram - end");
+ }
+ 
+@@ -2293,14 +2288,8 @@ void MythPlayer::FileChangedCallback(void)
+ {
+     VERBOSE(VB_PLAYBACK, LOC + "FileChangedCallback");
+ 
+-    Pause();
+     ChangeSpeed();
+-    if (dynamic_cast<AvFormatDecoder *>(decoder))
+-        player_ctx->buffer->Reset(false, true);
+-    else
+-        player_ctx->buffer->Reset(false, true, true);
+-    SetEof(false);
+-    Play();
++    player_ctx->buffer->Reset(false, false, true);
+ 
+     player_ctx->SetPlayerChangingBuffers(false);
+ 
+@@ -2320,8 +2309,8 @@ void MythPlayer::JumpToProgram(void)
+     bool discontinuity = false, newtype = false;
+     int newid = -1;
+     long long nextpos = player_ctx->tvchain->GetJumpPos();
+-    ProgramInfo *pginfo = player_ctx->tvchain->GetSwitchProgram(
+-        discontinuity, newtype, newid);
++    QSharedPointer<ProgramInfo> pginfo(player_ctx->tvchain->GetSwitchProgram(
++        discontinuity, newtype, newid));
+     if (!pginfo)
+         return;
+ 
+@@ -2339,11 +2328,10 @@ void MythPlayer::JumpToProgram(void)
+         OpenDummy();
+         ResetPlaying();
+         SetEof(false);
+-        delete pginfo;
+         return;
+     }
+ 
+-    SendMythSystemPlayEvent("PLAY_CHANGED", pginfo);
++    SendMythSystemPlayEvent("PLAY_CHANGED", pginfo.data());
+ 
+     player_ctx->buffer->OpenFile(
+         pginfo->GetPlaybackURL(), RingBuffer::kLiveTVOpenTimeout);
+@@ -2356,7 +2344,6 @@ void MythPlayer::JumpToProgram(void)
+         VERBOSE(VB_IMPORTANT, QString("\n") + player_ctx->tvchain->toString());
+         SetEof(true);
+         SetErrored(QObject::tr("Error opening jump program file buffer"));
+-        delete pginfo;
+         return;
+     }
+ 
+@@ -2374,7 +2361,6 @@ void MythPlayer::JumpToProgram(void)
+         VERBOSE(VB_IMPORTANT, LOC_ERR + "JumpToProgram failed.");
+         if (!IsErrored())
+             SetErrored(QObject::tr("Error reopening video decoder"));
+-        delete pginfo;
+         return;
+     }
+ 
+@@ -2385,7 +2371,6 @@ void MythPlayer::JumpToProgram(void)
+     player_ctx->buffer->IgnoreLiveEOF(false);
+ 
+     decoder->SetProgramInfo(*pginfo);
+-    delete pginfo;
+ 
+     CheckTVChain();
+     forcePositionMapSync = true;
+-- 
+1.7.9.5
+

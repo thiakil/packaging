@@ -1,0 +1,28 @@
+From 0efc4e25040edf00343444e346e8bc1aba6cfaeb Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 24 May 2013 21:01:04 +0100
+Subject: [PATCH 129/207] AO: Don't disable Pulse if no valid output
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/audio/audiooutput.cpp |    4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/mythtv/libs/libmyth/audio/audiooutput.cpp b/mythtv/libs/libmyth/audio/audiooutput.cpp
+index cbb5a42..d4f5bce 100644
+--- a/mythtv/libs/libmyth/audio/audiooutput.cpp
++++ b/mythtv/libs/libmyth/audio/audiooutput.cpp
+@@ -79,6 +79,10 @@ AudioOutput *AudioOutput::OpenAudio(AudioSettings &settings,
+     QString &main_device = settings.main_device;
+     AudioOutput *ret = NULL;
+ 
++    // Don't suspend Pulse if unnecessary.  This can save 100mS
++    if (settings.format == FORMAT_NONE || settings.channels <= 0)
++        willsuspendpa = false;
++
+ #ifdef USING_PULSE
+     bool pulsestatus = false;
+ #else
+-- 
+1.7.9.5
+

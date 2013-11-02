@@ -1,0 +1,91 @@
+From 8e2f81840f042e9810a8999516373f6e5d723e1a Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 24 Jun 2011 17:48:21 +0200
+Subject: [PATCH 044/285] TV: Disable tuning OSD after changing channel via
+ NETWORK_CONTROL CHANID
+
+This disables the tuning OSD display when changing channel via a MythEvent.
+The intention is to provide a cleaner display for MHEG programs that change
+streams.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/tv_play.cpp |   23 ++++++++++++++---------
+ mythtv/libs/libmythtv/tv_play.h   |    2 +-
+ 2 files changed, 15 insertions(+), 10 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/tv_play.cpp b/mythtv/libs/libmythtv/tv_play.cpp
+index 004db3e..5514bfc 100644
+--- a/mythtv/libs/libmythtv/tv_play.cpp
++++ b/mythtv/libs/libmythtv/tv_play.cpp
+@@ -6911,7 +6911,7 @@ void TV::ChangeChannel(PlayerContext *ctx, uint chanid, const QString &chan)
+     if (ctx->player)
+         ctx->player->GetAudio()->Reset();
+ 
+-    UnpauseLiveTV(ctx);
++    UnpauseLiveTV(ctx, chanid && GetQueuedChanID());
+     PauseAudioUntilBuffered(ctx);
+ 
+     if (oldinputname != ctx->recorder->GetInput())
+@@ -8456,16 +8456,21 @@ void TV::customEvent(QEvent *e)
+         QStringList signalList = me->ExtraDataList();
+ 
+         PlayerContext *mctx = GetPlayerReadLock(0, __FILE__, __LINE__);
+-        for (uint i = 0; mctx && (i < player.size()); i++)
++        OSD *osd = GetOSDLock(mctx);
++        if (osd && !osd->IsWindowVisible(OSD_WIN_INTERACT))
+         {
+-            PlayerContext *ctx = GetPlayer(mctx, i);
+-            bool tc = ctx->recorder && (ctx->GetCardID() == cardnum);
+-            if (tc && !signalList.empty())
++            for (uint i = 0; mctx && (i < player.size()); i++)
+             {
+-                UpdateOSDSignal(ctx, signalList);
+-                UpdateOSDTimeoutMessage(ctx);
++                PlayerContext *ctx = GetPlayer(mctx, i);
++                bool tc = ctx->recorder && (ctx->GetCardID() == cardnum);
++                if (tc && !signalList.empty())
++                {
++                    UpdateOSDSignal(ctx, signalList);
++                    UpdateOSDTimeoutMessage(ctx);
++                }
+             }
+         }
++        ReturnOSDLock(mctx, osd);
+         ReturnPlayerLock(mctx);
+     }
+ 
+@@ -11183,7 +11188,7 @@ void TV::PauseLiveTV(PlayerContext *ctx)
+  *  \brief Used in ChangeChannel(), ChangeChannel(),
+  *         and ToggleInputs() to restart video output.
+  */
+-void TV::UnpauseLiveTV(PlayerContext *ctx)
++void TV::UnpauseLiveTV(PlayerContext *ctx, bool bQuietly /*=false*/)
+ {
+     VERBOSE(VB_PLAYBACK, LOC + QString("UnpauseLiveTV() player ctx %1")
+             .arg(find_player_index(ctx)));
+@@ -11203,7 +11208,7 @@ void TV::UnpauseLiveTV(PlayerContext *ctx)
+ 
+     ITVRestart(ctx, true);
+ 
+-    if (ctx->HasPlayer())
++    if (ctx->HasPlayer() && !bQuietly)
+     {
+         UpdateOSDProgInfo(ctx, "program_info");
+         UpdateLCD();
+diff --git a/mythtv/libs/libmythtv/tv_play.h b/mythtv/libs/libmythtv/tv_play.h
+index cece539..89230cf 100644
+--- a/mythtv/libs/libmythtv/tv_play.h
++++ b/mythtv/libs/libmythtv/tv_play.h
+@@ -361,7 +361,7 @@ class MPUBLIC TV : public QObject
+     void ChangeChannel(PlayerContext*, int direction);
+     void ChangeChannel(PlayerContext*, uint chanid, const QString &channum);
+     void PauseLiveTV(PlayerContext*);
+-    void UnpauseLiveTV(PlayerContext*);
++    void UnpauseLiveTV(PlayerContext*, bool bQuietly = false);
+ 
+     void ShowPreviousChannel(PlayerContext*);
+     void PopPreviousChannel(PlayerContext*, bool immediate_change);
+-- 
+1.7.9.5
+

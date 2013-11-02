@@ -1,0 +1,45 @@
+From a2518e362217135e35ec0179a1b9367aa25c9800 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 15 Jun 2013 19:56:35 +0100
+Subject: [PATCH 223/285] VO: Prevent annoying jump in window position when
+ starting playback
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/videoout_xv.cpp  |    2 +-
+ mythtv/libs/libmythtv/videooutbase.cpp |    6 +-----
+ 2 files changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/videoout_xv.cpp b/mythtv/libs/libmythtv/videoout_xv.cpp
+index 0383d7f..fc7e692 100644
+--- a/mythtv/libs/libmythtv/videoout_xv.cpp
++++ b/mythtv/libs/libmythtv/videoout_xv.cpp
+@@ -1290,7 +1290,7 @@ bool VideoOutputXv::Init(
+                       codec_id, embedid);
+ 
+     // Set resolution/measurements (check XRandR, Xinerama, config settings)
+-    InitDisplayMeasurements(width, height, true);
++    InitDisplayMeasurements(width, height, false);
+ 
+     // Set embedding window id
+     if (embedid > 0)
+diff --git a/mythtv/libs/libmythtv/videooutbase.cpp b/mythtv/libs/libmythtv/videooutbase.cpp
+index a5f7052..d228cea 100644
+--- a/mythtv/libs/libmythtv/videooutbase.cpp
++++ b/mythtv/libs/libmythtv/videooutbase.cpp
+@@ -1628,11 +1628,7 @@ void VideoOutput::InitDisplayMeasurements(uint width, uint height, bool resize)
+     }
+ 
+     if (resize)
+-    {
+-        MoveResizeWindow(QRect(GetMythMainWindow()->geometry().x(),
+-                               GetMythMainWindow()->geometry().y(),
+-                               max_size.width(), max_size.height()));
+-    }
++        MoveResizeWindow(QRect(GetMythMainWindow()->geometry().topLeft(), max_size));
+ 
+     // get the physical dimensions (in mm) of the display. If using
+     // DisplayRes, this will be overridden when we call ResizeForVideo
+-- 
+1.7.9.5
+

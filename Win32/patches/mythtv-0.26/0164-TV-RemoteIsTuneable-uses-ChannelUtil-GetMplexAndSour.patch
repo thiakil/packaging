@@ -1,0 +1,31 @@
+From 83fd99d0569a6408a534055baad3a37ef5a5169c Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 3 Jun 2013 09:57:20 +0100
+Subject: [PATCH 164/227] TV: RemoteIsTuneable uses
+ ChannelUtil::GetMplexAndSourceID to cache mplexid
+ and sourceid
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/tvremoteutil.cpp |    5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/tvremoteutil.cpp b/mythtv/libs/libmythtv/tvremoteutil.cpp
+index 745179f..0e517ff 100644
+--- a/mythtv/libs/libmythtv/tvremoteutil.cpp
++++ b/mythtv/libs/libmythtv/tvremoteutil.cpp
+@@ -433,8 +433,9 @@ bool RemoteIsTuneable(uint cardid, uint chanid, const QString &channum)
+         chanid = c[0];
+     }
+ 
+-    const uint mplexid = ChannelUtil::GetMplexID(chanid);
+-    const uint sourceid = ChannelUtil::GetSourceIDForChannel(chanid);
++    uint mplexid = 0, sourceid = 0;
++    if (!ChannelUtil::GetMplexAndSourceID(mplexid, sourceid, chanid))
++        return false;
+     QStringList const inputs = CardUtil::GetInputNames(cardid, sourceid);
+     if (inputs.size() == 0)
+         return false;
+-- 
+1.7.9.5
+

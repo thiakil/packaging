@@ -1,0 +1,39 @@
+From ae197c3c925ff6983ac451be27f932ed6da8511d Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 13 Nov 2011 09:56:31 +0100
+Subject: [PATCH 015/124] freemheg: Don't return an object not present error
+ until timeout occurs
+
+Remove the error return in GetCarouselData when GetDSMCCObject returns
+'not present' since the object and/or data may arrive later.
+
+This fixes a problem with the BBC interactive logo not being displayed
+after switchiong to a BBC channel.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mhi.cpp |    8 ++------
+ 1 file changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mhi.cpp b/mythtv/libs/libmythtv/mhi.cpp
+index d8bb6e1..dd5769b 100644
+--- a/mythtv/libs/libmythtv/mhi.cpp
++++ b/mythtv/libs/libmythtv/mhi.cpp
+@@ -420,12 +420,8 @@ bool MHIContext::GetCarouselData(QString objectPath, QByteArray &result)
+                     LOG(VB_MHEG, LOG_INFO, QString("[mhi] Received %1").arg(objectPath));
+                 return true; // Found it
+             }
+-            else if (res < 0)
+-            {
+-                if (bReported)
+-                    LOG(VB_MHEG, LOG_INFO, QString("[mhi] Not found %1").arg(objectPath));
+-                return false; // Not there.
+-            }
++            // NB don't exit if -1 (not present) is returned as the object may
++            // arrive later.  Exiting can cause the inital app to not be found
+         }
+ 
+         if (t.elapsed() > 60000) // TODO get this from carousel info
+-- 
+1.7.9.5
+

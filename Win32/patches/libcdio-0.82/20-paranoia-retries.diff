@@ -1,0 +1,22 @@
+--- libcdio-0.82-orig//lib/paranoia/paranoia.c	2008-11-29 05:52:43.000000000 +0100
++++ libcdio-0.82//lib/paranoia/paranoia.c	2011-01-21 21:36:53.000000000 +0100
+@@ -2978,17 +2978,15 @@ cdio_paranoia_read_limited(cdrom_paranoi
+       retry_count=0;
+     } else {
+       /* increase overlap or bail */
+-      retry_count++;
++      if (retry_count++ >= max_retries) return NULL;
+       
+       /* The better way to do this is to look at how many actual
+ 	 matches we're getting and what kind of gap */
+ 
+       if (retry_count%5==0){
+-	if (p->dynoverlap==MAX_SECTOR_OVERLAP*CD_FRAMEWORDS ||
+-	   retry_count==max_retries){
++	if (p->dynoverlap==MAX_SECTOR_OVERLAP*CD_FRAMEWORDS){
+ 	  if (!(p->enable&PARANOIA_MODE_NEVERSKIP))
+ 	    verify_skip_case(p,callback);
+-	  retry_count=0;
+ 	} else {
+ 	  if (p->stage1.offpoints!=-1){ /* hack */
+ 	    p->dynoverlap*=1.5;

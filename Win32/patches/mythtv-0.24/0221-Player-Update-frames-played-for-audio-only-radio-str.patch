@@ -1,0 +1,30 @@
+From efdcf71e71b83c1bab2868838ac35e218363df29 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 15 Jun 2013 15:17:05 +0100
+Subject: [PATCH 221/285] Player: Update frames played for audio only (radio)
+ streams so that OSD info is correct
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |    5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 7da2848..c3352da 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -2181,6 +2181,11 @@ bool MythPlayer::VideoLoop(void)
+ 
+     if (using_null_videoout && decoder)
+         decoder->UpdateFramesPlayed();
++    else if (noVideoTracks)
++    {
++        if (!videoPaused)
++            ++framesPlayed;
++    }
+     else
+         framesPlayed = videoOutput->GetFramesPlayed();
+     return !IsErrored();
+-- 
+1.7.9.5
+

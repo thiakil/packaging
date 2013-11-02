@@ -1,0 +1,42 @@
+From c61fc5027d38b5dc4dfa64aea839b31eec9b2816 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 22 Jun 2013 15:05:27 +0100
+Subject: [PATCH 230/285] Player: Fix ugly 4:3 green square shown when
+ starting liveTV
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |    8 +++-----
+ 1 file changed, 3 insertions(+), 5 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 34dd646..661672d 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -874,12 +874,10 @@ void MythPlayer::OpenDummy(void)
+ {
+     isDummy = true;
+ 
+-    float displayAspect =
+-        gCoreContext->GetFloatSettingOnHost("XineramaMonitorAspectRatio",
+-                                        gCoreContext->GetHostName(), 1.3333);
+-
+     if (!videoOutput)
+     {
++        float displayAspect = gCoreContext->GetFloatSettingOnHost(
++            "XineramaMonitorAspectRatio", gCoreContext->GetHostName(), 16./9);
+         SetVideoParams(720, 576, 25.00, 15, displayAspect);
+     }
+ 
+@@ -1889,7 +1887,7 @@ void MythPlayer::RefreshPauseFrame(void)
+ {
+     if (needNewPauseFrame)
+     {
+-        if (videoOutput->ValidVideoFrames())
++        if (isDummy || videoOutput->ValidVideoFrames())
+         {
+             videoOutput->UpdatePauseFrame();
+             needNewPauseFrame = false;
+-- 
+1.7.9.5
+

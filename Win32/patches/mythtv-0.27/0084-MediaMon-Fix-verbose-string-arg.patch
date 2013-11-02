@@ -1,0 +1,26 @@
+From 9c631ddf416e453cbdd93fdf3ba811efbb541151 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 5 Jul 2013 21:08:45 +0100
+Subject: [PATCH 084/207] MediaMon: Fix verbose string arg
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythbase/mythmedia.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythbase/mythmedia.cpp b/mythtv/libs/libmythbase/mythmedia.cpp
+index 24b84e6..ff3d131 100644
+--- a/mythtv/libs/libmythbase/mythmedia.cpp
++++ b/mythtv/libs/libmythbase/mythmedia.cpp
+@@ -223,7 +223,7 @@ MythMediaType MythMediaDevice::DetectMediaType(void)
+         }
+         else
+         {
+-            LOG(VB_MEDIA, LOG_NOTICE, QString("DetectMediaType(this=0x%1) unknown file type %1")
++            LOG(VB_MEDIA, LOG_NOTICE, QString("DetectMediaType(this=0x%1) unknown file type %2")
+                 .arg(quintptr(this),0,16).arg(it.key()));
+         }
+     }
+-- 
+1.7.9.5
+

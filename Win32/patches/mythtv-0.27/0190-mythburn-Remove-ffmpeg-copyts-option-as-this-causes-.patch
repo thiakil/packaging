@@ -1,0 +1,74 @@
+From a373b67ee69b9f4338b59a974e646e2bf7f8f700 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 28 Sep 2013 16:30:51 +0100
+Subject: [PATCH 190/207] mythburn: Remove ffmpeg -copyts option as this
+ causes mythffmpeg to hang
+
+NB it is not advised to use the -copyts unless -codec copy is used.
+See: http://trac.ffmpeg.org/ticket/933
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../mythburn/encoder_profiles/ffmpeg_dvd_ntsc.xml  |    3 ---
+ .../mythburn/encoder_profiles/ffmpeg_dvd_pal.xml   |    3 ---
+ 2 files changed, 6 deletions(-)
+
+diff --git a/mythplugins/mytharchive/mythburn/encoder_profiles/ffmpeg_dvd_ntsc.xml b/mythplugins/mytharchive/mythburn/encoder_profiles/ffmpeg_dvd_ntsc.xml
+index d865b39..6e39188 100644
+--- a/mythplugins/mytharchive/mythburn/encoder_profiles/ffmpeg_dvd_ntsc.xml
++++ b/mythplugins/mytharchive/mythburn/encoder_profiles/ffmpeg_dvd_ntsc.xml
+@@ -14,7 +14,6 @@
+         <parameter name="-acodec"      value="ac3"/>
+         <parameter name="-b:a"         value="192k"/>
+         <parameter name="-ac"          value="2"/>
+-        <parameter name="-copyts"      value=""/>
+         <parameter name="-aspect"      value="%aspect"/>
+         <parameter name="-pass"        value="%passno"/>
+         <parameter name="-passlogfile" value="%passlogfile"/>
+@@ -35,7 +34,6 @@
+         <parameter name="-acodec" value="ac3"/>
+         <parameter name="-b:a"    value="192k"/>
+         <parameter name="-ac"     value="2"/>
+-        <parameter name="-copyts" value=""/>
+         <parameter name="-aspect" value="%aspect"/>
+         <parameter name=""        value="%outputfile"/>
+     </profile>
+@@ -54,7 +52,6 @@
+         <parameter name="-acodec" value="ac3"/>
+         <parameter name="-b:a"    value="192k"/>
+         <parameter name="-ac"     value="2"/>
+-        <parameter name="-copyts" value=""/>
+         <parameter name="-aspect" value="%aspect"/>
+         <parameter name=""        value="%outputfile"/>
+     </profile>
+diff --git a/mythplugins/mytharchive/mythburn/encoder_profiles/ffmpeg_dvd_pal.xml b/mythplugins/mytharchive/mythburn/encoder_profiles/ffmpeg_dvd_pal.xml
+index d8ab1eb..563e2a6 100644
+--- a/mythplugins/mytharchive/mythburn/encoder_profiles/ffmpeg_dvd_pal.xml
++++ b/mythplugins/mytharchive/mythburn/encoder_profiles/ffmpeg_dvd_pal.xml
+@@ -14,7 +14,6 @@
+         <parameter name="-acodec"      value="ac3"/>
+         <parameter name="-b:a"         value="192k"/>
+         <parameter name="-ac"          value="2"/>
+-        <parameter name="-copyts"      value=""/>
+         <parameter name="-aspect"      value="%aspect"/>
+         <parameter name="-pass"        value="%passno"/>
+         <parameter name="-passlogfile" value="%passlogfile"/>
+@@ -35,7 +34,6 @@
+         <parameter name="-acodec" value="ac3"/>
+         <parameter name="-b:a"    value="192k"/>
+         <parameter name="-ac"     value="2"/>
+-        <parameter name="-copyts" value=""/>
+         <parameter name="-aspect" value="%aspect"/>
+         <parameter name=""        value="%outputfile"/>
+     </profile>
+@@ -54,7 +52,6 @@
+         <parameter name="-acodec" value="ac3"/>
+         <parameter name="-b:a"    value="192k"/>
+         <parameter name="-ac"     value="2"/>
+-        <parameter name="-copyts" value=""/>
+         <parameter name="-aspect" value="%aspect"/>
+         <parameter name=""        value="%outputfile"/>
+     </profile>
+-- 
+1.7.9.5
+

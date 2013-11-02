@@ -1,0 +1,133 @@
+From 6ed5814ca02f9b94cd5a0662737b0b8096c6bd81 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 18 Apr 2012 15:18:25 +0200
+Subject: [PATCH 072/124] mythplayer: Avoid stutters between programs and when
+ changing channel.
+
+Reorder some code in SwitchToProgram to reduce interference with
+RingBuffer prefetching and decoding.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |   62 +++++++++++++++-------------------
+ 1 file changed, 27 insertions(+), 35 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index b8394d9..0ffde94 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -2459,8 +2459,6 @@ void MythPlayer::SwitchToProgram(void)
+     bool newIsDummy = player_ctx->tvchain->GetCardType(newid) == "DUMMY";
+ 
+     SetPlayingInfo(*pginfo);
+-    Pause();
+-    ChangeSpeed();
+ 
+     if (newIsDummy)
+     {
+@@ -2495,10 +2493,7 @@ void MythPlayer::SwitchToProgram(void)
+     }
+ 
+     if (GetEof())
+-    {
+         discontinuity = true;
+-        ResetCaptions();
+-    }
+ 
+     LOG(VB_PLAYBACK, LOG_INFO, LOC + QString("SwitchToProgram(void) "
+         "discont: %1 newtype: %2 newid: %3 decoderEof: %4")
+@@ -2506,9 +2501,11 @@ void MythPlayer::SwitchToProgram(void)
+ 
+     if (discontinuity || newtype)
+     {
++        Pause();
++        ChangeSpeed();
++        ResetCaptions();
++
+         player_ctx->tvchain->SetProgram(*pginfo);
+-        if (decoder)
+-            decoder->SetProgramInfo(*pginfo);
+ 
+         player_ctx->buffer->Reset(true);
+         if (newtype)
+@@ -2518,39 +2515,40 @@ void MythPlayer::SwitchToProgram(void)
+         }
+         else
+             ResetPlaying();
++
++        if (IsErrored())
++        {
++            LOG(VB_GENERAL, LOG_ERR, LOC + "SwitchToProgram failed.");
++            SetEof(true);
++            return;
++        }
++
++        SetEof(false);
++
++        if (decoder)
++        {
++            // the bitrate is reset by player_ctx->buffer->OpenFile()...
++            player_ctx->buffer->UpdateRawBitrate(decoder->GetRawBitrate());
++            decoder->SetProgramInfo(*pginfo);
++        }
++
++        CheckTVChain();
++        forcePositionMapSync = true;
++        Play();
+     }
+     else
+     {
+         player_ctx->SetPlayerChangingBuffers(true);
+         if (decoder)
+         {
++            // the bitrate is reset by player_ctx->buffer->OpenFile()...
++            player_ctx->buffer->UpdateRawBitrate(decoder->GetRawBitrate());
+             decoder->SetReadAdjust(player_ctx->buffer->SetAdjustFilesize());
+             decoder->SetWaitForChange();
+         }
+     }
+     delete pginfo;
+ 
+-    if (IsErrored())
+-    {
+-        LOG(VB_GENERAL, LOG_ERR, LOC + "SwitchToProgram failed.");
+-        SetEof(true);
+-        return;
+-    }
+-
+-    SetEof(false);
+-
+-    // the bitrate is reset by player_ctx->buffer->OpenFile()...
+-    if (decoder)
+-        player_ctx->buffer->UpdateRawBitrate(decoder->GetRawBitrate());
+-    player_ctx->buffer->Unpause();
+-
+-    if (discontinuity || newtype)
+-    {
+-        CheckTVChain();
+-        forcePositionMapSync = true;
+-    }
+-
+-    Play();
+     LOG(VB_PLAYBACK, LOG_INFO, LOC + "SwitchToProgram - end");
+ }
+ 
+@@ -2558,14 +2556,8 @@ void MythPlayer::FileChangedCallback(void)
+ {
+     LOG(VB_PLAYBACK, LOG_INFO, LOC + "FileChangedCallback");
+ 
+-    Pause();
+     ChangeSpeed();
+-    if (dynamic_cast<AvFormatDecoder *>(decoder))
+-        player_ctx->buffer->Reset(false, true);
+-    else
+-        player_ctx->buffer->Reset(false, true, true);
+-    SetEof(false);
+-    Play();
++    player_ctx->buffer->Reset(false, false, true);
+ 
+     player_ctx->SetPlayerChangingBuffers(false);
+ 
+-- 
+1.7.9.5
+

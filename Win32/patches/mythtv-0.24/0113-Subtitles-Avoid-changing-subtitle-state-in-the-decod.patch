@@ -1,0 +1,31 @@
+From e74bc389a45edcd218276ae9fb905ae68fb69f8f Mon Sep 17 00:00:00 2001
+From: Jim Stichnoth <jstichnoth@mythtv.org>
+Date: Fri, 25 May 2012 16:40:34 -0700
+Subject: [PATCH 113/285] Subtitles: Avoid changing subtitle state in the
+ decoder thread.
+
+Use the proper API to defer subtitle changes to the UI event loop, to
+avoid creating or deleting MythUI objects in a non-UI thread.
+Refs #10740
+(cherry picked from commit f0f37a55d67ffffa27d51ebc6b2cb48589c820fc)
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |    3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 5d0557f..649aa72 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -626,8 +626,7 @@ void MythPlayer::ReinitVideo(void)
+ 
+     if (textDisplayMode)
+     {
+-        DisableCaptions(textDisplayMode, false);
+-        SetCaptionsEnabled(true, false);
++        EnableSubtitles(true);
+     }
+ }
+ 
+-- 
+1.7.9.5
+

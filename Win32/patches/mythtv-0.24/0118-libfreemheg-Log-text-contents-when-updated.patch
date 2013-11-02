@@ -1,0 +1,26 @@
+From 3107bf357a21479a092f42305149d8d292de097f Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 1 Jun 2012 20:20:11 +0200
+Subject: [PATCH 118/285] libfreemheg: Log text contents when updated
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythfreemheg/Text.cpp |    2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/mythtv/libs/libmythfreemheg/Text.cpp b/mythtv/libs/libmythfreemheg/Text.cpp
+index 3bd0890..2ecf3cc 100644
+--- a/mythtv/libs/libmythfreemheg/Text.cpp
++++ b/mythtv/libs/libmythfreemheg/Text.cpp
+@@ -193,6 +193,8 @@ void MHText::ContentPreparation(MHEngine *engine)
+ void MHText::ContentArrived(const unsigned char *data, int length, MHEngine *engine)
+ {
+     CreateContent(data, length, engine);
++    MHLOG(MHLogDetail, QString("Content arrived %1 := '%2'")
++        .arg(m_ObjectReference.Printable()).arg(m_Content.Printable()) );
+     // Now signal that the content is available.
+     engine->EventTriggered(this, EventContentAvailable);
+     m_fNeedsRedraw = true;
+-- 
+1.7.9.5
+

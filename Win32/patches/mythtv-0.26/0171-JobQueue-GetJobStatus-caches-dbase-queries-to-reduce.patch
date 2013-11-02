@@ -1,0 +1,82 @@
+From 054028cd732ce96be99f90c151214afebefd2595 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 10 Jun 2013 11:44:43 +0100
+Subject: [PATCH 171/227] JobQueue: GetJobStatus caches dbase queries to
+ reduce playbackbox update time
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/jobqueue.cpp |   42 ++++++++++++++++++++++++++++++++++--
+ 1 file changed, 40 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/jobqueue.cpp b/mythtv/libs/libmythtv/jobqueue.cpp
+index b549df7..0e0504f 100644
+--- a/mythtv/libs/libmythtv/jobqueue.cpp
++++ b/mythtv/libs/libmythtv/jobqueue.cpp
+@@ -1537,6 +1537,38 @@ enum JobStatus JobQueue::GetJobStatus(int jobID)
+ enum JobStatus JobQueue::GetJobStatus(
+     int jobType, uint chanid, const QDateTime &recstartts)
+ {
++    // This fn is called rapidly by playbackbox so cache the result
++    typedef QPair< enum JobStatus, QTime > val_t; // JobStatus, cache age
++    typedef QMap< QString, val_t > cache_t;
++    static cache_t s_cache;
++    static QMutex s_mutex;
++    const int kMaxAge = 15000;
++
++    QString const key = QString::number(jobType)
++        + '_' + QString::number(chanid)
++        + '_' + recstartts.toString(Qt::ISODate);
++    {
++        QMutexLocker locker(&s_mutex);
++
++        cache_t::iterator it = s_cache.find(key);
++        if (it != s_cache.end())
++        {
++            if (it->second.elapsed() <= kMaxAge)
++                return it->first;
++            s_cache.erase(it);
++        }
++
++        // clean out stale cache entries
++        it = s_cache.begin();
++        while (it != s_cache.end())
++        {
++            if (it->second.elapsed() > kMaxAge)
++                it = s_cache.erase(it);
++            else
++                ++it;
++        }
++    }
++
+     MSqlQuery query(MSqlQuery::InitCon());
+ 
+     query.prepare("SELECT status FROM jobqueue WHERE type = :TYPE "
+@@ -1546,16 +1578,22 @@ enum JobStatus JobQueue::GetJobStatus(
+     query.bindValue(":CHANID", chanid);
+     query.bindValue(":STARTTIME", recstartts);
+ 
++    enum JobStatus status = JOB_UNKNOWN;
+     if (query.exec())
+     {
+         if (query.next())
+-            return (enum JobStatus)query.value(0).toInt();
++            status = JobStatus(query.value(0).toInt());
+     }
+     else
+     {
+         MythDB::DBError("Error in JobQueue::GetJobStatus()", query);
++        return JOB_UNKNOWN;
+     }
+-    return JOB_UNKNOWN;
++
++    QMutexLocker locker(&s_mutex);
++    s_cache.insert(key, val_t(status, QTime::currentTime()) );
++
++    return status;
+ }
+ 
+ void JobQueue::RecoverQueue(bool justOld)
+-- 
+1.7.9.5
+

@@ -1,0 +1,230 @@
+From e2a7f62d5d626a7181297ca1c3c3d88c6a17b9aa Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 15 May 2013 18:54:31 +0100
+Subject: [PATCH 188/285] UPNP: MediaRenderer support seeks
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/netstream.cpp     |    3 +-
+ mythtv/libs/libmythupnp/AVTCTL_scpd.xml |    2 +
+ mythtv/libs/libmythupnp/upnpavt.cpp     |   88 +++++++++++++++++--------------
+ 3 files changed, 51 insertions(+), 42 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/netstream.cpp b/mythtv/libs/libmythtv/netstream.cpp
+index 1d7eb01..1d127d4 100644
+--- a/mythtv/libs/libmythtv/netstream.cpp
++++ b/mythtv/libs/libmythtv/netstream.cpp
+@@ -298,8 +298,7 @@ void NetStream::slotReadyRead()
+     if (m_reply)
+     {
+         qint64 avail = m_reply->bytesAvailable();
+-        VERBOSE((avail <= 2 * kMaxBuffer) ? VB_FILE|VB_EXTRA :
+-                (avail <= 4 * kMaxBuffer) ? VB_FILE : VB_IMPORTANT,
++        VERBOSE((avail <= 2 * kMaxBuffer) ? VB_FILE|VB_EXTRA : VB_FILE,
+              LOC + QString("(%1) Ready 0x%2, %3 bytes available").arg(m_id)
+                 .arg(quintptr(m_reply),0,16).arg(avail) );
+ 
+diff --git a/mythtv/libs/libmythupnp/AVTCTL_scpd.xml b/mythtv/libs/libmythupnp/AVTCTL_scpd.xml
+index a459e1e..29107c0 100644
+--- a/mythtv/libs/libmythupnp/AVTCTL_scpd.xml
++++ b/mythtv/libs/libmythupnp/AVTCTL_scpd.xml
+@@ -214,6 +214,8 @@
+ 			<dataType>string</dataType>
+ 			<allowedValueList>
+ 				<allowedValue>TRACK_NR</allowedValue>
++				<allowedValue>ABS_TIME</allowedValue>
++				<allowedValue>REL_TIME</allowedValue>
+ 			</allowedValueList>
+ 		</stateVariable>
+ 
+diff --git a/mythtv/libs/libmythupnp/upnpavt.cpp b/mythtv/libs/libmythupnp/upnpavt.cpp
+index a10dea8..96a574a 100644
+--- a/mythtv/libs/libmythupnp/upnpavt.cpp
++++ b/mythtv/libs/libmythupnp/upnpavt.cpp
+@@ -36,11 +36,9 @@ UPnpAVTransport::UPnpAVTransport( UPnpDevice *pDevice , const QString sSharePath
+     AddVariable( new StateVariable< QString >( "NumberOfTracks", true ) );
+     SetValue< QString >( "NumberOfTracks", "0" );
+     AddVariable( new StateVariable< QString >( "CurrentMediaDuration", true ) );
+-    SetValue< QString >( "CurrentMediaDuration", "0" );
++    SetValue< QString >( "CurrentMediaDuration", "00:00:00" );
+     AddVariable( new StateVariable< QString >( "AVTransportURI", true ) );
+     AddVariable( new StateVariable< QString >( "AVTransportURIMetaData", true ) );
+-    AddVariable( new StateVariable< QString >( "NextAVTransportURI", true ) );
+-    AddVariable( new StateVariable< QString >( "NextAVTransportURIMetaData", true ) );
+     // PlaybackStorageMedium, RecordStorageMedium:
+     // “UNKNOWN” ”DV”  “MINI-DV” “VHS” ”W-VHS” “S-VHS” “D-VHS” “VHSC”
+     // “VIDEO8” “HI8” “CD-ROM” “CD-DA” “CD-R” “CD-RW” “VIDEO-CD” ”SACD”
+@@ -74,9 +72,8 @@ UPnpAVTransport::UPnpAVTransport( UPnpDevice *pDevice , const QString sSharePath
+     // GetPositionInfo
+     AddVariable( new StateVariable< QString >( "CurrentTrack", true ) );
+     SetValue< QString >( "CurrentTrack", "0" );
+-    AddVariable( new StateVariable< QString >( "CurrentTrackDuration", true ) );
+-    AddVariable( new StateVariable< QString >( "CurrentTrackMetaData", true ) );
+-    AddVariable( new StateVariable< QString >( "CurrentTrackURI", true ) );
++    AddVariable( new StateVariable< QString >( "AbsoluteTimePosition", true ) );
++    SetValue< QString >( "AbsoluteTimePosition", "00:00:00" );
+ 
+     QString sUPnpDescPath = UPnp::g_pConfig->GetValue( "UPnP/DescXmlPath", m_sSharePath );
+ 
+@@ -195,7 +192,7 @@ void UPnpAVTransport::SetAVTransportURI( HTTPRequest *pRequest )
+ 
+     // For GetMediaInfo
+     SetValue< QString >( "NumberOfTracks", "1" ); // NB no playlists
+-    SetValue< QString >( "CurrentMediaDuration", "0" );
++    SetValue< QString >( "CurrentMediaDuration", "00:00:00" );
+ 
+     if ( GetValue<QString>("TransportState") == "PLAYING")
+     {
+@@ -236,9 +233,9 @@ void UPnpAVTransport::GetMediaInfo( HTTPRequest *pRequest )
+     list.push_back(
+         NameValue("CurrentURIMetaData", GetValue<QString>("AVTransportURIMetaData")));
+     list.push_back(
+-        NameValue("NextURI", GetValue<QString>("NextAVTransportURI")));
++        NameValue("NextURI", "NOT_IMPLEMENTED"));
+     list.push_back(
+-        NameValue("NextURIMetaData", GetValue<QString>("NextAVTransportURIMetaData")));
++        NameValue("NextURIMetaData", "NOT_IMPLEMENTED"));
+     list.push_back(
+         NameValue("PlayMedium", GetValue<QString>("PlaybackStorageMedium")));
+     list.push_back(
+@@ -292,21 +289,21 @@ void UPnpAVTransport::GetPositionInfo( HTTPRequest *pRequest )
+     list.push_back(
+         NameValue("Track", GetValue<QString>("CurrentTrack")));
+     list.push_back(
+-        NameValue("TrackDuration", GetValue<QString>("CurrentTrackDuration")));
++        NameValue("TrackDuration", GetValue<QString>("CurrentMediaDuration")));
+     list.push_back(
+-        NameValue("TrackMetaData", GetValue<QString>("CurrentTrackMetaData")));
++        NameValue("TrackMetaData", "NOT_IMPLEMENTED")); //GetValue<QString>("CurrentTrackMetaData")));
+     list.push_back(
+-        NameValue("TrackURI", GetValue<QString>("CurrentTrackURI")));
++        NameValue("TrackURI", GetValue<QString>("AVTransportURI")));
+     // TODO real values from current playback
+     // see NetworkControl::processQuery location
+     list.push_back(
+-        NameValue("RelTime", "0")); //GetValue<QString>("RelativeTimePosition")));
++        NameValue("RelTime", GetValue<QString>("AbsoluteTimePosition")));
+     list.push_back(
+-        NameValue("AbsTime", "0")); //GetValue<QString>("AbsoluteTimePosition")));
++        NameValue("AbsTime", GetValue<QString>("AbsoluteTimePosition")));
+     list.push_back(
+-        NameValue("RelCount", "0")); //GetValue<QString>("RelativeCounterPosition")));
++        NameValue("RelCount", "2147483647")); //GetValue<QString>("RelativeCounterPosition")));
+     list.push_back(
+-        NameValue("AbsCount", "0")); //GetValue<QString>("AbsoluteCounterPosition")));
++        NameValue("AbsCount", "2147483647")); //GetValue<QString>("AbsoluteCounterPosition")));
+ 
+     pRequest->FormatActionResponse(list);
+ }
+@@ -419,7 +416,6 @@ UPnPResultCode UPnpAVTransport::StartPlay()
+ {
+     // TODO: TransportState STOPPED”, “PLAYING”, and “PAUSED_PLAYBACK” only
+ 
+-    // TODO validate URI
+     QString uri = GetValue<QString>("AVTransportURI");
+     if ( uri.isEmpty() )
+     {
+@@ -517,9 +513,7 @@ UPnPResultCode UPnpAVTransport::StartPlay()
+ 
+     // For GetPositionInfo
+     SetValue< QString >( "CurrentTrack", "1" );
+-    SetValue< QString >( "CurrentTrackDuration", GetValue<QString>("CurrentMediaDuration") );
+-    SetValue< QString >( "CurrentTrackMetaData", GetValue<QString>("AVTransportURIMetaData") );
+-    SetValue< QString >( "CurrentTrackURI", uri );
++    SetValue< QString >( "AbsoluteTimePosition", "00:00:00" );
+ 
+     return UPnPResult_Success;
+ }
+@@ -537,27 +531,43 @@ void UPnpAVTransport::Seek( HTTPRequest *pRequest )
+         return;
+     }
+ 
+-    if (pRequest->m_mapParams[ "Unit" ] != "TRACK_NR")
+-    {
+-        VERBOSE(VB_UPNP, "UPnpAVTransport::Seek invalid Unit");
+-        UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueOutOfRange );
+-        return;
+-    }
++    // STOPPED or PLAYING only
+ 
+     QString target = pRequest->m_mapParams[ "Target" ];
+-    // 0=end, 1=begin
+-    if (target.isEmpty() || (target != "0" && target != "1"))
++    QString units = pRequest->m_mapParams[ "Unit" ];
++    if (units == "TRACK_NR")
+     {
+-        VERBOSE(VB_UPNP, "UPnpAVTransport::Seek invalid Target");
++        // 0=end, 1=begin (ui4)
++        if (target == "0")
++            SendEvent("NETWORK_CONTROL SEEK FORWARD");
++        else if (target == "1")
++            SendEvent("NETWORK_CONTROL SEEK BEGINNING");
++        else
++        {
++            VERBOSE(VB_UPNP, QString("UPnpAVTransport::Seek invalid Target '%1'").arg(target));
++            UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueOutOfRange );
++            return;
++        }
++
++        SetValue< QString >( "CurrentTrack", target);
++    }
++    else if (units == "ABS_TIME" || units == "REL_TIME")
++    {
++        unsigned secs = target.section(':',2,2).toUInt()
++            + 60 * target.section(':',1,1).toUInt()
++            + 3600 * target.section(':',0,0).toUInt();
++        SendEvent(QString("NETWORK_CONTROL SEEK POSITION %1").arg(secs));
++        SetValue< QString >( "AbsoluteTimePosition", target );
++    }
++    // ABS_COUNT(ui4) REL_COUNT(ui4) CHANNEL_FREQ TAPE-INDEX FRAME
++    else
++    {
++        VERBOSE(VB_UPNP, QString("UPnpAVTransport::Seek invalid Unit '%1'").arg(units));
+         UPnp::FormatErrorResponse( pRequest, UPnPResult_ArgumentValueOutOfRange );
+         return;
+     }
+-    SetValue< QString >( "CurrentTrack", target);
+-
+-    // STOPPED or PLAYING only
+-    VERBOSE(VB_UPNP, QString("UPnpAVTransport::Seek %1").arg(target));
+ 
+-    // TODO see NetworkControl::processPlay seek
++    VERBOSE(VB_UPNP, QString("UPnpAVTransport::Seek %1 %2").arg(target).arg(units));
+ 
+     pRequest->FormatActionResponse(NameValues());
+ }
+@@ -575,13 +585,12 @@ void UPnpAVTransport::Next( HTTPRequest *pRequest )
+         return;
+     }
+ 
+-    // STOPPED or PLAYING only
++    // TODO: TransportState STOPPED or PLAYING only
+     VERBOSE(VB_UPNP, "UPnpAVTransport::Next");
+ 
++    SendEvent("NETWORK_CONTROL SEEK FORWARD");
+     SetValue< QString >( "CurrentTrack", "0"); // End of file
+ 
+-    // TODO see NetworkControl::processPlay seek
+-
+     pRequest->FormatActionResponse(NameValues());
+ }
+ 
+@@ -598,13 +607,12 @@ void UPnpAVTransport::Previous( HTTPRequest *pRequest )
+         return;
+     }
+ 
+-    // STOPPED or PLAYING only
++    // TODO: TransportState STOPPED or PLAYING only
+     VERBOSE(VB_UPNP, "UPnpAVTransport::Previous");
+ 
++    SendEvent("NETWORK_CONTROL SEEK BEGINNING");
+     SetValue< QString >( "CurrentTrack", "1"); // Begin of file
+ 
+-    // TODO see NetworkControl::processPlay seek
+-
+     pRequest->FormatActionResponse(NameValues());
+ }
+ 
+-- 
+1.7.9.5
+

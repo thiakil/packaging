@@ -1,0 +1,52 @@
+--- qt-everywhere-opensource-src-4.7.0/mkspecs/win32-g++/qmake.conf.orig	2010-09-10 11:04:49.000000000 +0200
++++ qt-everywhere-opensource-src-4.7.0/mkspecs/win32-g++/qmake.conf	2010-12-04 19:29:57.000000000 +0100
+@@ -75,14 +75,17 @@ QMAKE_LIBS_QT_ENTRY     = -lmingw32 -lqt
+ !isEmpty(QMAKE_SH) {
+     MINGW_IN_SHELL      = 1
+ 	QMAKE_DIR_SEP		= /
+-	QMAKE_QMAKE		~= s,\\\\,/,
++#	QMAKE_QMAKE		~= s,\\\\,/,
+ 	QMAKE_COPY		= cp
+-	QMAKE_COPY_DIR		= xcopy /s /q /y /i
++	QMAKE_COPY_DIR		= cp -r
+ 	QMAKE_MOVE		= mv
+ 	QMAKE_DEL_FILE		= rm
+-	QMAKE_MKDIR		= mkdir
++	QMAKE_MKDIR		= mkdir -p
+ 	QMAKE_DEL_DIR		= rmdir
+     QMAKE_CHK_DIR_EXISTS = test -d
++    QMAKE_MOC		= $$[QT_INSTALL_BINS]/moc
++    QMAKE_UIC		= $$[QT_INSTALL_BINS]/uic
++    QMAKE_IDC		= $$[QT_INSTALL_BINS]/idc
+ } else {
+ 	QMAKE_COPY		= copy /y
+ 	QMAKE_COPY_DIR		= xcopy /s /q /y /i
+@@ -91,12 +94,11 @@ QMAKE_LIBS_QT_ENTRY     = -lmingw32 -lqt
+ 	QMAKE_MKDIR		= mkdir
+ 	QMAKE_DEL_DIR		= rmdir
+     QMAKE_CHK_DIR_EXISTS	= if not exist
++    QMAKE_MOC		= $$[QT_INSTALL_BINS]$${DIR_SEPARATOR}moc.exe
++    QMAKE_UIC		= $$[QT_INSTALL_BINS]$${DIR_SEPARATOR}uic.exe
++    QMAKE_IDC		= $$[QT_INSTALL_BINS]$${DIR_SEPARATOR}idc.exe
+ }
+ 
+-QMAKE_MOC		= $$[QT_INSTALL_BINS]$${DIR_SEPARATOR}moc.exe
+-QMAKE_UIC		= $$[QT_INSTALL_BINS]$${DIR_SEPARATOR}uic.exe
+-QMAKE_IDC		= $$[QT_INSTALL_BINS]$${DIR_SEPARATOR}idc.exe
+-
+ QMAKE_IDL		= midl
+ QMAKE_LIB		= ar -ru
+ QMAKE_RC		= windres
+diff -uprN qt-everywhere-opensource-src-4.7.0.orig/src/corelib/codecs/codecs.pri qt-everywhere-opensource-src-4.7.0/src/corelib/codecs/codecs.pri
+--- qt-everywhere-opensource-src-4.7.0.orig/src/corelib/codecs/codecs.pri	2010-09-10 11:05:25.000000000 +0200
++++ qt-everywhere-opensource-src-4.7.0/src/corelib/codecs/codecs.pri	2010-11-09 15:32:08.000000000 +0100
+@@ -19,7 +19,7 @@ SOURCES += \
+ 	codecs/qutfcodec.cpp \
+ 	codecs/qtextcodecplugin.cpp
+ 
+-unix {
++unix|win32-*: {
+ 	SOURCES += codecs/qfontlaocodec.cpp
+ 
+         contains(QT_CONFIG,iconv) {
+

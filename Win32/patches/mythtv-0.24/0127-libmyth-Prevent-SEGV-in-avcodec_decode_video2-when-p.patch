@@ -1,0 +1,36 @@
+From 229207094e7d895da9f565b2d7ed6a4f7bd68a6a Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 17 Jun 2012 10:30:37 +0200
+Subject: [PATCH 127/285] libmyth: Prevent SEGV in avcodec_decode_video2 when
+ playing nuv material
+
+Under certain circumstances NuppelDecoder::DecodeFrame can call
+avcodec_decode_video2 when mpa_vidctx is NULL and thus cause a SEGV.
+
+This patch adds a test for a NULL mpa_vidctx exits with error.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/nuppeldecoder.cpp |    6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/nuppeldecoder.cpp b/mythtv/libs/libmythtv/nuppeldecoder.cpp
+index 52e68a3..512f317 100644
+--- a/mythtv/libs/libmythtv/nuppeldecoder.cpp
++++ b/mythtv/libs/libmythtv/nuppeldecoder.cpp
+@@ -895,6 +895,12 @@ bool NuppelDecoder::DecodeFrame(struct rtframeheader *frameheader,
+         if (!mpa_vidcodec)
+             InitAVCodecVideo(frameheader->comptype - '3');
+ 
++        if (!mpa_vidctx)
++        {
++            VERBOSE(VB_PLAYBACK, LOC_ERR + "NULL mpa_vidctx");
++            return false;
++        }
++
+         AVFrame mpa_pic;
+         av_init_packet(&pkt);
+         pkt.data = lstrm;
+-- 
+1.7.9.5
+

@@ -1,0 +1,34 @@
+From a2b306ac60fe8c42b82141be6b1163846da848f3 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 27 Jun 2012 19:28:55 +0200
+Subject: [PATCH 140/227] libmyth: Initialise ProgramInfo::programflags in all
+ ctors
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/programinfo.cpp |    2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/mythtv/libs/libmyth/programinfo.cpp b/mythtv/libs/libmyth/programinfo.cpp
+index f444b44..bf33bb5 100644
+--- a/mythtv/libs/libmyth/programinfo.cpp
++++ b/mythtv/libs/libmyth/programinfo.cpp
+@@ -239,6 +239,7 @@ ProgramInfo::ProgramInfo(const ProgramInfo &other) :
+ 
+ ProgramInfo::ProgramInfo(uint _chanid, const QDateTime &_recstartts) :
+     chanid(0),
++    programflags(FL_NONE),
+     positionMapDBReplacement(NULL)
+ {
+     LoadProgramFromRecorded(_chanid, _recstartts);
+@@ -743,6 +744,7 @@ ProgramInfo::ProgramInfo(
+ 
+ ProgramInfo::ProgramInfo(const QString &_pathname) :
+     chanid(0),
++    programflags(FL_NONE),
+     positionMapDBReplacement(NULL)
+ {
+     if (_pathname.isEmpty())
+-- 
+1.7.9.5
+

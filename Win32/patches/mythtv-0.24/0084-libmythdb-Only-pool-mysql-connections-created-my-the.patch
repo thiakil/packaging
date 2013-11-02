@@ -1,0 +1,99 @@
+From 6598e61085660940f10752bdba19c864bcfe58bb Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 11 Jan 2012 15:31:04 +0100
+Subject: [PATCH 084/285] libmythdb: Only pool mysql connections created my
+ the UI thread.
+
+This works around the 5 second delay on exit caused by Qt checking which
+thread opened a mysql connection but did not close one.
+
+The pool is freed by the cleanup guard which executes on the main thread.
+Therefore any pooled mysql connection made by a different thread will
+trigger the problem.  For instance, ImageLoadThread calls
+MythUIImage::LoadImage which in turn needs the theme directory name from
+the settings database.  Multiple images are loaded during statup, each
+creating a parallel mysql connection, which are then pooled when the
+thread exits.  At exit, Qt complains after all mysql connections are
+closed that the ImageLoadThreads didn't close their mysql connection.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythdb/mythdbcon.cpp |   20 +++++++++++++++++---
+ mythtv/libs/libmythdb/mythdbcon.h   |    2 ++
+ 2 files changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/mythtv/libs/libmythdb/mythdbcon.cpp b/mythtv/libs/libmythdb/mythdbcon.cpp
+index 013c8fe..5f6c576 100644
+--- a/mythtv/libs/libmythdb/mythdbcon.cpp
++++ b/mythtv/libs/libmythdb/mythdbcon.cpp
+@@ -9,6 +9,8 @@
+ #include <QSqlError>
+ #include <QSqlField>
+ #include <QSqlRecord>
++#include <QThread>
++#include <QApplication>
+ 
+ // MythTV
+ #include "compat.h"
+@@ -18,7 +20,7 @@
+ 
+ static const uint kPurgeTimeout = 60 * 60;
+ 
+-MSqlDatabase::MSqlDatabase(const QString &name)
++MSqlDatabase::MSqlDatabase(const QString &name) : m_thread(0)
+ {
+     m_name = name;
+     m_db = QSqlDatabase::addDatabase("QMYSQL3", name);
+@@ -119,6 +121,7 @@ bool MSqlDatabase::OpenDatabase()
+             VERBOSE(VB_GENERAL,
+                     QString("Connected to database '%1' at host: %2")
+                             .arg(m_db.databaseName()).arg(m_db.hostName()));
++            m_thread = QThread::currentThread();
+ 
+             // WriteDelayed depends on SetHaveDBConnection() and SetHaveSchema()
+             // both being called with true, so order is important here.
+@@ -275,8 +278,19 @@ void MDBManager::pushConnection(MSqlDatabase *db)
+ 
+     if (db)
+     {
+-        db->m_lastDBKick = QDateTime::currentDateTime();
+-        m_pool.prepend(db);
++        // Only re-use the connection if opened by the main thread.
++        // Otherwise when the app exits and the connections are closed by main,
++        // Qt complains that some threads have not exited and hangs for 5 seconds
++        if (!db->m_thread || db->m_thread == qApp->thread())
++        {
++            db->m_lastDBKick = QDateTime::currentDateTime();
++            m_pool.prepend(db);
++        }
++        else
++        {
++            --m_connCount;
++            delete db;
++        }
+     }
+ 
+     m_lock.unlock();
+diff --git a/mythtv/libs/libmythdb/mythdbcon.h b/mythtv/libs/libmythdb/mythdbcon.h
+index 8bc921d..c260812 100644
+--- a/mythtv/libs/libmythdb/mythdbcon.h
++++ b/mythtv/libs/libmythdb/mythdbcon.h
+@@ -12,6 +12,7 @@
+ #include "mythexp.h"
+ 
+ class QSemaphore;
++class QThread;
+ 
+ /// \brief QSqlDatabase wrapper, used by MSqlQuery. Do not use directly.
+ class MPUBLIC MSqlDatabase
+@@ -34,6 +35,7 @@ class MPUBLIC MSqlDatabase
+     QString m_name;
+     QSqlDatabase m_db;
+     QDateTime m_lastDBKick;
++    QThread* m_thread;
+ };
+ 
+ /// \brief DB connection pool, used by MSqlQuery. Do not use directly.
+-- 
+1.7.9.5
+

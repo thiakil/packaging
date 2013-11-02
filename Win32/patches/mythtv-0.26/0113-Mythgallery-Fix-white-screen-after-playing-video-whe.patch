@@ -1,0 +1,36 @@
+From 046105a59a28387b9829110c26b9bc369ee6cfee Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 13 Aug 2012 15:37:48 +0200
+Subject: [PATCH 113/227] Mythgallery: Fix white screen after playing video
+ when using OpenGL
+
+If the mythfrontend UI is set to use OpenGL and MythGallery is set to use
+OpenGL transitions then when video playback exits a white screen is
+shown instead of the video screenshot with "Press SELECT to play again"
+overlay.
+
+The fix is to call makeCurrent on return from playback.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../mythgallery/mythgallery/glsingleview.cpp       |    3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/mythplugins/mythgallery/mythgallery/glsingleview.cpp b/mythplugins/mythgallery/mythgallery/glsingleview.cpp
+index 5cba1d8..8edb77d 100644
+--- a/mythplugins/mythgallery/mythgallery/glsingleview.cpp
++++ b/mythplugins/mythgallery/mythgallery/glsingleview.cpp
+@@ -215,7 +215,10 @@ void GLSingleView::paintGL(void)
+         ThumbItem *item = m_itemList.at(m_pos);
+ 
+         if (item)
++        {
+             GalleryUtil::PlayVideo(item->GetPath());
++            makeCurrent();
++        }
+ 
+         if (!m_slideshow_running && item)
+         {
+-- 
+1.7.9.5
+

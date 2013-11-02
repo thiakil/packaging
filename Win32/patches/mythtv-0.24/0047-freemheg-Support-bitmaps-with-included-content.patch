@@ -1,0 +1,79 @@
+From d2b1c503b1eb113cf96ce10f0c108fd7f051f6b9 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 18 Jul 2011 20:17:45 +0200
+Subject: [PATCH 047/285] freemheg: Support bitmaps with included content
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythfreemheg/Bitmap.cpp |   20 ++++++++++++--------
+ mythtv/libs/libmythfreemheg/Bitmap.h   |    2 ++
+ 2 files changed, 14 insertions(+), 8 deletions(-)
+
+diff --git a/mythtv/libs/libmythfreemheg/Bitmap.cpp b/mythtv/libs/libmythfreemheg/Bitmap.cpp
+index f2fee96..9944833 100644
+--- a/mythtv/libs/libmythfreemheg/Bitmap.cpp
++++ b/mythtv/libs/libmythfreemheg/Bitmap.cpp
+@@ -96,16 +96,24 @@ void MHBitmap::ContentPreparation(MHEngine *engine)
+     MHVisible::ContentPreparation(engine);
+     if (m_ContentType == IN_NoContent)
+         MHERROR("Bitmap must contain a content");
+-    if (m_ContentType == IN_IncludedContent) // We can't handle included content at the moment.
+-        MHERROR("Included content in bitmap is not implemented");
++    if (m_ContentType == IN_IncludedContent)
++        CreateContent(m_IncludedContent.Bytes(), m_IncludedContent.Size(), engine);
+ }
+ 
+ // Decode the content.
+ void MHBitmap::ContentArrived(const unsigned char *data, int length, MHEngine *engine)
+ {
+-    QRegion updateArea = GetVisibleArea(); // If there's any content already we have to redraw it.
+     if (! m_pContent) return; // Shouldn't happen.
+ 
++    CreateContent(data, length, engine);
++    // Now signal that the content is available.
++    engine->EventTriggered(this, EventContentAvailable);
++}
++
++void MHBitmap::CreateContent(const unsigned char *data, int length, MHEngine *engine)
++{
++    QRegion updateArea = GetVisibleArea(); // If there's any content already we have to redraw it.
++
+     int nCHook = m_nContentHook;
+     if (nCHook == 0) nCHook = engine->GetDefaultBitmapCHook();
+ 
+@@ -119,18 +127,14 @@ void MHBitmap::ContentArrived(const unsigned char *data, int length, MHEngine *e
+     else if (nCHook == 2 /* ||nCHook == 5 */) { // MPEG I-frame.
+         m_pContent->CreateFromMPEG(data, length);
+     }
+-
++    // 1,3,5,8 are reserved. 7= H.264 Intra Frame
+     else MHERROR(QString("Unknown bitmap content hook %1").arg(nCHook));
+ 
+     updateArea += GetVisibleArea(); // Redraw this bitmap.
+     engine->Redraw(updateArea); // Mark for redrawing
+-
+-    // Now signal that the content is available.
+-    engine->EventTriggered(this, EventContentAvailable);
+ }
+ 
+ 
+-
+ // Set the transparency.
+ void MHBitmap::SetTransparency(int nTransPerCent, MHEngine *)
+ {
+diff --git a/mythtv/libs/libmythfreemheg/Bitmap.h b/mythtv/libs/libmythfreemheg/Bitmap.h
+index 21827b9..b187073 100644
+--- a/mythtv/libs/libmythfreemheg/Bitmap.h
++++ b/mythtv/libs/libmythfreemheg/Bitmap.h
+@@ -69,6 +69,8 @@ protected:
+     int     m_nXDecodeOffset, m_nYDecodeOffset;
+ 
+     MHBitmapDisplay  *m_pContent; // Pointer to current image if any.
++
++    void CreateContent(const unsigned char *p, int s, MHEngine *engine);
+ };
+ 
+ // Actions.
+-- 
+1.7.9.5
+

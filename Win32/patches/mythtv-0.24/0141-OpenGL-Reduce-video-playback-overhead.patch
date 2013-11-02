@@ -1,0 +1,55 @@
+From 8ac94816ca02b27c5a0d96d3e599062e1f30f1a8 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 21 Jul 2012 18:47:35 +0200
+Subject: [PATCH 141/285] OpenGL: Reduce video playback overhead
+
+This patch introduces 2 changes to reduce video frame overhead and
+hence reduce CPU load.
+
+1. In MythRenderOpenGL::doneCurrent don't call QGLContext::doneCurrent
+as it's strictly not necessary and causes the next call to makeCurrent
+to take considerably longer.  Saves ~ 11mS per frame.
+
+2. In VideoOutputOpenGL::Show only call gl_context->swapBuffers if
+the current format is double buffered,  Saves ~2mS per frame.
+
+Timings from an Intel i5 661 @ 3.33GHz using onboard graphics with
+Linux 3.4 KMS.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/videoout_opengl.cpp   |    2 +-
+ mythtv/libs/libmythui/mythrender_opengl.cpp |    4 +++-
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/videoout_opengl.cpp b/mythtv/libs/libmythtv/videoout_opengl.cpp
+index 5e5650d..3dcde9d 100644
+--- a/mythtv/libs/libmythtv/videoout_opengl.cpp
++++ b/mythtv/libs/libmythtv/videoout_opengl.cpp
+@@ -411,7 +411,7 @@ void VideoOutputOpenGL::Show(FrameScanType scan)
+         return;
+     }
+ 
+-    if (gl_context)
++    if (gl_context && gl_context->format().doubleBuffer())
+         gl_context->swapBuffers();
+ }
+ 
+diff --git a/mythtv/libs/libmythui/mythrender_opengl.cpp b/mythtv/libs/libmythui/mythrender_opengl.cpp
+index 57eb275..6654d8b 100644
+--- a/mythtv/libs/libmythui/mythrender_opengl.cpp
++++ b/mythtv/libs/libmythui/mythrender_opengl.cpp
+@@ -153,7 +153,9 @@ void MythRenderOpenGL::makeCurrent()
+ void MythRenderOpenGL::doneCurrent()
+ {
+     m_lock_level--;
+-#ifndef Q_OS_WIN32
++#if 0 && !defined Q_OS_WIN32
++    // Calling doneCurrent is strictly not necessary and causes the next call
++    // to makeCurrent to take considerably longer
+     if (m_lock_level == 0)
+         QGLContext::doneCurrent();
+ #endif
+-- 
+1.7.9.5
+

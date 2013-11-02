@@ -1,0 +1,34 @@
+From 4c3c3bf90f84a61539e42deed1385d6fcfc054ab Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 4 May 2012 12:58:09 +0200
+Subject: [PATCH 103/285] mythmusic: Prevent continuous restarts of player
+ when AutoPlayCD is enabled
+
+The libcdio patch returns -1 from getNumCDAudioTracks when no CD is present.
+This causes ReadCDThread::run to continually report that the CD has
+been changed which in turn causes PlaybackBoxMusic::occasionallyCheckCD
+to reset the playlist.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/mythmusic/mythmusic/databasebox.cpp |    4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/mythplugins/mythmusic/mythmusic/databasebox.cpp b/mythplugins/mythmusic/mythmusic/databasebox.cpp
+index b865c28..d04424f 100644
+--- a/mythplugins/mythmusic/mythmusic/databasebox.cpp
++++ b/mythplugins/mythmusic/mythmusic/databasebox.cpp
+@@ -1280,6 +1280,10 @@ void ReadCDThread::run()
+     decoder->setDevice(m_CDdevice);
+     int tracknum = decoder->getNumCDAudioTracks();
+ 
++    // Catch error case when tray is open
++    if (tracknum < 0)
++        tracknum = 0;
++
+     bool redo = false;
+ 
+     if (tracknum != gMusicData->all_music->getCDTrackCount())
+-- 
+1.7.9.5
+

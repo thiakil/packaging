@@ -1,0 +1,32 @@
+From 0b8f5b9735ebe12ae27a6eac585685a1fb046036 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 20 Jun 2013 11:40:31 +0100
+Subject: [PATCH 227/285] AFD: Increase default bitrate to 5Mbps for H264
+ streams
+
+ffmpeg doesn't provide a bitrate for some H264 streams so it's defaulted
+at present to 500kbps.  The RingBuffer uses this value to setup initial read
+block sizes.  With HDTV this value is too low which causes RingBuffer to
+underrun initially.  So increase it to a more reasonable value.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index 19e168f..a152d16 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -1821,7 +1821,7 @@ int AvFormatDecoder::ScanStreams(bool novideo)
+                 // HACK -- begin
+                 // ffmpeg is unable to compute H.264 bitrates in mpegts?
+                 if (CODEC_IS_H264(enc->codec_id) && enc->bit_rate == 0)
+-                    enc->bit_rate = 500000;
++                    enc->bit_rate = 8000000; // Typical for HD
+                 // HACK -- end
+ 
+                 StreamInfo si(i, 0, 0, 0, 0);
+-- 
+1.7.9.5
+

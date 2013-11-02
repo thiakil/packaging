@@ -1,0 +1,222 @@
+diff --git a/mythzoneminder/mythzmserver/main.cpp b/mythzoneminder/mythzmserver/main.cpp
+index 0681b1c..6ca85b0 100644
+--- a/mythzoneminder/mythzmserver/main.cpp
++++ b/mythzoneminder/mythzmserver/main.cpp
+@@ -21,10 +21,15 @@
+ #include <cstdio>
+ #include <map>
+ #include <sys/types.h>
++#ifdef WIN32
++#include <winsock2.h>
++typedef int socklen_t;
++#else
+ #include <sys/socket.h>
+ #include <sys/time.h>
+ #include <netinet/in.h>
+ #include <arpa/inet.h>
++#endif
+ #include <fcntl.h>
+ #include <signal.h>
+ 
+@@ -186,13 +191,17 @@ int main(int argc, char **argv)
+             close(logfd);
+     }
+ 
++#ifndef WIN32
+     if (signal(SIGPIPE, SIG_IGN) == SIG_ERR)
+         cout << "Unable to ignore SIGPIPE\n";
++#endif
+ 
+     //  Switch to daemon mode?
+     if (daemon_mode)
+     {
++#ifndef WIN32
+         if (daemon(0, 0) < 0)
++#endif
+         {
+             cout << "Failed to run as a daemon. Bailing out.\n";
+             return EXIT_DAEMONIZING_ERROR;
+@@ -222,7 +231,7 @@ int main(int argc, char **argv)
+     }
+ 
+     // lose the pesky "address already in use" error message
+-    if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &yes,
++    if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, (const char*)&yes,
+                                                         sizeof(int)) == -1)
+     {
+         perror("setsockopt");
+diff --git a/mythplugins/mythzoneminder/mythzmserver/mythzmserver.pro b/mythplugins/mythzoneminder/mythzmserver/mythzmserver.pro
+index cf78fcb..c94e758 100644
+--- mythplugins/mythzoneminder/mythzmserver/mythzmserver.pro
++++ mythplugins/mythzoneminder/mythzmserver/mythzmserver.pro
+@@ -10,7 +10,8 @@ target.path = $${PREFIX}/bin
+ 
+ INSTALLS = target
+ 
+-LIBS = $$system(mysql_config --libs)
++mingw:LIBS += -lwsock32 -lmysql
++linux:LIBS = $$system(mysql_config --libs)
+ 
+ # Input
+ HEADERS += zmserver.h
+diff --git a/mythzoneminder/mythzmserver/zmserver.cpp b/mythzoneminder/mythzmserver/zmserver.cpp
+index a6c94ac..e73caf8 100644
+--- a/mythzoneminder/mythzmserver/zmserver.cpp
++++ b/mythzoneminder/mythzmserver/zmserver.cpp
+@@ -18,17 +18,25 @@
+ #include <cstdlib>
+ #include <cstring>
+ #include <cstdio>
++#include <ctime>
+ #include <errno.h>
++#ifdef WIN32
++#include <winsock2.h>
++#define MSG_NOSIGNAL 0
++#else
+ #include <sys/socket.h>
+-#include <fcntl.h>
+ #include <netinet/in.h>
+ #include <sys/stat.h>
+ #include <sys/shm.h>
++#endif
++#include <fcntl.h>
+ 
+ #ifdef linux
+ #  include <sys/vfs.h>
+ #  include <sys/statvfs.h>
+ #  include <sys/sysinfo.h>
++#elif defined USING_MINGW
++#  include <sys/param.h>
+ #else
+ #  include <sys/param.h>
+ #  include <sys/mount.h>
+@@ -75,7 +83,7 @@ string  g_user = "";
+ string  g_webUser = "";
+ string  g_binPath = "";
+ 
+-time_t  g_lastDBKick = 0;
++std::time_t  g_lastDBKick = 0;
+ 
+ void loadZMConfig(const string &configfile)
+ {
+@@ -174,13 +182,13 @@ void connectToDatabase(void)
+ 
+ void kickDatabase(bool debug)
+ {
+-    if (time(NULL) < g_lastDBKick + DB_CHECK_TIME)
++    if (std::time(NULL) < g_lastDBKick + DB_CHECK_TIME)
+         return;
+ 
+     if (debug)
+         cout << "Kicking database connection" << endl;
+ 
+-    g_lastDBKick = time(NULL);
++    g_lastDBKick = std::time(NULL);
+ 
+     if (mysql_query(&g_dbConn, "SELECT NULL;") == 0)
+     {
+@@ -207,6 +214,7 @@ ZMServer::ZMServer(int sock, bool debug)
+ 
+     // get the shared memory key
+     char buf[100];
++#ifndef USING_MINGW
+     m_shmKey = 0x7a6d2000;
+     string setting = getZMSetting("ZM_SHM_KEY");
+ 
+@@ -217,6 +225,9 @@ ZMServer::ZMServer(int sock, bool debug)
+         snprintf(buf, sizeof(buf), "0x%x", m_shmKey);
+         cout << "Shared memory key is: " << buf << endl;
+     }
++#else
++    string setting;
++#endif
+ 
+     // get the event filename format
+     setting = getZMSetting("ZM_EVENT_IMAGE_DIGITS");
+@@ -352,7 +363,7 @@ bool ZMServer::send(const string s, const unsigned char *buffer, int dataLen) co
+         return false;
+ 
+     // send data
+-    status = ::send(m_sock, buffer, dataLen, MSG_NOSIGNAL);
++    status = ::send(m_sock, (const char*)buffer, dataLen, MSG_NOSIGNAL);
+     if ( status == -1 )
+         return false;
+ 
+@@ -378,6 +389,7 @@ void ZMServer::handleHello()
+ 
+ long long ZMServer::getDiskSpace(const string &filename, long long &total, long long &used)
+ {
++#ifndef USING_MINGW
+     struct statfs statbuf;
+     bzero(&statbuf, sizeof(statbuf));
+     long long freespace = -1;
+@@ -404,6 +416,9 @@ long long ZMServer::getDiskSpace(const string &filename, long long &total, long
+     }
+ 
+     return freespace;
++#else
++    return -1;
++#endif
+ }
+ 
+ void ZMServer::handleGetServerStatus(void)
+@@ -415,6 +430,7 @@ void ZMServer::handleGetServerStatus(void)
+     string status = runCommand(g_binPath + "/zmdc.pl check");
+     ADD_STR(outStr, status)
+ 
++#ifndef USING_MINGW
+     // get load averages
+     double loads[3];
+     if (getloadavg(loads, 3) == -1)
+@@ -427,6 +443,9 @@ void ZMServer::handleGetServerStatus(void)
+         sprintf(buf, "%0.2lf", loads[0]);
+         ADD_STR(outStr, buf)
+     }
++#else
++    ADD_STR(outStr, "Unknown")
++#endif
+ 
+     // get free space on the disk where the events are stored
+     char buf[15];
+@@ -1309,6 +1328,7 @@ void ZMServer::initMonitor(MONITOR *monitor)
+             ((monitor->image_buffer_count) * (sizeof(struct timeval))) +
+             ((monitor->image_buffer_count) * monitor->frame_size);
+ 
++#ifndef USING_MINGW
+     int shmid;
+ 
+     if ((shmid = shmget((m_shmKey & 0xffffff00) | monitor->mon_id,
+@@ -1352,6 +1372,7 @@ void ZMServer::initMonitor(MONITOR *monitor)
+             sizeof(SharedData) +
+             sizeof(TriggerData) +
+             ((monitor->image_buffer_count) * sizeof(struct timeval));
++#endif
+ }
+ 
+ int ZMServer::getFrame(unsigned char *buffer, int bufferSize, MONITOR *monitor)
+diff --git a/mythzoneminder/mythzmserver/zmserver.h b/mythzoneminder/mythzmserver/zmserver.h
+index 849f4ec..451e1c5 100644
+--- a/mythzoneminder/mythzmserver/zmserver.h
++++ b/mythzoneminder/mythzmserver/zmserver.h
+@@ -190,7 +190,9 @@ class ZMServer
+     map<int, MONITOR *>  m_monitors;
+     string               m_eventFileFormat;
+     string               m_analyseFileFormat;
++#ifndef USING_MINGW /* Need <sys/shm.h> */
+     key_t                m_shmKey;
++#endif
+ };
+ 
+ 
+diff --git a/mythplugins/mythzoneminder/mythzoneminder/zmliveplayer.cpp b/mythplugins/mythzoneminder/mythzoneminder/zmliveplayer.cpp
+index de5f111..b093d23 100644
+--- mythplugins/mythzoneminder/mythzoneminder/zmliveplayer.cpp
++++ mythplugins/mythzoneminder/mythzoneminder/zmliveplayer.cpp
+@@ -13,7 +13,6 @@
+  * ============================================================ */
+ 
+ #include <iostream>
+-#include <sys/shm.h>
+ #include <cstdlib>
+ 
+ // qt

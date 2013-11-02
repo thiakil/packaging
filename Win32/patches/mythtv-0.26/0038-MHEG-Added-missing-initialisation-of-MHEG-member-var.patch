@@ -1,0 +1,29 @@
+From d3930ed0f9b6a60793398cd1cd24ee58a0e39f78 Mon Sep 17 00:00:00 2001
+From: Richard <peper03@yahoo.com>
+Date: Sat, 18 May 2013 01:09:06 +0200
+Subject: [PATCH 038/227] MHEG: Added missing initialisation of MHEG member
+ variable that sometimes caused (non-MHEG) video
+ playback to pause at the end.
+
+Signed-off-by: Stuart Morgan <smorgan@mythtv.org>
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mhi.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/mhi.cpp b/mythtv/libs/libmythtv/mhi.cpp
+index 38c3ae6..eef64ea 100644
+--- a/mythtv/libs/libmythtv/mhi.cpp
++++ b/mythtv/libs/libmythtv/mhi.cpp
+@@ -55,7 +55,7 @@ class MHIImageData
+ 
+ MHIContext::MHIContext(InteractiveTV *parent)
+     : m_parent(parent),     m_dsmcc(new Dsmcc()),
+-      m_keyProfile(0),
++      m_notify(0),          m_keyProfile(0),
+       m_engine(MHCreateEngine(this)), m_stop(false),
+       m_updated(false),
+       m_displayWidth(StdDisplayWidth), m_displayHeight(StdDisplayHeight),
+-- 
+1.7.9.5
+

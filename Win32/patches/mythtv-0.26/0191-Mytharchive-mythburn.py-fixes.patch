@@ -1,0 +1,45 @@
+From 909c4485bff24f3077e5519763686f47852363c3 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 9 Aug 2013 09:40:06 +0100
+Subject: [PATCH 191/227] Mytharchive: mythburn.py fixes
+
+Enable mythburn.py to burn an iso image.
+
+1. Catch an exception calling doesFileExist
+2. Remove obsolete -croptop/right/bottom/left parameters to mythffmpeg
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../mytharchive/mythburn/scripts/mythburn.py       |    9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/mythplugins/mytharchive/mythburn/scripts/mythburn.py b/mythplugins/mytharchive/mythburn/scripts/mythburn.py
+index a25629d..988f276 100755
+--- a/mythplugins/mytharchive/mythburn/scripts/mythburn.py
++++ b/mythplugins/mytharchive/mythburn/scripts/mythburn.py
+@@ -1433,8 +1433,11 @@ def getFileInformation(file, folder):
+ 
+         data.rating = str(vid.userrating)
+ 
+-        if doesFileExist(vid.coverfile):
+-            data.coverfile = vid.coverfile
++        try:
++            if doesFileExist(vid.coverfile):
++                data.coverfile = vid.coverfile
++        except:
++            data.coverfile = ""
+ 
+     elif file.attributes["type"].value=="file":
+         data.type =         file.attributes["type"].value
+@@ -2178,7 +2181,7 @@ def encodeNuvToMPEG2(chanid, starttime, mediafile, destvideofile, folder, profil
+     command += "-aspect %s -r %s " % (aspectratio, fps)
+     if (deinterlace == 1):
+         command += "-deinterlace "
+-    command += "-croptop %s -cropright %s -cropbottom %s -cropleft %s " % (croptop, cropright, cropbottom, cropleft)
++    #command += "-croptop %s -cropright %s -cropbottom %s -cropleft %s " % (croptop, cropright, cropbottom, cropleft)
+     command += "-s %s -b %s -vcodec mpeg2video " % (outvideores, outvideobitrate)
+     command += "-qmin %s -qmax %s -qdiff %s " % (qmin, qmax, qdiff)
+     command += "-ab %s -ar %s -acodec %s " % (outaudiobitrate, outaudiosamplerate, outaudiocodec)
+-- 
+1.7.9.5
+

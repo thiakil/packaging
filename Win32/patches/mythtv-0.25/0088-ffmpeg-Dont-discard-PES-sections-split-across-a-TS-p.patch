@@ -1,0 +1,70 @@
+From bce98fad58f460106c23af3c087fadbaf2a4b432 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 1 Jun 2012 20:28:15 +0200
+Subject: [PATCH 088/124] ffmpeg: Dont discard PES sections split across a TS
+ packet
+
+If a TS packet has a pointer field which marks the boundary of
+PES sections then the first section will be discarded if a
+second section is started by the remainder of the TS packet.
+
+This fix adds a check for a completed section in mpegts_push_section
+and if prresent, adds the section data.
+
+This bug is most noticeable on the BBC MHEG text service which
+often will not start beciause the boot application or essential
+filles have missing blocks - see nomeg.mpg
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/external/FFmpeg/libavformat/mpegts.c |   11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/external/FFmpeg/libavformat/mpegts.c b/mythtv/external/FFmpeg/libavformat/mpegts.c
+index 4f6157f..3dad049 100644
+--- a/mythtv/external/FFmpeg/libavformat/mpegts.c
++++ b/mythtv/external/FFmpeg/libavformat/mpegts.c
+@@ -339,8 +339,10 @@ static void write_section_data(AVFormatContext *s, MpegTSFilter *tss1,
+         /* compute section length if possible */
+         if (tss->section_h_size == -1 && tss->section_index >= 3) {
+             len = (AV_RB16(tss->section_buf + 1) & 0xfff) + 3;
+-            if (len > 4096)
++            if (len > 4096) {
++                tss->end_of_section_reached = 1;
+                 return;
++            }
+             tss->section_h_size = len;
+         }
+ 
+@@ -365,6 +367,8 @@ static void write_section_data(AVFormatContext *s, MpegTSFilter *tss1,
+             av_crc(av_crc_get_table(AV_CRC_32_IEEE), -1,
+                    tss->section_buf, tss->section_h_size) == 0)
+             tss->section_cb(tss1, tss->section_buf, tss->section_h_size);
++        else
++            av_log(s, AV_LOG_WARNING, "write_section_data: PID %#x CRC error\n", tss1->pid);
+ 
+         if (tss->section_index > tss->section_h_size) {
+             int left = tss->section_index - tss->section_h_size;
+@@ -633,7 +637,7 @@ static void mpegts_push_section(MpegTSFilter *filter, const uint8_t *section, in
+         return;
+     }
+ 
+-    if (sect->new_packet && pkt && sect->st) {
++    if (sect->new_packet && pkt && sect->st && pkt->size == 0) {
+         int pktLen = section_len + 184; /* Add enough for a complete TS payload. */
+         sect->new_packet = 0;
+         av_free_packet(pkt);
+@@ -2138,7 +2142,10 @@ static int handle_packet(MpegTSContext *ts, const uint8_t *packet)
+             /* pointer field present */
+             len = *p++;
+             if (p + len > p_end)
++            {
++                av_log(s, AV_LOG_WARNING, "handle_packet: Last section data too long on PID=%#x, %d\n", pid, cc);
+                 return 0;
++            }
+             if (len && cc_ok) {
+                 /* write remaining section bytes */
+                 write_section_data(s, tss,
+-- 
+1.7.9.5
+

@@ -1,0 +1,189 @@
+From 22d3e49ee9c5cd28b14b206e114ba2b5f1dbaae3 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 20 May 2011 19:29:38 +0200
+Subject: [PATCH 086/227] MythCenter-Wide: Make TV program guide more legible
+ on SD screen
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/themes/MythCenter-wide/schedule-ui.xml |   66 +++++++++++++------------
+ 1 file changed, 34 insertions(+), 32 deletions(-)
+
+diff --git a/mythtv/themes/MythCenter-wide/schedule-ui.xml b/mythtv/themes/MythCenter-wide/schedule-ui.xml
+index 4232de8..3b6893d 100644
+--- a/mythtv/themes/MythCenter-wide/schedule-ui.xml
++++ b/mythtv/themes/MythCenter-wide/schedule-ui.xml
+@@ -33,7 +33,7 @@
+         </shape>
+ 
+         <shape name="shape5">
+-            <area>20,240,1240,456</area>
++            <area>20,240,1240,464</area>
+             <type>roundbox</type>
+             <fill color="#000000" alpha="30" />
+             <cornerradius>10</cornerradius>
+@@ -51,19 +51,19 @@
+         </textarea>
+ 
+         <guidegrid name="guidegrid">
+-            <area>226,294,1020,390</area>
++            <area>226,294,1020,400</area>
+             <layout>horizontal</layout>
+-            <channels>5</channels>
++            <channels>8</channels>
+             <timeslots>5</timeslots>
+             <solidcolor>#003256</solidcolor>
+             <selector type="roundbox" linecolor="#ffff33" />
+-            <showcategories>yes</showcategories>
++            <showcategories>no</showcategories>
+             <categoryalpha>60</categoryalpha>
+             <recordingcolor>#00aa00</recordingcolor>
+             <conflictingcolor>#ff6600</conflictingcolor>
+             <cutdown>no</cutdown>
+-            <multiline>yes</multiline>
+-            <textoffset>8,6</textoffset>
++            <multiline>no</multiline>
++            <textoffset>6,9</textoffset>
+             <recordstatus type="SingleRecord" image="gg-rs-single.png" />
+             <recordstatus type="TimeslotRecord" image="gg-rs-timeslot.png" />
+             <recordstatus type="ChannelRecord" image="gg-rs-channel.png" />
+@@ -73,7 +73,7 @@
+             <recordstatus type="OverrideRecord" image="gg-rs-override.png" />
+             <arrow direction="left" image="gg-arrow-left.png" />
+             <arrow direction="right" image="gg-arrow-right.png" />
+-            <font>baseguide</font>
++            <font>basemedium</font>
+         </guidegrid>
+ 
+         <buttonlist name="timelist">
+@@ -101,27 +101,27 @@
+         </buttonlist>
+ 
+         <buttonlist name="channellist">
+-            <area>24,294,194,396</area>
+-            <buttonarea>0,0,194,396</buttonarea>
++            <area>24,294,194,400</area>
++            <buttonarea>0,0,194,400</buttonarea>
+             <triggerevent context="Global" action="ESCAPE">LEFT</triggerevent>
+             <statetype name="buttonitem">
+-                <area>0,0,194,74</area>
++                <area>0,0,194,50</area>
+                 <state name="active">
+                     <imagetype name="buttonbackground">
+-                        <area>0,0,194,78</area>
++                        <area>4,1,190,48</area>
+                         <filename>gg-chans.png</filename>
+                     </imagetype>
+-                    <imagetype name="channelicon">
+-                        <area>10,14,40,40</area>
+-                    </imagetype>
++                    <!--imagetype name="channelicon">
++                        <area>6,5,40,40</area>
++                    </imagetype-->
+                     <textarea name="buttontext" from="basetextarea">
+-                        <area>54,0,138,78</area>
++                        <area>10,0,174,50</area>
+                         <font>basesmall</font>
+                         <font state="favourite">basesmall_favorite</font>
+                         <font state="unavailable">basesmall_normal</font>
+                         <font state="favunavailable">basesmall_favourite_unavailable</font>
+                         <cutdown>no</cutdown>
+-                        <align>allcenter</align>
++                        <align>left,vcenter</align>
+                     </textarea>
+                 </state>
+                 <state name="selectedactive" from="active"/>
+@@ -197,7 +197,8 @@
+         </shape>
+ 
+         <shape name="shape5">
+-            <area>20,240,1240,456</area>
++            <!-- channellist + timelist + guidegrid bkgnd -->
++            <area>20,240,1240,460</area>
+             <type>roundbox</type>
+             <fill color="#000000" alpha="30" />
+             <cornerradius>10</cornerradius>
+@@ -205,6 +206,7 @@
+ 
+         <shape name="shape6">
+             <area>934,44,310,180</area>
++            <!-- video bkgnd -->
+             <type>roundbox</type>
+             <fill color="#000000" alpha="255" />
+             <cornerradius>6</cornerradius>
+@@ -226,19 +228,19 @@
+         </textarea>
+ 
+         <guidegrid name="guidegrid">
+-            <area>220,294,1032,390</area>
++            <area>220,294,1032,400</area>
+             <layout>horizontal</layout>
+-            <channels>5</channels>
++            <channels>8</channels>
+             <timeslots>4</timeslots>
+             <solidcolor>#003256</solidcolor>
+             <selector type="roundbox" linecolor="#ffff33"></selector>
+-            <showcategories>yes</showcategories>
++            <showcategories>no</showcategories>
+             <categoryalpha>60</categoryalpha>
+             <recordingcolor>#00aa00</recordingcolor>
+             <conflictingcolor>#ff6600</conflictingcolor>
+             <cutdown>no</cutdown>
+-            <multiline>yes</multiline>
+-            <textoffset>8,6</textoffset>
++            <multiline>no</multiline>
++            <textoffset>6,9</textoffset>
+             <recordstatus type="SingleRecord" image="gg-rs-single.png"></recordstatus>
+             <recordstatus type="TimeslotRecord" image="gg-rs-timeslot.png"></recordstatus>
+             <recordstatus type="ChannelRecord" image="gg-rs-channel.png"></recordstatus>
+@@ -248,7 +250,7 @@
+             <recordstatus type="OverrideRecord" image="gg-rs-override.png"></recordstatus>
+             <arrow direction="left" image="gg-arrow-left.png"></arrow>
+             <arrow direction="right" image="gg-arrow-right.png"></arrow>
+-            <font>basesmall</font>
++            <font>basemedium</font>
+         </guidegrid>
+ 
+         <buttonlist name="timelist">
+@@ -300,29 +302,29 @@
+         </buttonlist>
+ 
+         <buttonlist name="channellist">
+-            <area>24,294,190,396</area>
++            <area>24,294,194,400</area>
+             <layout>vertical</layout>
+             <spacing>0</spacing>
+-            <buttonarea>0,0,190,396</buttonarea>
++            <buttonarea>0,0,194,400</buttonarea>
+             <triggerevent context="Global" action="ESCAPE">LEFT</triggerevent>
+             <statetype name="buttonitem">
+-                <area>0,0,196,74</area>
++                <area>0,0,194,50</area>
+                 <state name="active">
+                     <imagetype name="buttonbackground">
+-                        <area>0,0,190,78</area>
++                        <area>4,1,190,48</area>
+                         <filename>gg-chans.png</filename>
+                     </imagetype>
+-                    <imagetype name="channelicon">
+-                        <area>10,14,40,40</area>
+-                    </imagetype>
++                    <!--imagetype name="channelicon">
++                        <area>6,5,40,40</area>
++                    </imagetype-->
+                     <textarea name="buttontext" from="basetextarea">
+-                        <area>54,0,130,78</area>
++                        <area>10,0,174,50</area>
+                         <font>basesmall</font>
+                         <font state="favourite">basesmall_favorite</font>
+                         <font state="unavailable">basesmall_normal</font>
+                         <font state="favunavailable">basesmall_favourite_unavailable</font>
++                        <align>left,vcenter</align>
+                         <cutdown>no</cutdown>
+-                        <align>allcenter</align>
+                     </textarea>
+                 </state>
+                 <state name="selectedactive" from="active"/>
+-- 
+1.7.9.5
+

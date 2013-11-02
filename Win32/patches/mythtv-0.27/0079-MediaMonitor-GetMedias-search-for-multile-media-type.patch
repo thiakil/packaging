@@ -1,0 +1,104 @@
+From 32f8fa81102b62ba32f65afed0d84a3db61600d2 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 15 Mar 2011 12:34:32 +0100
+Subject: [PATCH 079/207] MediaMonitor::GetMedias - search for multile media
+ types
+
+Add the ability to request multiple media types when searching  MediaMonitor
+disks.
+
+This is useful in the MythGallery plugin which registers specific image
+filetypes with MediaMonitor.  When a CD/USB is inserted with media
+containing images, the disk is searched statistically and the media type
+is set to MEDIATYPE_MGALLERY.  However, when MythGallery shows a list of
+devices with supported media it needs to ask for both MEDIATYPE_MGALLERY
+and MEDIATYPE_DATA.  MythGallery is the only caller of the
+MediaMonitor::GetMedias function.
+
+Ticket URL: <http://code.mythtv.org/trac/ticket/9520>
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/mythgallery/mythgallery/iconview.cpp |    2 +-
+ mythtv/libs/libmyth/mythmediamonitor.cpp         |   10 +++++-----
+ mythtv/libs/libmyth/mythmediamonitor.h           |    2 +-
+ 3 files changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/mythplugins/mythgallery/mythgallery/iconview.cpp b/mythplugins/mythgallery/mythgallery/iconview.cpp
+index a2c116a..be05492 100644
+--- a/mythplugins/mythgallery/mythgallery/iconview.cpp
++++ b/mythplugins/mythgallery/mythgallery/iconview.cpp
+@@ -614,7 +614,7 @@ bool IconView::HandleMediaEscape(MediaMonitor *mon)
+ {
+     bool handled = false;
+     QDir curdir(m_currDir);
+-    QList<MythMediaDevice*> removables = mon->GetMedias(MEDIATYPE_DATA);
++    QList<MythMediaDevice*> removables = mon->GetMedias(MEDIATYPE_DATA|MEDIATYPE_MGALLERY);
+     QList<MythMediaDevice*>::iterator it = removables.begin();
+     for (; !handled && (it != removables.end()); ++it)
+     {
+diff --git a/mythtv/libs/libmyth/mythmediamonitor.cpp b/mythtv/libs/libmyth/mythmediamonitor.cpp
+index 1ddfb60..d9ee655 100644
+--- a/mythtv/libs/libmyth/mythmediamonitor.cpp
++++ b/mythtv/libs/libmyth/mythmediamonitor.cpp
+@@ -450,7 +450,7 @@ void MediaMonitor::StopMonitoring(void)
+  *
+  *   NOTE: This function can block.
+  *
+- *  \sa Unlock(MythMediaDevice *pMedia), GetMedias(MythMediaType mediatype)
++ *  \sa Unlock(MythMediaDevice *pMedia), GetMedias(unsigned mediatypes)
+  */
+ bool MediaMonitor::ValidateAndLock(MythMediaDevice *pMedia)
+ {
+@@ -467,7 +467,7 @@ bool MediaMonitor::ValidateAndLock(MythMediaDevice *pMedia)
+ /** \fn MediaMonitor::Unlock(MythMediaDevice *pMedia)
+  *  \brief decrements the MythMediaDevices reference count
+  *
+- *  \sa ValidateAndLock(MythMediaDevice *pMedia), GetMedias(MythMediaType mediatype)
++ *  \sa ValidateAndLock(MythMediaDevice *pMedia), GetMedias(unsigned mediatypes)
+  */
+ void MediaMonitor::Unlock(MythMediaDevice *pMedia)
+ {
+@@ -546,7 +546,7 @@ QString MediaMonitor::GetMountPath(const QString& devPath)
+     return mountPath;
+ }
+ 
+-/** \fn MediaMonitor::GetMedias(MythMediaType mediatype)
++/** \fn MediaMonitor::GetMedias(unsigned mediatypes)
+  *  \brief Ask for available media. Must be locked with ValidateAndLock().
+  *
+  *   This method returns a list of MythMediaDevice pointers which match
+@@ -564,7 +564,7 @@ QString MediaMonitor::GetMountPath(const QString& devPath)
+  *  \sa ValidateAndLock(MythMediaDevice *pMedia)
+  *  \sa Unlock(MythMediaDevice *pMedia)
+  */
+-QList<MythMediaDevice*> MediaMonitor::GetMedias(MythMediaType mediatype)
++QList<MythMediaDevice*> MediaMonitor::GetMedias(unsigned mediatypes)
+ {
+     QMutexLocker locker(&m_DevicesLock);
+ 
+@@ -573,7 +573,7 @@ QList<MythMediaDevice*> MediaMonitor::GetMedias(MythMediaType mediatype)
+     QList<MythMediaDevice*>::iterator it = m_Devices.begin();
+     for (;it != m_Devices.end(); ++it)
+     {
+-        if (((*it)->getMediaType() & mediatype) &&
++        if (((*it)->getMediaType() & mediatypes) &&
+             (((*it)->getStatus() == MEDIASTAT_USEABLE) ||
+              ((*it)->getStatus() == MEDIASTAT_MOUNTED) ||
+              ((*it)->getStatus() == MEDIASTAT_NOTMOUNTED)))
+diff --git a/mythtv/libs/libmyth/mythmediamonitor.h b/mythtv/libs/libmyth/mythmediamonitor.h
+index 3b1d4d2..04b0680 100644
+--- a/mythtv/libs/libmyth/mythmediamonitor.h
++++ b/mythtv/libs/libmyth/mythmediamonitor.h
+@@ -59,7 +59,7 @@ class MPUBLIC MediaMonitor : public QObject
+     // it is safe to dereference the pointer. When finished call Unlock()
+     QList<MythMediaDevice*> GetRemovable(bool showMounted = false,
+                                          bool showUsable = false);
+-    QList<MythMediaDevice*> GetMedias(MythMediaType mediatype);
++    QList<MythMediaDevice*> GetMedias(unsigned mediatypes);
+     MythMediaDevice*        GetMedia(const QString &path);
+ 
+     void MonitorRegisterExtensions(uint mediaType, const QString &extensions);
+-- 
+1.7.9.5
+

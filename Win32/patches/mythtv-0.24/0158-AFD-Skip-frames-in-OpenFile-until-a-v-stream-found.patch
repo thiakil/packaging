@@ -1,0 +1,55 @@
+From 7e1c6a5664c2e3add350b818a7196491668106b2 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 7 Jan 2013 19:12:24 +0000
+Subject: [PATCH 158/285] AFD: Skip frames in OpenFile() until a/v stream
+ found
+
+If the 1st show of the evening is recorded on BBC3/4 Freeview then the
+recording can start with no a/v streams, just data.  This prevents the
+recording from playing back so skip these blank frames.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |   26 ++++++++++++++++++++++----
+ 1 file changed, 22 insertions(+), 4 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index 608244e..c88a6e4 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -972,10 +972,28 @@ int AvFormatDecoder::OpenFile(RingBuffer *rbuffer, bool novideo,
+ 
+         // av_estimate_timings seeks to end of file and may encounter changes
+         // in the PMT resulting in the initial streams being changed.  So read
+-        // the 1st packet to ensure that the starting streams are correct.
+-        AVPacket pkt;
+-        av_read_frame(ic, &pkt);
+-        av_free_packet(&pkt);
++        // from beginning to ensure that the starting streams are correct.
++        AVPacket pkt = {0};
++        av_init_packet(&pkt);
++        for (bool valid = false; !valid && !ateof; )
++        {
++            // Skip a frame
++            if (av_read_frame(ic, &pkt) < 0)
++                break;
++            av_free_packet(&pkt);
++
++            // Repeat until audio or video found
++            for (uint u = 0; u < ic->nb_streams; ++u)
++            {
++                AVCodecContext *enc = ic->streams[u]->codec;
++                if (enc->codec_type == CODEC_TYPE_VIDEO ||
++                    enc->codec_type == CODEC_TYPE_AUDIO)
++                {
++                    valid = true;
++                    break;
++                }
++            }
++        }
+     }
+ 
+     // Scan for the initial A/V streams
+-- 
+1.7.9.5
+

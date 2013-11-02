@@ -1,0 +1,34 @@
+From 0a49c1f7f54668eb15b8680aa4adbfca0b59ee0c Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 25 Jan 2012 20:36:03 +0100
+Subject: [PATCH 087/285] ffmpeg: install x264 presets
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/external/FFmpeg/Makefile |    3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/external/FFmpeg/Makefile b/mythtv/external/FFmpeg/Makefile
+index 05e1c82..700557f 100644
+--- a/mythtv/external/FFmpeg/Makefile
++++ b/mythtv/external/FFmpeg/Makefile
+@@ -34,7 +34,7 @@ FFLIBS-$(CONFIG_AVCORE)   += avcore
+ 
+ FFLIBS := avutil
+ 
+-DATA_FILES := $(wildcard $(SRC_DIR)/ffpresets/*.ffpreset)
++DATA_FILES := $(wildcard ffpresets/*.ffpreset)
+ 
+ SKIPHEADERS = cmdutils_common_opts.h
+ 
+@@ -48,6 +48,7 @@ ALL_TARGETS-$(CONFIG_DOC)       += documentation
+ 
+ ifdef PROGS
+ INSTALL_TARGETS-yes             += install-mythprogs
++INSTALL_TARGETS-yes             += install-data
+ #INSTALL_TARGETS-yes             += install-progs install-data
+ INSTALL_TARGETS-$(CONFIG_DOC)   += install-man
+ endif
+-- 
+1.7.9.5
+

@@ -1,0 +1,36 @@
+From 2f006691cda1df26cae28db469379b66dadd10f4 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 4 May 2012 13:05:07 +0200
+Subject: [PATCH 104/285] mythmusic: Fix a SEGV that occurs with AutoPlayCD
+ after ejecting a CD
+
+- Enable mediamonitor
+- Enable mythmusic AutoPlayCD
+- Insert a CD
+- Stop playing
+- Eject the CD using the mythmusic menu
+- Select 'Play music' and a SEGV occurs due to stale metadata.
+
+This fix forces the player to refresh its metadata when the CD status
+has changed.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/mythmusic/mythmusic/playbackbox.cpp |    1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/mythplugins/mythmusic/mythmusic/playbackbox.cpp b/mythplugins/mythmusic/mythmusic/playbackbox.cpp
+index d21f689..ef5f3f9 100644
+--- a/mythplugins/mythmusic/mythmusic/playbackbox.cpp
++++ b/mythplugins/mythmusic/mythmusic/playbackbox.cpp
+@@ -996,6 +996,7 @@ void PlaybackBoxMusic::occasionallyCheckCD()
+ 
+         }
+ 
++        gPlayer->refreshMetadata();
+         postUpdate();
+     }
+ 
+-- 
+1.7.9.5
+

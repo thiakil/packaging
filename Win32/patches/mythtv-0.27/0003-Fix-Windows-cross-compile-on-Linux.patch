@@ -1,0 +1,75 @@
+From 299fe5edeb9838601ca922d2a88b2d1cd8d21a84 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 10 Oct 2012 20:47:33 +0200
+Subject: [PATCH 003/207] Fix Windows cross-compile on Linux
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/configure                    |    3 ++-
+ mythtv/external/nzmqt/src/nzmqt.pro |    5 +++++
+ mythtv/external/qjson/src/src.pro   |    8 +++++++-
+ 3 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/configure b/mythtv/configure
+index ea0bb63..8086821 100755
+--- a/mythtv/configure
++++ b/mythtv/configure
+@@ -6475,7 +6475,8 @@ if enabled mythlogserver; then
+     echo "Configuring zeromq..."
+     (cd external/zeromq ; \
+              ./configure --quiet --without-documentation --prefix=${prefix} \
+-                         --includedir=${prefix}/include/mythtv/zeromq)
++                         --includedir=${prefix}/include/mythtv/zeromq\
++                     ${cross_prefix:+--host=${cross_prefix%-}} )
+     echo "Configuring nzmqt..."
+     (cd external/nzmqt/src ; \
+            ${qmakeconf} -o Makefile)
+diff --git a/mythtv/external/nzmqt/src/nzmqt.pro b/mythtv/external/nzmqt/src/nzmqt.pro
+index 45dc1d4..947457f 100644
+--- a/mythtv/external/nzmqt/src/nzmqt.pro
++++ b/mythtv/external/nzmqt/src/nzmqt.pro
+@@ -13,6 +13,11 @@ INSTALLS = target
+ 
+ TEMPLATE = lib
+ 
++# Windows doesn't have a nice variable like LD_LIBRARY_PATH,
++# which means make install would be broken without extra steps.
++# As a workaround, we store dlls with exes. Also improves debugging!
++windows: target.path = $${PREFIX}/bin
++
+ QMAKE_CLEAN += $(TARGET) $(TARGETA) $(TARGETD) $(TARGET0) $(TARGET1) $(TARGET2)
+ 
+ SOURCES += \
+diff --git a/mythtv/external/qjson/src/src.pro b/mythtv/external/qjson/src/src.pro
+index 7859c38..8cd25e1 100644
+--- a/mythtv/external/qjson/src/src.pro
++++ b/mythtv/external/qjson/src/src.pro
+@@ -9,6 +9,7 @@ TARGET   = mythqjson
+ target.path = $${LIBDIR}
+ DESTDIR  = $$QJSON_BASE/lib
+ #CONFIG += create_prl
++CONFIG += dll
+ INSTALLS = target
+ 
+ !mingw {
+@@ -17,6 +18,12 @@ INSTALLS = target
+ 
+ windows: {
+   DEFINES += QJSON_MAKEDLL
++
++    # Windows doesn't have a nice variable like LD_LIBRARY_PATH,
++    # which means make install would be broken without extra steps.
++    # As a workaround, we store dlls with exes. Also improves debugging!
++    #
++    target.path = $${PREFIX}/bin
+ }
+ 
+ # MythTV OS X build fix. We want a dynamic library (like all our other libs),
+@@ -96,4 +103,3 @@ cppinc.files += $${PUBLIC_CPPHEADERS}
+ cppinc.path  += $${PREFIX}/include/mythtv/QJson/
+ 
+ INSTALLS += cppinc
+-
+-- 
+1.7.9.5
+

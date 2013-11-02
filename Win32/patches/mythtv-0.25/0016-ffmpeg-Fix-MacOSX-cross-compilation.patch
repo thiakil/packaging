@@ -1,0 +1,33 @@
+From 9056df138a19b61afef5123c08e5e2d2aea60db3 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 14 Mar 2011 12:10:08 +0100
+Subject: [PATCH 016/124] ffmpeg: Fix MacOSX cross compilation
+
+configure detects struct rusage in sys/resource.h and defines
+HAVE_STRUCT_RUSAGE_RU_MAXRSS in config.h.  However, ffmpeg.c #defines
+_X_XOPEN_SOURCE but this causes struct rusage to become opaque.
+Compromise #define _BSD_SOURCE which allows usleep and struct rusage.ru_maxr
+
+Ticket URL: <http://code.mythtv.org/trac/ticket/9653>
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/external/FFmpeg/ffmpeg.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/external/FFmpeg/ffmpeg.c b/mythtv/external/FFmpeg/ffmpeg.c
+index 185ca19..fe2475a 100644
+--- a/mythtv/external/FFmpeg/ffmpeg.c
++++ b/mythtv/external/FFmpeg/ffmpeg.c
+@@ -20,7 +20,7 @@
+  */
+ 
+ /* needed for usleep() */
+-#define _XOPEN_SOURCE 600
++#define _BSD_SOURCE 1
+ 
+ #include "config.h"
+ #include <ctype.h>
+-- 
+1.7.9.5
+

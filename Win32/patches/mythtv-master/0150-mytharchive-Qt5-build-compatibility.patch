@@ -1,0 +1,40 @@
+From 7041f911f46b13bf72c382578ac91c98fa3698bd Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 18 Mar 2013 12:46:40 +0000
+Subject: [PATCH 150/202] mytharchive: Qt5 build compatibility
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../mytharchive/mytharchive/mytharchive.pro        |    4 ++++
+ .../mytharchivehelper/mytharchivehelper.pro        |    3 +++
+ 2 files changed, 7 insertions(+)
+
+diff --git a/mythplugins/mytharchive/mytharchive/mytharchive.pro b/mythplugins/mytharchive/mytharchive/mytharchive.pro
+index 03c6d9d..a8912b8 100644
+--- a/mythplugins/mytharchive/mytharchive/mytharchive.pro
++++ b/mythplugins/mytharchive/mytharchive/mytharchive.pro
+@@ -66,6 +66,10 @@ INSTALLS +=  nativeuifiles
+ #The following line was inserted by qt3to4
+ QT += xml sql opengl network
+ 
++contains(QT_VERSION, ^5\\.[0-9]\\..*) {
++QT += widgets
++}
++
+ DEFINES += MPLUGIN_API
+ 
+ use_hidesyms {
+diff --git a/mythplugins/mytharchive/mytharchivehelper/mytharchivehelper.pro b/mythplugins/mytharchive/mytharchivehelper/mytharchivehelper.pro
+index f194b1a..1e2c545 100644
+--- a/mythplugins/mytharchive/mytharchivehelper/mytharchivehelper.pro
++++ b/mythplugins/mytharchive/mytharchivehelper/mytharchivehelper.pro
+@@ -26,3 +26,6 @@ LIBS += -lmythavutil
+ LIBS += -lz
+ 
+ QT += xml sql opengl network
++contains(QT_VERSION, ^5\\.[0-9]\\..*) {
++QT += widgets
++}
+-- 
+1.7.9.5
+

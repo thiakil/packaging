@@ -1,0 +1,111 @@
+From 43be58e22075676d65d63b1a11c0152ee045cfa1 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 15 Apr 2011 21:24:12 +0200
+Subject: [PATCH 024/285] MythGallery: Fix 'Show Devices' menu to show media
+ on removable devices
+
+MythGallery has a menu option 'Show Devices' to show pictures on removable
+media.  However, there are some bugs in the current code that stop this
+from working and also prevent the display of pictures on media inserted if
+MediaMonitor 'Jump to Plugin' is enabled.
+
+Ticket URL: <http://code.mythtv.org/trac/ticket/9522>
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/mythgallery/mythgallery/iconview.cpp |   21 +++++++++++++++------
+ 1 file changed, 15 insertions(+), 6 deletions(-)
+
+diff --git a/mythplugins/mythgallery/mythgallery/iconview.cpp b/mythplugins/mythgallery/mythgallery/iconview.cpp
+index f7b0339..379327e 100644
+--- a/mythplugins/mythgallery/mythgallery/iconview.cpp
++++ b/mythplugins/mythgallery/mythgallery/iconview.cpp
+@@ -204,7 +204,8 @@ bool IconView::Create(void)
+         m_thumbGen->setSize(thumbWidth, thumbHeight);
+ 
+     SetupMediaMonitor();
+-    LoadDirectory(m_galleryDir);
++    if (!m_currDevice)
++        LoadDirectory(m_galleryDir);
+ 
+     return true;
+ }
+@@ -339,7 +340,10 @@ void IconView::LoadThumbnail(ThumbItem *item)
+ 
+ void IconView::SetupMediaMonitor(void)
+ {
+-#ifndef _WIN32
++#ifdef _WIN32
++    if (m_currDevice)
++        LoadDirectory(m_currDevice->getDevicePath());
++#else
+     MediaMonitor *mon = MediaMonitor::GetMediaMonitor();
+     if (m_currDevice && mon && mon->ValidateAndLock(m_currDevice))
+     {
+@@ -370,7 +374,6 @@ void IconView::SetupMediaMonitor(void)
+             mon->Unlock(m_currDevice);
+         }
+     }
+-    m_currDevice = NULL;
+ #endif // _WIN32
+ }
+ 
+@@ -541,6 +544,9 @@ bool IconView::HandleMediaDeviceSelect(ThumbItem *item)
+     {
+         m_currDevice = item->GetMediaDevice();
+ 
++#ifdef _WIN32
++        LoadDirectory(m_currDevice->getDevicePath());
++#else
+         if (!m_currDevice->isMounted(false))
+             m_currDevice->mount();
+ 
+@@ -553,6 +559,7 @@ bool IconView::HandleMediaDeviceSelect(ThumbItem *item)
+                                         MythMediaDevice*)));
+ 
+         LoadDirectory(m_currDevice->getMountPath());
++#endif
+ 
+         mon->Unlock(m_currDevice);
+     }
+@@ -1047,7 +1054,11 @@ void IconView::HandleSettings(void)
+     MediaMonitor *mon = MediaMonitor::GetMediaMonitor();
+     if (m_currDevice && mon && mon->ValidateAndLock(m_currDevice))
+     {
++#ifdef _WIN32
++        LoadDirectory(m_currDevice->getDevicePath());
++#else
+         LoadDirectory(m_currDevice->getMountPath());
++#endif
+         mon->Unlock(m_currDevice);
+     }
+     else
+@@ -1127,8 +1138,8 @@ void IconView::HandleImport(void)
+ 
+ void IconView::HandleShowDevices(void)
+ {
+-#ifndef _WIN32
+     MediaMonitor *mon = MediaMonitor::GetMediaMonitor();
++#ifndef _WIN32
+     if (m_currDevice && mon && mon->ValidateAndLock(m_currDevice))
+     {
+         m_currDevice->disconnect(this);
+@@ -1156,7 +1167,6 @@ void IconView::HandleShowDevices(void)
+     m_itemList.append(item);
+     m_itemHash.insert(item->GetName(), item);
+ 
+-#ifndef _WIN32
+     if (mon)
+     {
+         QList<MythMediaDevice*> removables = mon->GetMedias(MEDIATYPE_DATA);
+@@ -1177,7 +1187,6 @@ void IconView::HandleShowDevices(void)
+             }
+         }
+     }
+-#endif
+ 
+     ThumbItem *thumbitem;
+     for (int x = 0; x < m_itemList.size(); x++)
+-- 
+1.7.9.5
+

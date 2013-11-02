@@ -1,0 +1,26 @@
+From 97d192219acd3ee02b8d53e2fcd92a4e896b2af5 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 5 Jul 2013 21:08:45 +0100
+Subject: [PATCH 247/285] Media: Fix verbose string arg
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/mythmedia.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmyth/mythmedia.cpp b/mythtv/libs/libmyth/mythmedia.cpp
+index abae9d8..65c475c 100644
+--- a/mythtv/libs/libmyth/mythmedia.cpp
++++ b/mythtv/libs/libmyth/mythmedia.cpp
+@@ -202,7 +202,7 @@ MediaType MythMediaDevice::DetectMediaType(void)
+         }
+         else
+         {
+-            VERBOSE(VB_GENERAL, QString("DetectMediaType(this=0x%1) unknown file type %1")
++            VERBOSE(VB_GENERAL, QString("DetectMediaType(this=0x%1) unknown file type %2")
+                 .arg(quintptr(this),0,16).arg(it.key()));
+         }
+     }
+-- 
+1.7.9.5
+

@@ -1,0 +1,32 @@
+From 2927c89190f74ae8dbde2e85f1bd50cfd74aa54d Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 21 Aug 2013 12:22:51 +0100
+Subject: [PATCH 210/227] MHEG: Rermove an unnecessary mutex lock operation
+
+QueueDSMCCPacket is called by the decoder thread to deliver MHEG data
+packets.  If the MHEG engine is in a busy wait then acqiring m_runLock
+can stall the decodere and caused dropped frames.
+
+Acquiring the mutex is unnecessary simply to signal the m_engine_wait
+condition
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mhi.cpp |    1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/mhi.cpp b/mythtv/libs/libmythtv/mhi.cpp
+index 036cb99..2041e63 100644
+--- a/mythtv/libs/libmythtv/mhi.cpp
++++ b/mythtv/libs/libmythtv/mhi.cpp
+@@ -294,7 +294,6 @@ void MHIContext::QueueDSMCCPacket(
+                                              componentTag, carouselId,
+                                              dataBroadcastId));
+     }
+-    QMutexLocker locker(&m_runLock);
+     m_engine_wait.wakeAll();
+ }
+ 
+-- 
+1.7.9.5
+

@@ -1,0 +1,27 @@
+From 4a365845c147f5b8549dc3f060fc48880ad6b2c6 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 16 May 2012 12:42:18 +0200
+Subject: [PATCH 073/202] MythCenter-wide theme: Improve legibility of
+ inactive text in listboxes
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/themes/MythCenter-wide/base.xml |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/themes/MythCenter-wide/base.xml b/mythtv/themes/MythCenter-wide/base.xml
+index 1beb6b6..7a7641e 100644
+--- a/mythtv/themes/MythCenter-wide/base.xml
++++ b/mythtv/themes/MythCenter-wide/base.xml
+@@ -87,7 +87,7 @@
+         <color>#888888</color>
+     </fontdef>
+     <fontdef name="basesmall_disabled" from="basesmall">
+-        <color>#666666</color>
++        <color>#888888</color>
+     </fontdef>
+     <fontdef name="basesmall_running_selected" from="basesmallbold">
+         <color>#00FF00</color>
+-- 
+1.7.9.5
+

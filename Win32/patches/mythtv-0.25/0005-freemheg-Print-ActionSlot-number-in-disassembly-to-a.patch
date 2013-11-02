@@ -1,0 +1,27 @@
+From 7de4436578b4638faca02a766aa91609ba6eb002 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 18 Jul 2011 20:42:48 +0200
+Subject: [PATCH 005/124] freemheg: Print ActionSlot number in disassembly to
+ aid debugging
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythfreemheg/TokenGroup.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythfreemheg/TokenGroup.cpp b/mythtv/libs/libmythfreemheg/TokenGroup.cpp
+index b24160b..b147952 100644
+--- a/mythtv/libs/libmythfreemheg/TokenGroup.cpp
++++ b/mythtv/libs/libmythfreemheg/TokenGroup.cpp
+@@ -68,7 +68,7 @@ void MHTokenGroupItem::PrintMe(FILE *fd, int nTabs) const
+         for (int i = 0; i < m_ActionSlots.Size(); i++)
+         {
+             PrintTabs(fd, nTabs + 2);
+-            fprintf(fd, "(\n");
++            fprintf(fd, "( // slot %d\n", i);
+             MHActionSequence *pActions = m_ActionSlots.GetAt(i);
+ 
+             if (pActions->Size() == 0)
+-- 
+1.7.9.5
+

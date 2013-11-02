@@ -1,0 +1,29 @@
+From 0aaafa71a3ca28e9f23d801dbdf9b0cfab9ced64 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 19 Jul 2011 14:47:08 +0200
+Subject: [PATCH 057/285] freemheg: Added ASN1 codes for InteractionChannel
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythfreemheg/ASN1Codes.h |    5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/mythtv/libs/libmythfreemheg/ASN1Codes.h b/mythtv/libs/libmythfreemheg/ASN1Codes.h
+index 53ea5aa..8cc353a 100644
+--- a/mythtv/libs/libmythfreemheg/ASN1Codes.h
++++ b/mythtv/libs/libmythfreemheg/ASN1Codes.h
+@@ -280,6 +280,11 @@
+ #define C_SET_BITMAP_DECODE_OFFSET  246
+ #define C_GET_BITMAP_DECODE_OFFSET  247
+ #define C_SET_SLIDER_PARAMETERS     248
++// Added in ETSI ES 202 184 V2.1.1 (2010-01)
++#define C_GET_DESKTOP_COLOUR        249
++#define C_SET_DESKTOP_COLOUR        250
++#define C_GET_COUNTER_POSITION      251
++#define C_GET_COUNTER_MAX_POSITION  252
+ 
+ // Pseudo-codes.  These are encoded into the link condition in binary but it's convenient
+ // to give them codes here since that way we can include them in the same lookup table.
+-- 
+1.7.9.5
+

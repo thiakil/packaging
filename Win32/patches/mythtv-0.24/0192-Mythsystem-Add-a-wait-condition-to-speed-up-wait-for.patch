@@ -1,0 +1,73 @@
+From 36b8ac825785e94f6217c4bbf5644f81f85a395d Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 9 Jun 2013 10:16:22 +0100
+Subject: [PATCH 192/285] Mythsystem: Add a wait condition to speed up wait
+ for completed children
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythdb/mythsystem.cpp |   20 +++++++++++---------
+ 1 file changed, 11 insertions(+), 9 deletions(-)
+
+diff --git a/mythtv/libs/libmythdb/mythsystem.cpp b/mythtv/libs/libmythdb/mythsystem.cpp
+index c3f8367..718414a 100644
+--- a/mythtv/libs/libmythdb/mythsystem.cpp
++++ b/mythtv/libs/libmythdb/mythsystem.cpp
+@@ -19,6 +19,7 @@
+ #include <QMutex>
+ #include <QSemaphore>
+ #include <QMap>
++#include <QWaitCondition>
+ 
+ # ifdef linux
+ #   include <sys/vfs.h>
+@@ -62,6 +63,7 @@ class MythSystemReaper : public QThread
+     private:
+         PidMap_t    m_pidMap;
+         QMutex      m_mapLock;
++        QWaitCondition m_wait;
+ };
+ 
+ static class MythSystemReaper *reaper = NULL;
+@@ -73,22 +75,21 @@ void MythSystemReaper::run(void)
+     // gCoreContext is set to NULL during shutdown, and we need this thread to
+     // exit during shutdown.
+     while( gCoreContext ) {
+-        usleep(100000);
+-
+-        time_t              now = time(NULL);
+-        PidMap_t::iterator  i, next;
+-        PidData_t          *pidData;
+-        pid_t               pid;
+-        int                 count;
+-
+         m_mapLock.lock();
+-        count = m_pidMap.size();
++        m_wait.wait(&m_mapLock, m_pidMap.count() ? 20 : 100);
++
++        int count = m_pidMap.size();
+         if( !count )
+         {
+             m_mapLock.unlock();
+             continue;
+         }
+ 
++        time_t              now = time(NULL);
++        PidMap_t::iterator  i, next;
++        PidData_t          *pidData;
++        pid_t               pid;
++
+         for( i = m_pidMap.begin(); i != m_pidMap.end(); i = next )
+         {
+             next    = i + 1;
+@@ -190,6 +191,7 @@ uint MythSystemReaper::waitPid( pid_t pid, time_t timeout, bool background,
+     pidData->ready.acquire(1);
+     m_mapLock.lock();
+     m_pidMap.insert( pid, pidData );
++    m_wait.wakeAll();
+     m_mapLock.unlock();
+ 
+     if( !background ) {
+-- 
+1.7.9.5
+

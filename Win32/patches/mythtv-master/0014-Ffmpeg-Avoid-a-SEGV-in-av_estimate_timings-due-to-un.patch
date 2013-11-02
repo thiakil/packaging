@@ -1,0 +1,32 @@
+From a98ba614823899f811e222824c6d432fbf748654 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 25 Feb 2013 19:00:13 +0000
+Subject: [PATCH 014/202] Ffmpeg: Avoid a SEGV in av_estimate_timings due to
+ uninitialised data
+
+av_estimate_timings_pts is called from av_estimate_timings_pts to determine
+running time.  The stack based AVPacket variable is passed without
+initialisation to av_read_packet which can cause mpegts_push_section
+to access unallocated memory.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/external/FFmpeg/libavformat/utils.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/external/FFmpeg/libavformat/utils.c b/mythtv/external/FFmpeg/libavformat/utils.c
+index 03f227e..ce050f5 100644
+--- a/mythtv/external/FFmpeg/libavformat/utils.c
++++ b/mythtv/external/FFmpeg/libavformat/utils.c
+@@ -2364,7 +2364,7 @@ static void estimate_timings_from_bit_rate(AVFormatContext *ic)
+  */
+ static void estimate_timings_from_pts(AVFormatContext *ic, int64_t old_offset)
+ {
+-    AVPacket pkt1, *pkt = &pkt1;
++    AVPacket pkt1 = {0}, *pkt = &pkt1;
+     AVStream *st;
+     int read_size, i, ret;
+     int64_t end_time;
+-- 
+1.7.9.5
+

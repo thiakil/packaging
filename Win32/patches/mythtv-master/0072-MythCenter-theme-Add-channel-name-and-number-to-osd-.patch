@@ -1,0 +1,60 @@
+From 1843be2480100597bca15cc0de0649d9725c3064 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 2 Jun 2011 18:33:59 +0200
+Subject: [PATCH 072/202] MythCenter theme: Add channel name and number to osd
+ program info
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/themes/MythCenter-wide/osd.xml |   19 +++++++++++++++++--
+ 1 file changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/themes/MythCenter-wide/osd.xml b/mythtv/themes/MythCenter-wide/osd.xml
+index 657691b..ab7b669 100644
+--- a/mythtv/themes/MythCenter-wide/osd.xml
++++ b/mythtv/themes/MythCenter-wide/osd.xml
+@@ -11,6 +11,9 @@
+         <fontdef name="medium" from="small">
+             <pixelsize>28</pixelsize>
+         </fontdef>
++        <fontdef name="medium_bold" from="medium">
++            <weight>bold</weight>
++        </fontdef>
+         <fontdef name="large" from="small">
+             <pixelsize>34</pixelsize>
+             <weight>bold</weight>
+@@ -24,9 +27,21 @@
+             <area>0,520,1180,200</area>
+             <filename>osd/prog_bot.png</filename>
+         </imagetype>
++
++        <textarea name="channame">
++            <font>medium_bold</font>
++            <area>20,20,860,40</area>
++            <align>left,bottom</align>
++        </textarea>
++        <textarea name="channum">
++            <font>medium_bold</font>
++            <area>880,20,280,40</area>
++            <align>right,bottom</align>
++        </textarea>
++
+         <textarea name="title">
+             <font>large</font>
+-            <area>20,40,860,70</area>
++            <area>20,50,860,60</area>
+             <align>left,bottom</align>
+         </textarea>
+         <shape name="divider1">
+@@ -37,7 +52,7 @@
+             <area>880,40,280,70</area>
+             <font>medium</font>
+             <template>%LENMINS%</template>
+-            <align>hcenter,bottom</align>
++            <align>right,bottom</align>
+         </textarea>
+         <shape name="divider2">
+             <area>890,520,2,180</area>
+-- 
+1.7.9.5
+

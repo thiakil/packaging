@@ -1,0 +1,31 @@
+From af198811c9047c65b80228f3ae05c62f645abbc0 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 8 Nov 2011 19:55:28 +0100
+Subject: [PATCH 045/124] mythuibuttonlist: Prevent reading beyond end of list
+
+Prevent a potential SEGV in MythUIButtonList::SetPosition by testing
+if an iterator is < end() before dereferencing.
+
+This was picked up by valgrind.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythui/mythuibuttonlist.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythui/mythuibuttonlist.cpp b/mythtv/libs/libmythui/mythuibuttonlist.cpp
+index 8d4de31..1d2685b 100644
+--- a/mythtv/libs/libmythui/mythuibuttonlist.cpp
++++ b/mythtv/libs/libmythui/mythuibuttonlist.cpp
+@@ -1316,7 +1316,7 @@ void MythUIButtonList::SetPosition(void)
+     if (it < m_itemList.begin())
+         it = m_itemList.begin();
+ 
+-    int curItem = GetItemPos(*it);
++    int curItem = it < m_itemList.end() ? GetItemPos(*it) : 0;
+ 
+     while (it < m_itemList.end() && button < (int)m_itemsVisible)
+     {
+-- 
+1.7.9.5
+

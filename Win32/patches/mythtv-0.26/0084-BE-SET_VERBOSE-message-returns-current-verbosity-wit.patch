@@ -1,0 +1,39 @@
+From dc651b985918f873058aceab3a140e344ac812cb Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 23 Jun 2013 15:11:29 +0100
+Subject: [PATCH 084/227] BE: SET_VERBOSE message returns current verbosity
+ with empty arg
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/programs/mythbackend/mainserver.cpp |    8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/programs/mythbackend/mainserver.cpp b/mythtv/programs/mythbackend/mainserver.cpp
+index daa39a2..08c6edb 100644
+--- a/mythtv/programs/mythbackend/mainserver.cpp
++++ b/mythtv/programs/mythbackend/mainserver.cpp
+@@ -5269,14 +5269,18 @@ void MainServer::HandleSetVerbose(QStringList &slist, PlaybackSock *pbs)
+     int len = newverbose.length();
+     if (len > 12)
+     {
+-        verboseArgParse(newverbose.right(len-12));
++        int ret = verboseArgParse(newverbose.right(len-12));
+         logPropagateCalc();
+ 
+         LOG(VB_GENERAL, LOG_NOTICE,
+             QString("Verbose mask changed, new mask is: %1")
+                  .arg(verboseString));
+ 
+-        retlist << "OK";
++        retlist << (!ret ? "OK" : "Failed");
++    }
++    else if (len == 11)
++    {
++        retlist << verboseString.trimmed();
+     }
+     else
+     {
+-- 
+1.7.9.5
+

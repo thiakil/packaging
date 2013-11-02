@@ -1,0 +1,1587 @@
+From 1d648015bcfc90d9ddd7cf4f2790c2688507d072 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 18 Jul 2011 21:27:44 +0200
+Subject: [PATCH 055/285] RingBuffer: Add streaming from network URI's
+
+This patch adds the potential to read from internet URIs which paves the way
+for MHEG InteractionChannel streaming.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/RingBuffer.cpp |  391 +++++++++++-------
+ mythtv/libs/libmythtv/RingBuffer.h   |    7 +-
+ mythtv/libs/libmythtv/libmythtv.pro  |    4 +
+ mythtv/libs/libmythtv/netstream.cpp  |  722 ++++++++++++++++++++++++++++++++++
+ mythtv/libs/libmythtv/netstream.h    |  132 +++++++
+ 5 files changed, 1110 insertions(+), 146 deletions(-)
+ create mode 100644 mythtv/libs/libmythtv/netstream.cpp
+ create mode 100644 mythtv/libs/libmythtv/netstream.h
+
+diff --git a/mythtv/libs/libmythtv/RingBuffer.cpp b/mythtv/libs/libmythtv/RingBuffer.cpp
+index be3ed1a..0c483af 100644
+--- a/mythtv/libs/libmythtv/RingBuffer.cpp
++++ b/mythtv/libs/libmythtv/RingBuffer.cpp
+@@ -28,6 +28,9 @@ using namespace std;
+ #include "livetvchain.h"
+ #include "DVDRingBuffer.h"
+ #include "BDRingBuffer.h"
++#ifdef USING_MHEG
++#include "netstream.h"
++#endif
+ #include "util.h"
+ #include "compat.h"
+ 
+@@ -135,6 +138,9 @@ RingBuffer::RingBuffer(const QString &lfilename,
+       readblocksize(CHUNK),     wanttoread(0),
+       numfailures(0),           commserror(false),
+       dvdPriv(NULL),            bdPriv(NULL),
++#ifdef USING_MHEG
++      m_stream(NULL),
++#endif
+       oldfile(false),           livetvchain(NULL),
+       ignoreliveeof(false),     readAdjust(0)
+ {
+@@ -296,10 +302,18 @@ void RingBuffer::OpenFile(const QString &lfilename, uint retry_ms)
+     filename = lfilename;
+     QString lower = filename.toLower();
+ 
+-    if (remotefile)
+-    {
+-        delete remotefile;
+-    }
++    delete remotefile;
++    remotefile = NULL;
++#ifdef USING_FRONTEND
++    delete dvdPriv;
++    dvdPriv = NULL;
++    delete bdPriv;
++    bdPriv = NULL;
++#endif
++#ifdef USING_MHEG
++    delete m_stream;
++    m_stream = NULL;
++#endif
+ 
+     if (fd2 >= 0)
+     {
+@@ -488,6 +502,16 @@ void RingBuffer::OpenFile(const QString &lfilename, uint retry_ms)
+         readblocksize = BD_BLOCK_SIZE * 62;
+     }
+ #endif // USING_FRONTEND
++#ifdef USING_MHEG
++    else if (NetStream::IsSupported(filename))
++    {
++        m_stream = new NetStream(filename, NetStream::kNeverCache);
++        if (m_stream->WaitTillReady(retry_ms))
++            readblocksize = CHUNK;
++        else
++            m_stream->Abort();
++    }
++#endif
+     else
+     {
+         QString tmpSubName = filename;
+@@ -541,7 +565,22 @@ void RingBuffer::OpenFile(const QString &lfilename, uint retry_ms)
+     commserror = false;
+     numfailures = 0;
+ 
+-    rawbitrate = 8000;
++    // The initial bitrate needs to be set with consideration for low bit rate
++    // streams (e.g. radio @ 64Kbps) such that fill_min bytes are received
++    // in a reasonable time period to enable decoders to peek the first few KB
++    // to determine type & settings.
++#ifdef USING_FRONTEND
++    if (is_dvd || is_bd)
++        rawbitrate = 8000;
++    else
++#endif
++#ifdef USING_MHEG
++    if (m_stream)
++        rawbitrate = 256;
++    else
++#endif
++        rawbitrate = 1000; // Allow for radio
++
+     CalcReadAheadThresh();
+ 
+     rwlock.unlock();
+@@ -552,16 +591,18 @@ void RingBuffer::OpenFile(const QString &lfilename, uint retry_ms)
+  */
+ bool RingBuffer::IsOpen(void) const
+ {
+-    rwlock.lockForRead();
+-    bool ret;
++    QReadLocker lock(&rwlock);
+ #ifdef USING_FRONTEND
+-    ret = tfw || (fd2 > -1) || remotefile || (dvdPriv && dvdPriv->IsOpen()) ||
+-           (bdPriv && bdPriv->IsOpen());
+-#else // if !USING_FRONTEND
+-    ret = tfw || (fd2 > -1) || remotefile;
++    if (dvdPriv)
++        return dvdPriv->IsOpen();
++    if (bdPriv)
++        return bdPriv->IsOpen();
+ #endif // !USING_FRONTEND
+-    rwlock.unlock();
+-    return ret;
++#ifdef USING_MHEG
++    if (m_stream)
++        return m_stream->IsOpen();
++#endif
++    return tfw || (fd2 > -1) || remotefile;
+ }
+ 
+ /** \fn RingBuffer::~RingBuffer(void)
+@@ -573,17 +614,15 @@ RingBuffer::~RingBuffer(void)
+ 
+     rwlock.lockForWrite();
+ 
+-    if (remotefile)
+-    {
+-        delete remotefile;
+-        remotefile = NULL;
+-    }
+-
+-    if (tfw)
+-    {
+-        delete tfw;
+-        tfw = NULL;
+-    }
++    /* NB the C++0X std N2798 para 3.7.4.2 point 4 says
++     * If the argument given to a deallocation function in the standard library
++     * is a pointer that is not the null pointer value (4.10), the deallocation
++     * function shall deallocate the storage referenced by the pointer
++     *
++     * So, delete NULL is OK.
++     */
++    delete remotefile;
++    delete tfw;
+ 
+     if (fd2 >= 0)
+     {
+@@ -592,21 +631,15 @@ RingBuffer::~RingBuffer(void)
+     }
+ 
+ #ifdef USING_FRONTEND
+-    if (dvdPriv)
+-    {
+-        delete dvdPriv;
+-    }
+-    if (bdPriv)
+-    {
+-        delete bdPriv;
+-    }
++    delete dvdPriv;
++    delete bdPriv;
+ #endif // USING_FRONTEND
++#ifdef USING_MHEG
++    delete m_stream;
++#endif
+ 
+-    if (readAheadBuffer) // this only runs if thread is terminated
+-    {
+-        delete [] readAheadBuffer;
+-        readAheadBuffer = NULL;
+-    }
++    // this only runs if thread is terminated
++    delete [] readAheadBuffer;
+ 
+     rwlock.unlock();
+ }
+@@ -734,24 +767,32 @@ int RingBuffer::safe_read(int fd, void *data, uint sz)
+  */
+ int RingBuffer::safe_read(RemoteFile *rf, void *data, uint sz)
+ {
+-    int ret = rf->Read(data, sz);
+-    if (ret < 0)
+-    {
+-        VERBOSE(VB_IMPORTANT, LOC_ERR +
+-                "RingBuffer::safe_read(RemoteFile* ...): read failed");
+-            
+-        poslock.lockForRead();
+-        rf->Seek(internalreadpos - readAdjust, SEEK_SET);
+-        poslock.unlock();
+-        numfailures++;
+-    }
+-    else if (ret == 0)
++    for (int retries = 0; ; ++retries)
+     {
+-        VERBOSE(VB_FILE, LOC +
+-                "RingBuffer::safe_read(RemoteFile* ...): at EOF");
++        int ret = rf->Read(data, sz);
++        if (ret > 0)
++            return ret;
++        else if (ret < 0)
++        {
++            VERBOSE(VB_IMPORTANT, LOC_ERR +
++                    "RingBuffer::safe_read(RemoteFile* ...): read failed");
++
++            poslock.lockForRead();
++            rf->Seek(internalreadpos - readAdjust, SEEK_SET);
++            poslock.unlock();
++            numfailures++;
++            return ret;
++        }
++        // Retry for 300mS if liveTV for low bit rate (radio) streams
++        else if (!livetvchain || retries >= 5)
++            break;
++
++        usleep(60000);
+     }
+ 
+-    return ret;
++    VERBOSE(VB_FILE, LOC +
++                    "RingBuffer::safe_read(RemoteFile* ...): at EOF");
++    return 0;
+ }
+ 
+ /** \fn RingBuffer::UpdateRawBitrate(uint)
+@@ -804,44 +845,39 @@ void RingBuffer::CalcReadAheadThresh(void)
+     readsallowed   = false;
+     readblocksize  = max(readblocksize, CHUNK);
+ 
+-    // loop without sleeping if the buffered data is less than this
+-    fill_threshold = kBufferSize / 8;
+-
+-    const int KB1   =   1*1024;
+-    const int KB2   =   2*KB1;
+-    const int KB4   =   4*KB1;
+-    const int KB8   =   8*KB1;
+-    const int KB16  =  16*KB1;
+-    const int KB32  =  32*KB1;
+-    const int KB64  =  64*KB1;
+-    const int KB128 = 128*KB1;
+-    const int KB256 = 256*KB1;
+-    const int KB512 = 512*KB1;
+-
+     estbitrate     = (uint) max(abs(rawbitrate * playspeed),
+                                 0.5f * rawbitrate);
+     estbitrate     = min(rawbitrate * 3, estbitrate);
+ 
+-    int const rbs = estbitrate > 18000 ? KB512 :
+-                    estbitrate > 9000  ? KB256 :
+-                    estbitrate > 5000  ? KB128 :
+-                    estbitrate > 2500  ? KB64 :
+-                    estbitrate > 1000  ? KB32 :
+-                    estbitrate > 500   ? KB16 :
+-                    estbitrate > 250   ? KB8 :
+-                    estbitrate > 125   ? KB4 :
+-                                         KB2;
++    int const KB1 = 1024;
++    int const rbs = estbitrate > 18000 ? 512*KB1 :
++                    estbitrate > 9000  ? 256*KB1 :
++                    estbitrate > 5000  ? 128*KB1 :
++                    estbitrate > 2500  ? 64*KB1 :
++                    estbitrate >  250  ? 32*KB1 : // 32KB~=0.25s @ 1Mbps
++                                         16*KB1 ;
+     if (rbs < CHUNK)
+         readblocksize = rbs;
+     else
+         readblocksize = max(rbs,readblocksize);
+ 
+     // minumum seconds of buffering before allowing read
+-    float const secs_min = 0.25f;
++    float const secs_min =
++#ifdef USING_MHEG
++        m_stream ? 2.0f :   // Allow more buffering if streaming
++#endif
++        0.25f;
+     // set the minimum buffering before allowing ffmpeg read
+     fill_min = (uint) (estbitrate * ((KB1 / 8) * secs_min));
++    if (fill_min < readblocksize)
++        fill_min = readblocksize;
+     if (fill_min > CHUNK)
+-        fill_min = CHUNK;
++        fill_min = ((fill_min + CHUNK - 1) / CHUNK) * CHUNK;
++    if ((uint)fill_min >= kBufferSize)
++        fill_min = kBufferSize - 1;
++
++    // loop without sleeping if the buffered data is less than this
++    fill_threshold = max((uint)fill_min, kBufferSize / 8);
+ 
+     VERBOSE(VB_FILE, LOC +
+             QString("CalcReadAheadThresh(%1 Kb)\n\t\t\t -> "
+@@ -863,7 +899,11 @@ bool RingBuffer::IsNearEnd(double fps, uint vvf) const
+     // WARNING: readahead_frames can greatly overestimate or underestimate
+     //          the number of frames available in the read ahead buffer
+     //          when rh_frames is less than the keyframe distance.
++    if (fps == 0.)
++        return false;
+     double bytes_per_frame = kbits_per_sec * (1000.0/8.0) / fps;
++    if (bytes_per_frame == 0.)
++        return false;
+     double readahead_frames = sz / bytes_per_frame;
+ 
+     bool near_end = ((vvf + readahead_frames) < 10.0) || (sz < rbs*1.5);
+@@ -902,6 +942,13 @@ int RingBuffer::ReadBufAvail(void) const
+     return ret;
+ }
+ 
++inline bool RingBuffer::ReadsAllowed() const
++{
++    return ateof || setswitchtonext || commserror ||
++        // Ensure some hysteresis around fill_min
++        ReadBufUsed() >= (readsallowed ? 1 : fill_min);
++}
++
+ /** \fn RingBuffer::ResetReadAhead(long long)
+  *  \brief Restart the read-ahead thread at the 'newinternal' position.
+  *
+@@ -1269,6 +1316,13 @@ void RingBuffer::run(void)
+                     readAheadBuffer + rbwposcopy, totfree);
+             }
+ #endif // USING_FRONTEND
++#ifdef USING_MHEG
++            else if (m_stream)
++            {
++                read_return = m_stream->safe_read(
++                    readAheadBuffer + rbwposcopy, totfree, 1000);
++            }
++#endif
+             else
+             {
+                 read_return = safe_read(fd2, readAheadBuffer + rbwposcopy, totfree);
+@@ -1291,13 +1345,9 @@ void RingBuffer::run(void)
+             poslock.unlock();
+         }
+ 
+-        int used = kBufferSize - ReadBufFree();
+-
+         bool reads_were_allowed = readsallowed;
+ 
+-        if ((0 == read_return) || (numfailures > 5) ||
+-            (readsallowed != (used >= fill_min || ateof ||
+-                              setswitchtonext || commserror)))
++        if ((0 == read_return) || (numfailures > 5) || ReadsAllowed() != readsallowed)
+         {
+             // If readpos changes while the lock is released
+             // we should not handle the 0 read_return now.
+@@ -1308,11 +1358,25 @@ void RingBuffer::run(void)
+ 
+             commserror |= (numfailures > 5);
+ 
+-            readsallowed = used >= fill_min || ateof ||
+-                setswitchtonext || commserror;
++            bool bReadsAllowed = ReadsAllowed();
++            if (readsallowed != bReadsAllowed)
++            {
++                readsallowed = bReadsAllowed;
++                VERBOSE(VB_FILE, LOC + (bReadsAllowed ?
++                    QString("Reads allowed: %1 bytes available").arg(ReadBufUsed()) :
++                    QString("Rebuffering %1..%2").arg(ReadBufUsed()).arg(fill_min)) );
++            }
+ 
+             if (0 == read_return && old_readpos == readpos)
+             {
++#ifdef USING_MHEG
++                if (m_stream)
++                {
++                    VERBOSE(VB_PLAYBACK, LOC + "MHEG stream EOF");
++                    ateof = true;
++                }
++                else
++#endif
+                 if (livetvchain)
+                 {
+                     if (!setswitchtonext && !ignoreliveeof &&
+@@ -1332,13 +1396,12 @@ void RingBuffer::run(void)
+ 
+             rwlock.unlock();
+             rwlock.lockForRead();
+-            used = kBufferSize - ReadBufFree();
+         }
+ 
+         VERBOSE(VB_FILE|VB_EXTRA, LOC + "@ end of read ahead loop");
+ 
+         if (!readsallowed || commserror || ateof || setswitchtonext ||
+-            (wanttoread <= used && wanttoread > 0))
++            (wanttoread <= ReadBufUsed() && wanttoread > 0))
+         {
+             // To give other threads a good chance to handle these
+             // conditions, even if they are only requesting a read lock
+@@ -1352,7 +1415,7 @@ void RingBuffer::run(void)
+         {
+             // yield if we have nothing to do...
+             if (!request_pause && reads_were_allowed &&
+-                (used >= fill_threshold || ateof || setswitchtonext))
++                (ReadBufUsed() >= fill_threshold || ateof || setswitchtonext || ignoreliveeof))
+             {
+                 generalWait.wait(&rwlock, 100);
+             }
+@@ -1362,7 +1425,7 @@ void RingBuffer::run(void)
+                 generalWait.wakeAll();
+                 rwlock.unlock();
+                 usleep(5 * 1000);
+-                rwlock.lockForRead();            
++                rwlock.lockForRead();
+             }
+         }
+     }
+@@ -1416,22 +1479,25 @@ bool RingBuffer::WaitForReadsAllowed(void)
+     while (!readsallowed && !stopreads &&
+            !request_pause && !commserror && readaheadrunning)
+     {
+-        generalWait.wait(&rwlock, 1000);
+-        if (!readsallowed && t.elapsed() > 1000)
++        // The timeout should allow for congestion of internet streamed media
++        if (t.elapsed() >= 30000)
+         {
+-            VERBOSE(VB_IMPORTANT, LOC_WARN +
+-                    "Taking too long to be allowed to read..");
+-
+-            if (t.elapsed() > 10000)
+-            {
+-                VERBOSE(VB_IMPORTANT, LOC_ERR + "Took more than "
+-                        "10 seconds to be allowed to read, aborting.");
+-                return false;
+-            }
++            VERBOSE(VB_IMPORTANT, LOC_ERR +
++                QString("Waited %1 seconds to be allowed to read, aborting.")
++                .arg(t.elapsed()/1000) );
++            return false;
+         }
++
++        generalWait.wait(&rwlock, 250);
+     }
+ 
+-    return readsallowed;
++    if (t.elapsed() >= 500)
++    {
++        VERBOSE(VB_IMPORTANT, LOC_WARN +
++            QString("Waited %1 mS to be allowed to read (avail=%2 fill_min=%3)..")
++            .arg(t.elapsed()).arg(ReadBufAvail()).arg(fill_min) );
++    }
++    return true;
+ }
+ 
+ bool RingBuffer::WaitForAvail(int count)
+@@ -1447,49 +1513,38 @@ bool RingBuffer::WaitForAvail(int count)
+         return false;
+     }
+ 
+-    MythTimer t;
+-    t.start();
+-    while ((avail < count) && !stopreads &&
+-           !request_pause && !commserror && readaheadrunning)
++    MythTimer t; t.start();
++    wanttoread = count;
++    while (avail < count && !stopreads && !request_pause &&
++            !commserror && readaheadrunning)
+     {
+-        wanttoread = count;
+-        generalWait.wait(&rwlock, 250);
+-        avail = ReadBufAvail();
+-
+-        if (ateof && avail < count)
++        if (ateof)
++        {
+             count = avail;
++            break;
++        }
+ 
+-        if (avail < count)
++        uint elapsed = t.elapsed();
++        if (elapsed >= 10000)
+         {
+-            int elapsed = t.elapsed();
+-            // Return avail for low bitrate audio streams to avoid underrun
+-            if (elapsed >= 500 && fill_min < CHUNK && avail >= fill_min)
+-                count = avail;
+-            else if  (((elapsed > 250)  && (elapsed < 500))  ||
+-                 ((elapsed > 500)  && (elapsed < 750))  ||
+-                 ((elapsed > 1000) && (elapsed < 1250)) ||
+-                 ((elapsed > 2000) && (elapsed < 2250)) ||
+-                 ((elapsed > 4000) && (elapsed < 4250)) ||
+-                 ((elapsed > 8000) && (elapsed < 8250)) ||
+-                 ((elapsed > 9000)))
+-            {
+-                VERBOSE(VB_IMPORTANT, LOC + "Waited " +
+-                        QString("%1").arg((elapsed / 250) * 0.25f, 3, 'f', 1) +
+-                        " seconds for data \n\t\t\tto become available..." +
+-                        QString(" %2 < %3")
+-                        .arg(avail).arg(count));
+-            }
+-
+-            if (elapsed > 16000)
+-            {
+-                VERBOSE(VB_IMPORTANT, LOC_ERR + "Waited " +
+-                        QString("%1").arg(elapsed/1000) +
+-                        " seconds for data, aborting.");
+-                return false;
+-            }
++            VERBOSE(VB_IMPORTANT, LOC_ERR +
++                QString("Timed out waiting for data available (wanted=%1, avail=%2)")
++                .arg(count).arg(avail) );
++            break;
++        }
++        else if (elapsed >= 100 && avail)
++        {
++            VERBOSE(VB_FILE|VB_EXTRA, LOC +
++                QString("Waited %1 mS for %2 bytes (wanted %3)")
++                .arg(elapsed).arg(avail).arg(count) );
++            count = avail;
++            generalWait.wakeAll();
++            break;
+         }
+-    }
+ 
++        generalWait.wait(&rwlock, 100);
++        avail = ReadBufAvail();
++    }
+     wanttoread = 0;
+ 
+     return avail >= count;
+@@ -1514,6 +1569,10 @@ int RingBuffer::ReadDirect(void *buf, int count, bool peek)
+     else if (bdPriv)
+         ret = bdPriv->safe_read(buf, count);
+ #endif // USING_FRONTEND
++#ifdef USING_MHEG
++    else if (m_stream)
++        ret = m_stream->safe_read(buf, count, 10);
++#endif
+     else if (fd2 >= 0)
+         ret = safe_read(fd2, buf, count);
+     else
+@@ -1544,13 +1603,18 @@ int RingBuffer::ReadDirect(void *buf, int count, bool peek)
+ 
+     if (peek && ret > 0)
+     {
++#ifdef USING_MHEG
++        if (m_stream)
++            m_stream->Seek(old_pos);
++        else
++#endif
+         if (!dvdPriv && !bdPriv)
+         {
+             long long new_pos = Seek(old_pos, SEEK_SET, true);
+             if (new_pos != old_pos)
+             {
+                 VERBOSE(VB_IMPORTANT, LOC_ERR +
+-                        QString("Peek() Failed to return from new "
++                        QString("Seek() Failed to return from new "
+                                 "position %1 to old position %2, now "
+                                 "at position %3")
+                         .arg(old_pos - ret).arg(old_pos).arg(new_pos));
+@@ -1584,13 +1648,15 @@ int RingBuffer::ReadDirect(void *buf, int count, bool peek)
+  */
+ int RingBuffer::ReadPriv(void *buf, int count, bool peek)
+ {
+-    QString loc_desc = 
++    const QString loc_desc =
+             QString("ReadPriv(..%1, %2)")
+         .arg(count).arg(peek?"peek":"normal");
+-    VERBOSE(VB_FILE|VB_EXTRA, LOC + loc_desc +
+-            QString(" @%1 -- begin").arg(rbrpos));
+ 
+     rwlock.lockForRead();
++
++    VERBOSE(VB_FILE|VB_EXTRA, LOC + loc_desc +
++            QString(" @%1 avail %2 -- begin").arg(rbrpos).arg(ReadBufAvail()));
++
+     if (writemode)
+     {
+         VERBOSE(VB_IMPORTANT, LOC_ERR + loc_desc +
+@@ -1621,6 +1687,7 @@ int RingBuffer::ReadPriv(void *buf, int count, bool peek)
+         if (request_pause || stopreads ||
+             !readaheadrunning || (ignorereadpos >= 0))
+         {
++            VERBOSE(VB_FILE, LOC + loc_desc + " -- direct read");
+             int ret = ReadDirect(buf, count, peek);
+             VERBOSE(VB_FILE|VB_EXTRA, LOC + loc_desc +
+                     QString(": ReadDirect checksum %1")
+@@ -1635,10 +1702,9 @@ int RingBuffer::ReadPriv(void *buf, int count, bool peek)
+     if (!WaitForReadsAllowed())
+     {
+         VERBOSE(VB_FILE, LOC + loc_desc + ": !WaitForReadsAllowed()");
+-        rwlock.unlock();
+-        rwlock.lockForWrite();
+-        wanttoread = 0;
+-        stopreads = true;
++        // NB don't set stopreads or else the next ReadPriv will call ReadDirect
++        // which, if there's any readahead, will cause data to be returned out
++        // of sequence
+         rwlock.unlock();
+         return 0;
+     }
+@@ -2054,6 +2120,21 @@ long long RingBuffer::Seek(long long pos, int whence, bool has_lock)
+         ret = new_pos;
+     }
+ #endif // USING_FRONTEND
++#ifdef USING_MHEG
++    else if (m_stream)
++    {
++        if (SEEK_END == whence)
++        {
++            errno = EINVAL;
++            ret = -1;
++        }
++        else
++        {
++            m_stream->Seek(new_pos);
++            ret = new_pos;
++        }
++    }
++#endif
+     else
+     {
+         ret = lseek64(fd2, pos, whence);
+@@ -2216,6 +2297,10 @@ long long RingBuffer::GetReadPosition(void) const
+     else if (bdPriv)
+         ret = bdPriv->GetReadPosition();
+ #endif // USING_FRONTEND
++#ifdef USING_MHEG
++    if (m_stream)
++        ret = m_stream->GetReadPosition();
++#endif
+     poslock.unlock();
+     rwlock.unlock();
+     return ret;
+@@ -2240,6 +2325,18 @@ long long RingBuffer::GetRealFileSize(void) const
+ {
+     rwlock.lockForRead();
+     long long ret = -1;
++#ifdef USING_FRONTEND
++    if (dvdPriv)
++        ret = dvdPriv->GetTotalReadPosition();
++    else if (bdPriv)
++        ret = bdPriv->GetTotalTimeOfTitle();
++    else
++#endif // USING_FRONTEND
++#ifdef USING_MHEG
++    if (m_stream)
++        ret = m_stream->GetSize();
++    else
++#endif
+     if (remotefile)
+         ret = remotefile->GetFileSize();
+     else
+@@ -2256,6 +2353,10 @@ bool RingBuffer::LiveMode(void) const
+ {
+     rwlock.lockForRead();
+     bool ret = (livetvchain);
++#ifdef USING_MHEG
++    if (m_stream)
++        ret = false;
++#endif
+     rwlock.unlock();
+     return ret;
+ }
+diff --git a/mythtv/libs/libmythtv/RingBuffer.h b/mythtv/libs/libmythtv/RingBuffer.h
+index 09c5f3a..abe9f58 100644
+--- a/mythtv/libs/libmythtv/RingBuffer.h
++++ b/mythtv/libs/libmythtv/RingBuffer.h
+@@ -21,6 +21,7 @@ class RemoteFile;
+ class ThreadedFileWriter;
+ class DVDRingBufferPriv;
+ class BDRingBufferPriv;
++class NetStream;
+ class LiveTVChain;
+ 
+ class MPUBLIC RingBuffer : protected QThread
+@@ -138,6 +139,9 @@ class MPUBLIC RingBuffer : protected QThread
+ 
+     int ReadBufFree(void) const;
+     int ReadBufAvail(void) const;
++    int ReadBufUsed(void) const
++        { return (kBufferSize - 1) - ReadBufFree(); }
++    bool ReadsAllowed() const;
+ 
+     void ResetReadAhead(long long newinternal);
+     void KillReadAheadThread(void);
+@@ -189,10 +193,11 @@ class MPUBLIC RingBuffer : protected QThread
+     int       numfailures;        // protected by rwlock (see note 1)
+     bool      commserror;         // protected by rwlock
+ 
+-    // We should really subclass for these two sets of functionality..
++    // We should really subclass for these sets of functionality..
+     // current implementation is not thread-safe.
+     DVDRingBufferPriv *dvdPriv; // NOT protected by a lock
+     BDRingBufferPriv  *bdPriv;  // NOT protected by a lock
++    NetStream         *m_stream;
+ 
+     bool oldfile;                 // protected by rwlock
+ 
+diff --git a/mythtv/libs/libmythtv/libmythtv.pro b/mythtv/libs/libmythtv/libmythtv.pro
+index 662587b..d46e49c 100644
+--- a/mythtv/libs/libmythtv/libmythtv.pro
++++ b/mythtv/libs/libmythtv/libmythtv.pro
+@@ -369,6 +369,10 @@ using_frontend {
+         SOURCES += dsmcc.cpp                dsmcccache.cpp
+         SOURCES += dsmccbiop.cpp            dsmccobjcarousel.cpp
+ 
++        # MHEG interaction channel
++        HEADERS += netstream.h
++        SOURCES += netstream.cpp
++
+         # MHEG/MHI stuff
+         HEADERS += interactivetv.h          mhi.h
+         SOURCES += interactivetv.cpp        mhi.cpp
+diff --git a/mythtv/libs/libmythtv/netstream.cpp b/mythtv/libs/libmythtv/netstream.cpp
+new file mode 100644
+index 0000000..13cd357
+--- /dev/null
++++ b/mythtv/libs/libmythtv/netstream.cpp
+@@ -0,0 +1,722 @@
++/* Network stream
++ * Copyright 2011 Lawrence Rust <lvr at softsystem dot co dot uk>
++ */
++#include "netstream.h"
++
++// C/C++ lib
++#include <cstdlib>
++using std::getenv;
++
++// Qt
++#include <QNetworkAccessManager>
++#include <QNetworkRequest>
++#include <QNetworkReply>
++#include <QNetworkProxy>
++#include <QNetworkDiskCache>
++#include <QSslConfiguration>
++#include <QUrl>
++#include <QThread>
++#include <QMutexLocker>
++#include <QEvent>
++#include <QCoreApplication>
++#include <QAtomicInt>
++#include <QMetaType> // qRegisterMetaType
++
++// Myth
++#include "mythverbose.h"
++#include "mythcorecontext.h"
++#include "mythdirs.h"
++
++
++/*
++ * Constants
++ */
++#define LOC "[netstream] "
++#define LOC_ERR LOC "ERROR: "
++
++
++/*
++ * Private data
++ */
++static QAtomicInt s_nRequest(1); // Unique NetStream request ID
++static QMutex s_mtx; // Guard local static data e.g. NAMThread singleton
++
++
++/*
++ * Private types
++ */
++// Custom event posted to NAMThread
++class NetStreamEvent : public QEvent
++{
++public:
++    NetStreamEvent(int id, const QNetworkRequest &req) :
++        QEvent(QEvent::User),
++        m_id(id),
++        m_req(req),
++        m_bCancelled(false)
++    { }
++
++    const int m_id;
++    const QNetworkRequest m_req;
++    volatile bool m_bCancelled;
++};
++
++
++/**
++ * Network streaming request
++ */
++NetStream::NetStream(const QUrl &url, QNetworkRequest::CacheLoadControl cache) :
++    m_id(s_nRequest.fetchAndAddRelaxed(1)),
++    m_state(kClosed),
++    m_event(0),
++    m_reply(0),
++    m_nRedirections(0)
++{
++    setObjectName("NetStream");
++    moveToThread(NAMThread::manager()->thread());
++
++    m_request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, cache);
++
++    // Receive requestStarted signals from NAMThread when it processes a NetStreamEvent
++    connect(NAMThread::manager(), SIGNAL(requestStarted(int, QNetworkReply*)),
++        this, SLOT(slotRequestStarted(int, QNetworkReply*)), Qt::DirectConnection );
++
++    QMutexLocker locker(&m_mutex);
++
++    if (Request(url))
++        m_state = kPending;
++}
++
++// virtual
++NetStream::~NetStream()
++{
++    Abort();
++
++    QMutexLocker locker(&m_mutex);
++
++    if (m_reply)
++    {
++        m_reply->deleteLater();
++        m_reply = 0;
++    }
++}
++
++// Send request to the network manager
++// Caller must hold m_mutex
++bool NetStream::Request(const QUrl& url)
++{
++    if (!IsSupported(url))
++    {
++        VERBOSE(VB_IMPORTANT, LOC_ERR +
++            QString("(%1) Request unsupported URL: %2")
++            .arg(m_id).arg(url.toString()) );
++        return false;
++    }
++
++    if (m_event)
++    {
++        VERBOSE(VB_IMPORTANT, LOC_ERR +
++            QString("(%1) Can't Request while pending").arg(m_id) );
++        return false;
++    }
++
++    if (m_reply)
++    {
++        m_reply->deleteLater();
++        m_reply = 0;
++    }
++
++    m_request.setUrl(url);
++
++    const QByteArray ua("User-Agent");
++    if (!m_request.hasRawHeader(ua))
++        m_request.setRawHeader(ua, "UK-MHEG/2 MYT001/001 MHGGNU/001");
++
++#if 1 // The BBC use a self certified cert so don't verify it
++    if (m_request.url().scheme() == "https")
++    {
++        // TODO use cert from carousel auth.tls.<x>
++        QSslConfiguration ssl(QSslConfiguration::defaultConfiguration());
++        ssl.setPeerVerifyMode(QSslSocket::VerifyNone);
++        m_request.setSslConfiguration(ssl);
++    }
++#endif
++
++    VERBOSE(VB_FILE, LOC + QString("(%1) Request %2")
++        .arg(m_id).arg(m_request.url().toString()) );
++    m_event = new NetStreamEvent(m_id, m_request);
++    QCoreApplication::postEvent(NAMThread::manager(), m_event);
++    return true;
++}
++
++// signal from NAMThread manager that a request has been started
++void NetStream::slotRequestStarted(int id, QNetworkReply *reply)
++{
++    QMutexLocker locker(&m_mutex);
++
++    if (m_id != id)
++        return;
++
++    m_event = 0; // Event is no longer valid
++
++    if (!m_reply)
++    {
++        VERBOSE(VB_FILE|VB_EXTRA, LOC + QString("(%1) Started").arg(m_id) );
++
++        m_reply = reply;
++        m_state = kStarted;
++
++        reply->setReadBufferSize(4*1024*1024L); // 0= unlimited, 1MB => 4secs @ 1.5Mbps
++
++        // NB The following signals must be Qt::DirectConnection 'cos this slot
++        // was connected Qt::DirectConnection so the current thread is NAMThread
++
++        // QNetworkReply signals
++        connect(reply, SIGNAL(finished()), this, SLOT(slotFinished()), Qt::DirectConnection );
++        connect(reply, SIGNAL(sslErrors(const QList<QSslError> &)), this,
++            SLOT(slotSslErrors(const QList<QSslError> &)), Qt::DirectConnection );
++        // QIODevice signals
++        connect(reply, SIGNAL(readyRead()), this, SLOT(slotReadyRead()), Qt::DirectConnection );
++    }
++    else
++        VERBOSE(VB_IMPORTANT, LOC_ERR +
++            QString("(%1) Started but m_reply not NULL").arg(m_id));
++}
++
++// signal from QNetworkReply
++void NetStream::slotReadyRead()
++{
++    QMutexLocker locker(&m_mutex);
++
++    if (m_reply)
++    {
++        m_state = kReady;
++
++        locker.unlock();
++        emit ReadyRead(this);
++        locker.relock();
++
++        m_ready.wakeAll();
++    }
++    else
++        VERBOSE(VB_IMPORTANT, LOC_ERR +
++            QString("(%1) ReadyRead but m_reply = NULL").arg(m_id));
++}
++
++// signal from QNetworkReply
++void NetStream::slotFinished()
++{
++    QMutexLocker locker(&m_mutex);
++
++    if (m_reply)
++    {
++        QNetworkReply::NetworkError error = m_reply->error();
++        if (QNetworkReply::NoError == error)
++        {
++            // Check for a re-direct
++            QUrl url = m_reply->attribute(
++                QNetworkRequest::RedirectionTargetAttribute).toUrl();
++            if (!url.isValid())
++            {
++                m_state = kFinished;
++            }
++            else if (m_nRedirections++ > 0)
++            {
++                VERBOSE(VB_FILE, LOC + QString("(%1) Too many redirections")
++                    .arg(m_id));
++                m_state = kFinished;
++            }
++            else if ((url = m_request.url().resolved(url)) == m_request.url())
++            {
++                VERBOSE(VB_FILE, LOC + QString("(%1) Redirection loop to %2")
++                    .arg(m_id).arg(url.toString()) );
++                m_state = kFinished;
++            }
++            else
++            {
++                VERBOSE(VB_FILE, LOC + QString("(%1) Redirecting").arg(m_id));
++                m_state = Request(url) ? kPending : kFinished;
++            }
++        }
++        else
++        {
++            VERBOSE(VB_FILE, LOC + QString("(%1) Error: %2")
++                .arg(m_id).arg(m_reply->errorString()) );
++            m_state = kFinished;
++        }
++
++        if (m_state == kFinished)
++        {
++            VERBOSE(VB_FILE, LOC + QString("(%1) Finished %2 bytes")
++                .arg(m_id).arg(ContentLength()) );
++
++            locker.unlock();
++            emit Finished(this);
++            locker.relock();
++
++            m_finished.wakeAll();
++        }
++    }
++    else
++        VERBOSE(VB_IMPORTANT, LOC_ERR + QString("(%1) Finished but m_reply = NULL")
++            .arg(m_id));
++}
++
++// signal from QNetworkReply
++void NetStream::slotSslErrors(const QList<QSslError> &errors)
++{
++    QMutexLocker locker(&m_mutex);
++
++    if (m_reply)
++    {
++        bool bIgnore = true;
++        Q_FOREACH(const QSslError &e, errors)
++        {
++            VERBOSE(VB_FILE, LOC + QString("(%1) SSL error %2: ")
++                .arg(m_id).arg(e.error()) + e.errorString() );
++            switch (e.error())
++            {
++#if 1 // The BBC use a self certified cert
++            case QSslError::SelfSignedCertificateInChain:
++                break;
++#endif
++            default:
++                bIgnore = false;
++                break;
++            }
++        }
++
++        if (bIgnore)
++        {
++            VERBOSE(VB_FILE, LOC + QString("(%1) SSL errors ignored").arg(m_id));
++            m_reply->ignoreSslErrors(errors);
++        }
++    }
++    else
++        VERBOSE(VB_IMPORTANT, LOC_ERR +
++            QString("(%1) SSL error but m_reply = NULL").arg(m_id) );
++}
++
++
++/**
++ * RingBuffer interface
++ */
++// static
++bool NetStream::IsSupported(const QUrl &url)
++{
++    return url.isValid() &&
++        (url.scheme() == "http" || url.scheme() == "https") &&
++        !url.authority().isEmpty() &&
++        !url.path().isEmpty();
++}
++
++bool NetStream::IsOpen() const
++{
++    QMutexLocker locker(&m_mutex);
++    return m_state > kClosed;
++}
++
++void NetStream::Abort()
++{
++    QMutexLocker locker(&m_mutex);
++
++    if (m_event)
++    {
++        VERBOSE(VB_FILE, LOC + QString("(%1) Cancelled").arg(m_id) );
++        m_event->m_bCancelled = true;
++        m_event = 0;
++    }
++
++    if (m_reply && m_reply->isRunning())
++    {
++        VERBOSE(VB_FILE, LOC + QString("(%1) Abort").arg(m_id) );
++        locker.unlock();
++        m_reply->abort();
++        locker.relock();
++    }
++
++    m_state = kFinished;
++}
++
++int NetStream::safe_read(void *data, unsigned sz, unsigned millisecs)
++{
++    QTime t; t.start();
++    QMutexLocker locker(&m_mutex);
++
++    if (!m_reply)
++        return -1;
++
++    qint64 avail;
++    while ((avail = m_reply->bytesAvailable()) < sz && m_state < kFinished)
++    {
++        unsigned elapsed = t.elapsed();
++        if (elapsed >= millisecs)
++            break;
++        m_ready.wait(&m_mutex, millisecs - elapsed);
++    }
++
++    avail = m_reply->read(reinterpret_cast< char* >(data), sz);
++    if (avail <= 0)
++        return m_state >= kFinished ? 0 : -1; // 0= EOF
++
++    VERBOSE(VB_FILE|VB_EXTRA, LOC + QString("(%1) safe_read => %2 bytes")
++        .arg(m_id).arg(avail) );
++
++    return (int)avail;
++}
++
++qlonglong NetStream::Seek(qlonglong pos)
++{
++    VERBOSE(VB_FILE, LOC + QString("(%1) Seek %2").arg(m_id).arg(pos) );
++
++    QMutexLocker locker(&m_mutex);
++
++    if (!m_reply)
++        return -1;
++
++    if (!m_reply->seek(pos))
++    {
++        VERBOSE(VB_IMPORTANT, LOC_ERR + QString("(%1) Seek %2 failed")
++            .arg(m_id).arg(pos) );
++        return -1;
++    }
++
++    return pos;
++}
++
++qlonglong NetStream::GetReadPosition() const
++{
++    QMutexLocker locker(&m_mutex);
++
++    if (!m_reply)
++        return -1;
++
++    return m_reply->pos();
++}
++
++// Caller must hold m_mutex
++qlonglong NetStream::ContentLength() const
++{
++    if (!m_reply)
++        return -1;
++
++    bool ok;
++    qlonglong len = m_reply->header(QNetworkRequest::ContentLengthHeader)
++        .toLongLong(&ok);
++    return ok ? len : -1;
++}
++
++qlonglong NetStream::GetSize() const
++{
++    QMutexLocker locker(&m_mutex);
++    return ContentLength();
++}
++
++/**
++ * Synchronous interface
++ */
++bool NetStream::WaitTillReady(unsigned long time)
++{
++    QMutexLocker locker(&m_mutex);
++
++    QTime t; t.start();
++    while (m_state < kReady)
++    {
++        unsigned elapsed = t.elapsed();
++        if (elapsed > time)
++            return false;
++
++        m_ready.wait(&m_mutex, time - elapsed);
++    }
++
++    return true;
++}
++
++bool NetStream::WaitTillFinished(unsigned long time)
++{
++    QMutexLocker locker(&m_mutex);
++
++    QTime t; t.start();
++    while (m_state < kFinished)
++    {
++        unsigned elapsed = t.elapsed();
++        if (elapsed > time)
++            return false;
++
++        m_finished.wait(&m_mutex, time - elapsed);
++    }
++
++    return true;
++}
++
++QNetworkReply::NetworkError NetStream::GetError() const
++{
++    QMutexLocker locker(&m_mutex);
++    return !m_reply ? QNetworkReply::OperationCanceledError : m_reply->error();
++}
++
++QString NetStream::GetErrorString() const
++{
++    QMutexLocker locker(&m_mutex);
++    return !m_reply ? "Operation cancelled" : m_reply->errorString();
++}
++
++qlonglong NetStream::BytesAvailable() const
++{
++    QMutexLocker locker(&m_mutex);
++    return m_reply ? m_reply->bytesAvailable() : 0;
++}
++
++QByteArray NetStream::ReadAll()
++{
++    QMutexLocker locker(&m_mutex);
++    return m_reply ? m_reply->readAll() : QByteArray();
++}
++
++/**
++ * Asynchronous interface
++ */
++bool NetStream::isStarted() const
++{
++    QMutexLocker locker(&m_mutex);
++    return m_state >= kStarted;
++}
++
++bool NetStream::isReady() const
++{
++    QMutexLocker locker(&m_mutex);
++    return m_state >= kReady;
++}
++
++bool NetStream::isFinished() const
++{
++    QMutexLocker locker(&m_mutex);
++    return m_state >= kFinished;
++}
++
++/**
++ * Public helpers
++ */
++// static
++bool NetStream::isAvailable()
++{
++    return NAMThread::manager()->isAvailable();
++}
++
++// Time when URI was last written to cache or invalid if not cached.
++// static
++QDateTime NetStream::GetLastModified(const QString &url)
++{
++    return NAMThread::manager()->GetLastModified(url);
++}
++
++
++/**
++ * NetworkAccessManager event loop thread
++ */
++NAMThread::NAMThread() : m_nam(0)
++{
++    setObjectName("NAMThread");
++    moveToThread(this); // Needed to create QNetworkAccessManager
++
++#if 1 // This ought to be done by the Qt lib but isn't in 4.7
++    //Q_DECLARE_METATYPE(QList<QSslError>)
++    qRegisterMetaType< QList<QSslError> >();
++#endif
++}
++
++//static
++NAMThread * NAMThread::manager()
++{
++    QMutexLocker locker(&s_mtx);
++
++    // Singleton
++    static NAMThread thread;
++    thread.start();
++    return &thread;
++}
++
++// virtual
++NAMThread::~NAMThread()
++{
++    delete m_nam;
++}
++
++// virtual
++void NAMThread::run()
++{
++    VERBOSE(VB_FILE, LOC "NAMThread starting");
++
++    m_nam = new QNetworkAccessManager(this);
++    m_nam->setObjectName("NetStream NAM");
++
++    // Setup disk cache directory shared with MythDownloadManager
++    QNetworkDiskCache *cache = new QNetworkDiskCache(this);
++    cache->setCacheDirectory(GetConfDir() + "/Cache-" +
++                                   gCoreContext->GetAppName() + "-" +
++                                   gCoreContext->GetHostName());
++    cache->setMaximumCacheSize(500LL*1024LL*1024LL);
++    m_nam->setCache(cache);
++
++    // Setup a network proxy e.g. for TOR: socks://localhost:9050
++    // TODO get this from mythdb
++    QString proxy(getenv("MYTHMHEG_PROXY"));
++    if (!proxy.isEmpty())
++    {
++        QUrl url(proxy, QUrl::TolerantMode);
++        QNetworkProxy::ProxyType type =
++            url.scheme().isEmpty() ? QNetworkProxy::HttpProxy :
++            url.scheme() == "socks" ? QNetworkProxy::Socks5Proxy :
++            url.scheme() == "http" ? QNetworkProxy::HttpProxy :
++            url.scheme() == "https" ? QNetworkProxy::HttpProxy :
++            url.scheme() == "cache" ? QNetworkProxy::HttpCachingProxy :
++            url.scheme() == "ftp" ? QNetworkProxy::FtpCachingProxy :
++            QNetworkProxy::NoProxy;
++        if (QNetworkProxy::NoProxy != type)
++        {
++            VERBOSE(VB_MHEG, LOC "Using proxy: " + proxy);
++            m_nam->setProxy(QNetworkProxy(
++                type, url.host(), url.port(), url.userName(), url.password() ));
++        }
++        else
++        {
++            VERBOSE(VB_IMPORTANT, LOC + QString("Unknown proxy type %1")
++                .arg(url.scheme()) );
++        }
++    }
++
++    connect(QCoreApplication::instance(), SIGNAL(aboutToQuit()),
++        this, SLOT(quit()), Qt::DirectConnection );
++
++    m_running.release();
++    exec();
++    m_running.acquire();
++
++    delete m_nam;
++    m_nam = 0;
++
++    VERBOSE(VB_FILE, LOC "NAMThread stopped");
++}
++
++// Handle events from NetStream
++// virtual
++bool NAMThread::event(QEvent *event)
++{
++    switch (event->type())
++    {
++    case QEvent::User: return NewRequest(event);
++    }
++    return false;
++}
++
++bool NAMThread::NewRequest(QEvent *event)
++{
++    NetStreamEvent *p = dynamic_cast< NetStreamEvent* >(event);
++    if (!p)
++        return false;
++
++    if (!p->m_bCancelled)
++    {
++        VERBOSE(VB_FILE|VB_EXTRA, LOC "get " + p->m_req.url().toString() );
++        QMutexLocker locker(&m_mutex);
++        QNetworkReply *reply = m_nam->get(p->m_req);
++        locker.unlock();
++        emit requestStarted(p->m_id, reply);
++    }
++    return true;
++}
++
++bool NAMThread::isAvailable()
++{
++    if (!m_running.tryAcquire(1, 3000))
++        return false;
++
++    m_running.release();
++
++    QMutexLocker locker(&m_mutex);
++
++    if (!m_nam)
++        return false;
++
++    switch (m_nam->networkAccessible())
++    {
++    case QNetworkAccessManager::Accessible: return true;
++    case QNetworkAccessManager::NotAccessible: return false;
++    case QNetworkAccessManager::UnknownAccessibility: return true;
++    }
++    return false;
++}
++
++// Time when URI was last written to cache or invalid if not cached.
++// static
++QDateTime NAMThread::GetLastModified(const QString &url)
++{
++    QMutexLocker locker(&m_mutex);
++
++    if (!m_nam)
++        return QDateTime(); // Invalid
++
++    QAbstractNetworkCache *cache = m_nam->cache();
++    if (!cache)
++        return QDateTime(); // Invalid
++
++    QNetworkCacheMetaData meta = cache->metaData(QUrl(url));
++    if (!meta.isValid())
++    {
++        VERBOSE(VB_FILE|VB_EXTRA, LOC + QString("GetLastModified('%1') not in cache")
++            .arg(url));
++        return QDateTime(); // Invalid
++    }
++
++    // Check if expired
++    QDateTime const now(QDateTime::currentDateTime()); // local time
++    QDateTime expire = meta.expirationDate();
++    if (expire.isValid() && expire.toLocalTime() < now)
++    {
++        VERBOSE(VB_FILE, LOC + QString("GetLastModified('%1') past expiration %2")
++            .arg(url).arg(expire.toString()));
++        return QDateTime(); // Invalid
++    }
++
++    // Get time URI was modified (Last-Modified header)  NB this may be invalid
++    QDateTime lastMod = meta.lastModified();
++
++    QNetworkCacheMetaData::RawHeaderList headers = meta.rawHeaders();
++    Q_FOREACH(const QNetworkCacheMetaData::RawHeader &h, headers)
++    {
++        // RFC 1123 date format: Thu, 01 Dec 1994 16:00:00 GMT
++        static const char kszFormat[] = "ddd, dd MMM yyyy HH:mm:ss 'GMT'";
++
++        QString const first(h.first.toLower());
++        if (first == "cache-control")
++        {
++            QString const second(h.second.toLower());
++            if (second == "no-cache" || second == "no-store")
++            {
++                VERBOSE(VB_FILE, LOC +
++                    QString("GetLastModified('%1') Cache-Control disabled").arg(url));
++                cache->remove(QUrl(url));
++                return QDateTime(); // Invalid
++            }
++        }
++        else if (first == "date")
++        {
++            QDateTime d = QDateTime::fromString(h.second, kszFormat);
++            if (!d.isValid())
++            {
++                VERBOSE(VB_IMPORTANT, LOC_ERR +
++                    QString("GetLastModified invalid Date header '%1'")
++                    .arg(h.second.constData()));
++                continue;
++            }
++            d.setTimeSpec(Qt::UTC);
++            lastMod = d;
++        }
++    }
++
++    VERBOSE(VB_FILE|VB_EXTRA, LOC + QString("GetLastModified('%1') last modified %2")
++        .arg(url).arg(lastMod.toString()));
++    return lastMod;
++}
++
++/* End of file */
+diff --git a/mythtv/libs/libmythtv/netstream.h b/mythtv/libs/libmythtv/netstream.h
+new file mode 100644
+index 0000000..01608fa
+--- /dev/null
++++ b/mythtv/libs/libmythtv/netstream.h
+@@ -0,0 +1,132 @@
++/* Network stream
++ * Copyright 2011 Lawrence Rust <lvr at softsystem dot co dot uk>
++ */
++#ifndef NETSTREAM_H
++#define NETSTREAM_H
++
++#include <QObject>
++#include <QMutex>
++#include <QSemaphore>
++#include <QThread>
++#include <QByteArray>
++#include <QNetworkRequest>
++#include <QNetworkReply>
++#include <QWaitCondition>
++#include <QDateTime>
++
++class QUrl;
++class QNetworkAccessManager;
++class NetStreamEvent;
++
++
++/**
++ * Stream content from a URI
++ */
++class NetStream : public QObject
++{
++    Q_OBJECT
++    Q_DISABLE_COPY(NetStream)
++
++public:
++    NetStream(const QUrl &, QNetworkRequest::CacheLoadControl mode = QNetworkRequest::PreferCache);
++    virtual ~NetStream();
++
++public:
++    // RingBuffer interface
++    static bool IsSupported(const QUrl &);
++    bool IsOpen() const;
++    void Abort();
++    int safe_read(void *data, unsigned size, unsigned millisecs);
++    qlonglong Seek(qlonglong);
++    qlonglong GetReadPosition() const;
++    qlonglong GetSize() const;
++
++    // Properties
++    QUrl Url() const { return m_request.url(); }
++
++    // Synchronous interface
++    bool WaitTillReady(unsigned long millisecs);
++    bool WaitTillFinished(unsigned long millisecs);
++    QNetworkReply::NetworkError GetError() const;
++    QString GetErrorString() const;
++    qlonglong BytesAvailable() const;
++    QByteArray ReadAll();
++
++    // Async interface
++    bool isStarted() const;
++    bool isReady() const;
++    bool isFinished() const;
++
++signals:
++    void ReadyRead(QObject*);
++    void Finished(QObject*);
++
++public:
++    // Time when a URI was last written to cache or invalid if not cached.
++    static QDateTime GetLastModified(const QString &url);
++    // Is the network accessible
++    static bool isAvailable();
++
++    // Implementation
++private slots:
++    // NAMThread signals
++    void slotRequestStarted(int, QNetworkReply *);
++    // QNetworkReply signals
++    void slotFinished();
++    void slotSslErrors(const QList<QSslError> & errors);
++    // QIODevice signals
++    void slotReadyRead();
++
++private:
++    bool Request(const QUrl &);
++    qlonglong ContentLength() const;
++
++    const int m_id; // Unique request ID
++
++    mutable QMutex m_mutex; // Protects r/w access to the following data
++    QNetworkRequest m_request;
++    enum { kClosed, kPending, kStarted, kReady, kFinished } m_state;
++    NetStreamEvent* m_event;
++    QNetworkReply* m_reply;
++    int m_nRedirections;
++    QWaitCondition m_ready;
++    QWaitCondition m_finished;
++};
++
++
++/**
++ * Thread to process NetStream requests
++ */
++class NAMThread : public QThread
++{
++    Q_OBJECT
++    Q_DISABLE_COPY(NAMThread)
++
++    // Use manager() to create
++    NAMThread();
++
++public:
++    static NAMThread * manager(); // Singleton
++    virtual ~NAMThread();
++
++    bool isAvailable();
++    QDateTime GetLastModified(const QString &url);
++
++signals:
++     void requestStarted(int, QNetworkReply *);
++
++    // Implementation
++public:
++    virtual bool event(QEvent *); // QObject override
++
++protected:
++    virtual void run(); // QThread override
++    bool NewRequest(QEvent *);
++
++private:
++    QSemaphore m_running;
++    mutable QMutex m_mutex; // Protects r/w access to the following data
++    QNetworkAccessManager *m_nam;
++};
++
++#endif /* ndef NETSTREAM_H */
+-- 
+1.7.9.5
+

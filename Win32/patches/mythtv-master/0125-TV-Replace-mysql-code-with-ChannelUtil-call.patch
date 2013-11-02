@@ -1,0 +1,35 @@
+From a3b05812165792e4a13655812351e8c904b95217 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 3 Jun 2013 12:45:53 +0100
+Subject: [PATCH 125/202] TV: Replace mysql code with ChannelUtil call
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/tv_play.cpp |   11 ++---------
+ 1 file changed, 2 insertions(+), 9 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/tv_play.cpp b/mythtv/libs/libmythtv/tv_play.cpp
+index 61cded3..ecad3f5 100644
+--- a/mythtv/libs/libmythtv/tv_play.cpp
++++ b/mythtv/libs/libmythtv/tv_play.cpp
+@@ -2307,15 +2307,8 @@ void TV::HandleStateChange(PlayerContext *mctx, PlayerContext *ctx)
+ 
+         if (chanid)
+         {
+-            QStringList reclist;
+-
+-            MSqlQuery query(MSqlQuery::InitCon());
+-            query.prepare("SELECT channum FROM channel "
+-                          "WHERE chanid = :CHANID");
+-            query.bindValue(":CHANID", chanid);
+-            if (query.exec() && query.isActive() && query.size() > 0 && query.next())
+-                channum = query.value(0).toString();
+-            else
++            channum = ChannelUtil::GetChanNum(chanid);
++            if (channum.isNull())
+                 channum = QString::number(chanid);
+ 
+             bool getit = ctx->recorder->ShouldSwitchToAnotherCard(
+-- 
+1.7.9.5
+

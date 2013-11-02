@@ -1,0 +1,264 @@
+From 8e880312525c53711d7d8f58fda467b9b43423a3 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 14 Mar 2011 14:14:18 +0100
+Subject: [PATCH 008/285] Fix media monitor autoplay of DVD's, audio CD's, USB
+ discs
+
+If I enable "media monitor" and "use new media" then inserting a:
+
+- DVD jumps to mythvideo but exits imediately.
+- audio CD or USB disc containing music jumps to mythmusic but exits
+ immediately.
+- data CD or USB disc containing photos jumps to mythgallery but exits
+ immediately.
+
+This patch enables autoplay of audio CD's and music or photos on USB.
+
+Ticket URL: <http://svn.mythtv.org/trac/ticket/9169>
+---
+ mythtv/libs/libmyth/mediamonitor-windows.cpp |   69 ++++++++++++++++++--------
+ mythtv/libs/libmyth/mythcdrom-linux.cpp      |   22 ++++++--
+ mythtv/libs/libmyth/mythhdd.cpp              |   24 +++++----
+ mythtv/libs/libmyth/mythmediamonitor.cpp     |   10 +++-
+ 4 files changed, 90 insertions(+), 35 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/mediamonitor-windows.cpp b/mythtv/libs/libmyth/mediamonitor-windows.cpp
+index acdc8b7..3fb6230 100644
+--- a/mythtv/libs/libmyth/mediamonitor-windows.cpp
++++ b/mythtv/libs/libmyth/mediamonitor-windows.cpp
+@@ -26,39 +26,66 @@ MediaMonitorWindows::MediaMonitorWindows(QObject* par,
+ {
+     char strDrives[128];
+     if (!::GetLogicalDriveStrings(sizeof(strDrives), strDrives))
++    {
++        VERBOSE(VB_IMPORTANT,
++            "Error. MediaMonitorWindows failed at GetLogicalDriveStrings.");
+         return;
++    }
+ 
+     for (char *driveName = strDrives; *driveName;
+          driveName += strlen(driveName) + 1)
+     {
+-        uint type = ::GetDriveType(driveName);
+-        if (type != DRIVE_REMOVABLE && type != DRIVE_CDROM)
+-            continue;
+-
+         MythMediaDevice *media = NULL;
+-
+-        if (type == DRIVE_CDROM)
++        UINT type = ::GetDriveType(driveName);
++        switch (type)
++        {
++        case DRIVE_CDROM:
++            VERBOSE(VB_MEDIA+VB_EXTRA,
++                QString("MediaMonitorWindows found cdrom '%1'").arg(driveName));
+             media = MythCDROM::get(this, driveName, false, allowEject);
+-        else
++            break;
++        case DRIVE_REMOVABLE:
++            VERBOSE(VB_MEDIA+VB_EXTRA,
++                QString("MediaMonitorWindows found removeable '%1'")
++                    .arg(driveName));
+             media = MythHDD::Get(this, driveName, false, allowEject);
+-
+-        if (!media)
+-        {
+-            VERBOSE(VB_IMPORTANT,
+-                    "Error. Couldn't create MythMediaDevice.");
+-            return;
++            break;
++        case DRIVE_UNKNOWN:
++            VERBOSE(VB_MEDIA+VB_EXTRA,
++                QString("MediaMonitorWindows found unknown '%1'")
++                    .arg(driveName));
++            media = MythCDROM::get(this, driveName, false, allowEject);
++            break;
++        case DRIVE_NO_ROOT_DIR:
++            VERBOSE(VB_MEDIA+VB_EXTRA,
++                QString("MediaMonitorWindows found '%1' with no root dir")
++                    .arg(driveName));
++            media = MythCDROM::get(this, driveName, false, allowEject);
++            break;
++        default:
++            VERBOSE(VB_MEDIA, QString("MediaMonitorWindows found '%1' type %2")
++                .arg(driveName).arg(type));
++        case DRIVE_FIXED:
++        case DRIVE_REMOTE:
++        case DRIVE_RAMDISK:
++            continue;
+         }
+ 
+-        // We store the volume name to improve
+-        // user activities like ChooseAndEjectMedia().
+-        char volumeName[MAX_PATH];
+-        if (GetVolumeInformation(driveName, volumeName, MAX_PATH,
+-                                 NULL, NULL, NULL, NULL, NULL))
++        if (media)
+         {
+-            media->setVolumeID(volumeName);
++            // We store the volume name to improve
++            // user activities like ChooseAndEjectMedia().
++            char volumeName[MAX_PATH];
++            if (GetVolumeInformation(driveName, volumeName, MAX_PATH,
++                                     NULL, NULL, NULL, NULL, NULL))
++            {
++                media->setVolumeID(volumeName);
++            }
++
++            AddDevice(media);
+         }
+-
+-        AddDevice(media);
++        else
++            VERBOSE(VB_IMPORTANT, "Error. Couldn't create MythMediaDevice.");
+     }
+ 
+     VERBOSE(VB_MEDIA, "Initial device list: " + listDevices());
+diff --git a/mythtv/libs/libmyth/mythcdrom-linux.cpp b/mythtv/libs/libmyth/mythcdrom-linux.cpp
+index 6c5b0d0..eea65d5 100644
+--- a/mythtv/libs/libmyth/mythcdrom-linux.cpp
++++ b/mythtv/libs/libmyth/mythcdrom-linux.cpp
+@@ -19,7 +19,9 @@
+ #define LOC_ERR QString("MythCDROMLinux, Error: ")
+ 
+ // On a mixed-mode disc (audio+data), set this to 0 to mount the data portion:
++#ifndef ASSUME_WANT_AUDIO
+ #define ASSUME_WANT_AUDIO 1
++#endif
+ 
+ 
+ // Some features cannot be detected (reliably) using the standard
+@@ -382,7 +384,7 @@ MediaStatus MythCDROMLinux::checkMedia()
+     switch (driveStatus())
+     {
+         case CDS_DISC_OK:
+-            VERBOSE(VB_MEDIA, m_DevicePath + " Disk OK, type = "
++            VERBOSE(VB_MEDIA+VB_EXTRA, m_DevicePath + " Disk OK, type = "
+                               + MediaTypeString(m_MediaType) );
+             // further checking is required
+             break;
+@@ -432,6 +434,15 @@ MediaStatus MythCDROMLinux::checkMedia()
+     // If we have tried to mount and failed, don't keep trying
+     if (m_Status == MEDIASTAT_ERROR)
+     {
++        // Check if an external agent (like Gnome/KDE) mounted the disk
++        if (isMounted())
++        {
++            onDeviceMounted();
++            // pretend we're NOTMOUNTED so setStatus emits a signal
++            m_Status = MEDIASTAT_NOTMOUNTED;
++            return setStatus(MEDIASTAT_MOUNTED, OpenedHere);
++        }
++
+         VERBOSE(VB_MEDIA+VB_EXTRA, "Disc is unmountable?");
+         if (OpenedHere)
+             closeDevice();
+@@ -510,18 +521,23 @@ MediaStatus MythCDROMLinux::checkMedia()
+             }
+             case CDS_AUDIO:
+                 VERBOSE(VB_MEDIA, "found an audio disk");
++                // pretend we're NOTMOUNTED so setStatus emits a signal
++                m_Status = MEDIASTAT_NOTMOUNTED;
+                 m_MediaType = MEDIATYPE_AUDIO;
+                 return setStatus(MEDIASTAT_USEABLE, OpenedHere);
+                 break;
+             case CDS_MIXED:
+-                m_MediaType = MEDIATYPE_MIXED;
+                 VERBOSE(VB_MEDIA, "found a mixed CD");
+                 // Note: Mixed mode CDs require an explixit mount call
+                 //       since we'll usually want the audio portion.
+                 // undefine ASSUME_WANT_AUDIO to change this behavior.
+-                #ifdef ASSUME_WANT_AUDIO
++                #if ASSUME_WANT_AUDIO
++                    // pretend we're NOTMOUNTED so setStatus emits a signal
++                    m_Status = MEDIASTAT_NOTMOUNTED;
++                    m_MediaType = MEDIATYPE_AUDIO;
+                     return setStatus(MEDIASTAT_USEABLE, OpenedHere);
+                 #else
++                    m_MediaType = MEDIATYPE_MIXED;
+                     mount();
+                     if (isMounted())
+                     {
+diff --git a/mythtv/libs/libmyth/mythhdd.cpp b/mythtv/libs/libmyth/mythhdd.cpp
+index 86f2018..0265d57 100644
+--- a/mythtv/libs/libmyth/mythhdd.cpp
++++ b/mythtv/libs/libmyth/mythhdd.cpp
+@@ -41,9 +41,18 @@ MediaStatus MythHDD::checkMedia(void)
+         return setStatus(MEDIASTAT_MOUNTED);
+     }
+ 
++    // Has device been removed?
++    if (!isDeviceOpen())
++    {
++        if (!openDevice())
++            return setStatus(MEDIASTAT_UNPLUGGED);
++        closeDevice();
++    }
++
+     // device is not mounted
+-    if (m_Status == MEDIASTAT_UNPLUGGED)
++    switch (m_Status)
+     {
++    case MEDIASTAT_UNPLUGGED:
+         // a removable device was just plugged in try to mount it.
+         mount();
+         if (isMounted())
+@@ -51,16 +60,11 @@ MediaStatus MythHDD::checkMedia(void)
+             m_Status = MEDIASTAT_NOTMOUNTED;
+             return setStatus(MEDIASTAT_MOUNTED);
+         }
+-        else
+-            return setStatus(MEDIASTAT_NOTMOUNTED);
+-    }
+-    else if (m_Status == MEDIASTAT_MOUNTED)
+-    {
++        return setStatus(MEDIASTAT_NOTMOUNTED);
++    case MEDIASTAT_MOUNTED:
+         // device was mounted and someone unmounted it.
+-        return m_Status = setStatus(MEDIASTAT_NOTMOUNTED);
+-    }
+-    else
+-    {
++        return setStatus(MEDIASTAT_NOTMOUNTED);
++    default:
+         // leave device state as is
+         return m_Status;
+     }
+diff --git a/mythtv/libs/libmyth/mythmediamonitor.cpp b/mythtv/libs/libmyth/mythmediamonitor.cpp
+index 3dac2ff..99e4044 100644
+--- a/mythtv/libs/libmyth/mythmediamonitor.cpp
++++ b/mythtv/libs/libmyth/mythmediamonitor.cpp
+@@ -362,6 +362,9 @@ bool MediaMonitor::RemoveDevice(const QString &dev)
+     {
+         if ((*it)->getDevicePath() == dev)
+         {
++            // Ensure device gets an unmount
++            (*it)->checkMedia();
++
+             if (m_UseCount[*it] == 0)
+             {
+                 (*it)->deleteLater();
+@@ -652,6 +655,9 @@ void MediaMonitor::JumpToMediaHandler(MythMediaDevice* pMedia)
+ 
+ 
+     GetMythMainWindow()->JumpTo("Main Menu");
++    QTime t; t.start();
++    while (GetMythMainWindow()->IsExitingToMain() && t.elapsed() < 2000)
++        qApp->processEvents(); // Ensure jump is executed before calling handler
+     handlers.at(selected).callback(pMedia);
+ }
+ 
+@@ -672,7 +678,9 @@ void MediaMonitor::mediaStatusChanged(MediaStatus oldStatus,
+     // This gets called from outside the main thread so we need
+     // to post an event back to the main thread.
+     // We now send events for all non-error statuses, so plugins get ejects
+-    if (m_SendEvent && stat != MEDIASTAT_ERROR && stat != MEDIASTAT_UNKNOWN)
++    if (m_SendEvent && stat != MEDIASTAT_ERROR && stat != MEDIASTAT_UNKNOWN &&
++        // Don't send an event for a new device that's not mounted
++        !(oldStatus == MEDIASTAT_UNPLUGGED && stat == MEDIASTAT_NOTMOUNTED))
+     {
+         // Should we ValidateAndLock() first?
+         QEvent *e = new MediaEvent(stat, pMedia);
+-- 
+1.7.9.5
+

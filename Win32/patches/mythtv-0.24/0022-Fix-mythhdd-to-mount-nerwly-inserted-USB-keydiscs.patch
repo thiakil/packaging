@@ -1,0 +1,70 @@
+From e3c45fbd7e45384c122dece7306c0b2dec770f11 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 15 Apr 2011 09:30:55 +0200
+Subject: [PATCH 022/285] Fix mythhdd to mount nerwly inserted ?USB keydiscs
+
+If mythhdd cannot find a mount for a drive then it attempts to open it to check
+that it hasn't been removed.  If it can't be opened then the drive is
+marked unplugged and no further action taken.
+
+On Linux this logic is flawed since hot plugged drives are owned by root and
+in the disk group and are not readable by normal processes.  Therefore the
+drive will never normally be mounted.
+
+This fix removes the open test and just proceeds to mount the drive.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/mythhdd.cpp |   16 ++++++----------
+ 1 file changed, 6 insertions(+), 10 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/mythhdd.cpp b/mythtv/libs/libmyth/mythhdd.cpp
+index 0265d57..01fa645 100644
+--- a/mythtv/libs/libmyth/mythhdd.cpp
++++ b/mythtv/libs/libmyth/mythhdd.cpp
+@@ -1,4 +1,5 @@
+ #include "mythhdd.h"
++#include "mythverbose.h"
+ 
+ /** \fn MythHDD::Get(QObject*, const char*, bool, bool)
+  *  \brief Helper function used to create a new instance
+@@ -22,6 +23,7 @@ MythHDD::MythHDD(QObject *par, const char *DevicePath,
+                  bool SuperMount, bool AllowEject)
+     : MythMediaDevice(par, DevicePath, SuperMount, AllowEject)
+ {
++    VERBOSE(VB_MEDIA, "MythHDD::MythHDD " + m_DevicePath);
+     m_Status = MEDIASTAT_UNPLUGGED;
+     m_MediaType = MEDIATYPE_DATA;       // default type is data
+ }
+@@ -38,24 +40,18 @@ MediaStatus MythHDD::checkMedia(void)
+         m_VolumeID = m_MountPath;
+ 
+         // device is mounted, trigger event
++        if (MEDIASTAT_MOUNTED != m_Status)
++            m_Status = MEDIASTAT_NOTMOUNTED;
+         return setStatus(MEDIASTAT_MOUNTED);
+     }
+ 
+-    // Has device been removed?
+-    if (!isDeviceOpen())
+-    {
+-        if (!openDevice())
+-            return setStatus(MEDIASTAT_UNPLUGGED);
+-        closeDevice();
+-    }
+-
+     // device is not mounted
+     switch (m_Status)
+     {
+     case MEDIASTAT_UNPLUGGED:
+         // a removable device was just plugged in try to mount it.
+-        mount();
+-        if (isMounted())
++        VERBOSE(VB_MEDIA, "MythHDD::checkMedia try mounting " + m_DevicePath);
++        if (mount())
+         {
+             m_Status = MEDIASTAT_NOTMOUNTED;
+             return setStatus(MEDIASTAT_MOUNTED);
+-- 
+1.7.9.5
+

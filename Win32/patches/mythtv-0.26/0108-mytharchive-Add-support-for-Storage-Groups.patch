@@ -1,0 +1,619 @@
+From 8c0b5a1cb54e5a41d02878f52b7f0b0da2e382b7 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 5 Apr 2012 21:45:12 +0200
+Subject: [PATCH 108/227] mytharchive: Add support for Storage Groups
+
+This patch adds basic support for videos and recordings stored on
+remote myth backends.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../mytharchive/remoteavformatcontext.h            |  118 +++++++++++++++++++
+ .../mytharchive/mytharchive/thumbfinder.cpp        |   20 ++--
+ mythplugins/mytharchive/mytharchive/thumbfinder.h  |    3 +-
+ .../mytharchive/mytharchive/videoselector.cpp      |   33 +++++-
+ mythplugins/mytharchive/mytharchivehelper/main.cpp |  124 ++++++++++++++------
+ .../mytharchive/mythburn/scripts/mythburn.py       |   31 +++--
+ 6 files changed, 260 insertions(+), 69 deletions(-)
+ create mode 100644 mythplugins/mytharchive/mytharchive/remoteavformatcontext.h
+
+diff --git a/mythplugins/mytharchive/mytharchive/remoteavformatcontext.h b/mythplugins/mytharchive/mytharchive/remoteavformatcontext.h
+new file mode 100644
+index 0000000..90e6d14
+--- /dev/null
++++ b/mythplugins/mytharchive/mytharchive/remoteavformatcontext.h
+@@ -0,0 +1,118 @@
++// Wrapper for AVFormatContext (av_open_input_file/stream)
++// supporting myth remote files
++#ifndef REMOTEAVFORMATCONTEXT_H
++#define REMOTEAVFORMATCONTEXT_H
++
++#include <QString>
++
++#include <remotefile.h>
++
++extern "C" {
++#include <avformat.h>
++#include <libavformat/avio.h>
++}
++
++class RemoteAVFormatContext
++{
++public:
++    RemoteAVFormatContext(const QString &filename = "") :
++        m_inputFC(NULL), m_inputIsRemote(false), m_buffer(NULL)
++    { if (!filename.isEmpty()) Open(filename); }
++
++    ~RemoteAVFormatContext()
++    {
++        Close();
++        if (m_buffer)
++            av_free(m_buffer);
++    }
++
++    bool Open(const QString &filename)
++    {
++        if (isOpen())
++            return false;
++
++        if (m_inputFC)
++            avformat_free_context(m_inputFC);
++        m_inputFC = avformat_alloc_context();
++
++        m_inputIsRemote = filename.startsWith("myth://");
++        if (m_inputIsRemote)
++        {
++            m_rf.SetURL(filename);
++            if (!m_rf.Open())
++                return false;
++
++            const int BUFFER_SIZE = 0x8000;
++            if (!m_buffer)
++            {
++                m_buffer = (unsigned char*)av_malloc(BUFFER_SIZE + FF_INPUT_BUFFER_PADDING_SIZE);
++                if (!m_buffer)
++                    return false;
++            }
++            m_byteIOContext = avio_alloc_context(m_buffer, BUFFER_SIZE, 0,
++                    &this->m_rf, &ReadFunc, &WriteFunc, &SeekFunc);
++
++            // probe the stream
++            AVProbeData probe_data;
++            probe_data.filename = "stream";
++            probe_data.buf_size = m_rf.Read(m_buffer, BUFFER_SIZE);
++            probe_data.buf = m_buffer;
++
++            AVInputFormat *fmt = av_probe_input_format(&probe_data, 1);
++            if (!fmt)
++                return false;
++
++            m_inputFC->pb = m_byteIOContext;
++            int ret = avformat_open_input(&m_inputFC, "decoder", fmt, NULL);
++            if (ret)
++                return false;
++        }
++        else
++        {
++            const char *type = NULL;
++            AVInputFormat *fmt = type ? av_find_input_format(type) : NULL;
++
++            int ret = avformat_open_input(&m_inputFC,  qPrintable(filename), fmt, NULL);
++            if (ret)
++                return false;
++        }
++
++        return true;
++    }
++
++    void Close()
++    {
++        if (m_inputFC)
++        {
++            avformat_close_input(&m_inputFC);
++            m_inputFC = NULL;
++        }
++    }
++
++    bool isOpen() const { return m_inputFC != NULL; }
++    operator AVFormatContext * () const { return m_inputFC; }
++    AVFormatContext * operator -> () const { return m_inputFC; }
++
++private:
++    static int ReadFunc(void *opaque, uint8_t *buf, int buf_size)
++    {
++        RemoteFile *rf = reinterpret_cast< RemoteFile* >(opaque);
++        return rf->Read(buf, buf_size);
++    }
++
++    static int WriteFunc(void *, uint8_t *, int) {  return -1; }
++
++    static int64_t SeekFunc(void *opaque, int64_t offset, int whence)
++    {
++        RemoteFile *rf = reinterpret_cast< RemoteFile* >(opaque);
++        return rf->Seek(offset, whence);
++    }
++
++private:
++    AVFormatContext *m_inputFC;
++    bool m_inputIsRemote;
++    RemoteFile m_rf;
++    AVIOContext *m_byteIOContext;
++    unsigned char *m_buffer;
++};
++#endif // REMOTEAVFORMATCONTEXT_H
+diff --git a/mythplugins/mytharchive/mytharchive/thumbfinder.cpp b/mythplugins/mytharchive/mytharchive/thumbfinder.cpp
+index 86b1a82..073b6c0 100644
+--- a/mythplugins/mytharchive/mytharchive/thumbfinder.cpp
++++ b/mythplugins/mytharchive/mytharchive/thumbfinder.cpp
+@@ -549,33 +549,26 @@ bool ThumbFinder::initAVCodec(const QString &inFile)
+ {
+     av_register_all();
+ 
+-    m_inputFC = NULL;
+-
+     // Open recording
+     LOG(VB_JOBQUEUE, LOG_INFO, QString("ThumbFinder: Opening '%1'")
+             .arg(inFile));
+ 
+-    QByteArray inFileBA = inFile.toLocal8Bit();
+-
+-    int ret = avformat_open_input(&m_inputFC, inFileBA.constData(), NULL, NULL);
+-
+-    if (ret)
++    if (!m_inputFC.Open(inFile))
+     {
+         LOG(VB_GENERAL, LOG_ERR, "ThumbFinder, Couldn't open input file" + ENO);
+         return false;
+     }
+ 
+     // Getting stream information
+-    if ((ret = avformat_find_stream_info(m_inputFC, NULL)) < 0)
++    int ret = avformat_find_stream_info(m_inputFC, NULL);
++    if (ret < 0)
+     {
+         LOG(VB_GENERAL, LOG_ERR,
+             QString("Couldn't get stream info, error #%1").arg(ret));
+-        avformat_close_input(&m_inputFC);
+-        m_inputFC = NULL;
+         return false;
+     }
+     av_estimate_timings(m_inputFC, 0);
+-    av_dump_format(m_inputFC, 0, inFileBA.constData(), 0);
++    av_dump_format(m_inputFC, 0, qPrintable(inFile), 0);
+ 
+     // find the first video stream
+     m_videostream = -1;
+@@ -906,10 +899,11 @@ void ThumbFinder::closeAVCodec()
+     av_free(m_frame);
+ 
+     // close the codec
+-    avcodec_close(m_codecCtx);
++    if (m_codecCtx)
++        avcodec_close(m_codecCtx);
+ 
+     // close the video file
+-    avformat_close_input(&m_inputFC);
++    m_inputFC.Close();
+ }
+ 
+ void ThumbFinder::showMenu()
+diff --git a/mythplugins/mytharchive/mytharchive/thumbfinder.h b/mythplugins/mytharchive/mytharchive/thumbfinder.h
+index 2431cf6..d60b7a7 100644
+--- a/mythplugins/mytharchive/mytharchive/thumbfinder.h
++++ b/mythplugins/mytharchive/mytharchive/thumbfinder.h
+@@ -15,6 +15,7 @@ extern "C" {
+ 
+ // mytharchive
+ #include "archiveutil.h"
++#include "remoteavformatcontext.h"
+ 
+ typedef struct SeekAmount
+ {
+@@ -75,7 +76,7 @@ class ThumbFinder : public MythScreenType
+     void updatePositionBar(int64_t frame);
+     int  calcFinalDuration(void);
+ 
+-    AVFormatContext *m_inputFC;
++    RemoteAVFormatContext m_inputFC;
+     AVCodecContext  *m_codecCtx;
+     AVCodec         *m_codec;
+     AVFrame         *m_frame;
+diff --git a/mythplugins/mytharchive/mytharchive/videoselector.cpp b/mythplugins/mytharchive/mytharchive/videoselector.cpp
+index 7779bbc..37eb2c1 100644
+--- a/mythplugins/mytharchive/mytharchive/videoselector.cpp
++++ b/mythplugins/mytharchive/mytharchive/videoselector.cpp
+@@ -17,6 +17,8 @@
+ #include <mythuibuttonlist.h>
+ #include <mythmainwindow.h>
+ #include <mythdialogbox.h>
++#include <metadata/videoutils.h>
++#include <remotefile.h>
+ 
+ // mytharchive
+ #include "videoselector.h"
+@@ -239,10 +241,24 @@ void VideoSelector::titleChanged(MythUIButtonListItem *item)
+     {
+         if (v->size == 0)
+         {
+-            QFile file(v->filename);
+-            if (file.exists())
+-                v->size = (uint64_t)file.size();
++            bool bExists;
++
++            if (v->filename.startsWith("myth://"))
++            {
++                struct stat fileinfo;
++                bExists = RemoteFile::Exists(v->filename, &fileinfo);
++                if (bExists)
++                    v->size = (uint64_t)fileinfo.st_size;
++            }
+             else
++            {
++                QFile file(v->filename);
++                bExists = file.exists();
++                if (bExists)
++                    v->size = (uint64_t)file.size();
++            }
++
++            if (!bExists)
+                 LOG(VB_GENERAL, LOG_ERR,
+                     QString("VideoSelector: Cannot find file: %1")
+                         .arg(v->filename));
+@@ -412,7 +428,7 @@ vector<VideoInfo *> *VideoSelector::getVideoListFromDB(void)
+     }
+ 
+     query.prepare("SELECT intid, title, plot, length, filename, coverfile, "
+-                  "category, showlevel, subtitle, season, episode "
++                  "category, showlevel, subtitle, season, episode, host "
+                   "FROM videometadata ORDER BY title,season,episode");
+ 
+     if (query.exec() && query.size())
+@@ -421,6 +437,11 @@ vector<VideoInfo *> *VideoSelector::getVideoListFromDB(void)
+         QString artist, genre, episode;
+         while (query.next())
+         {
++            // Exclude iso images as they aren't supported
++            QString filename = query.value(4).toString();
++            if (filename.endsWith(".iso"))
++                continue;
++
+             VideoInfo *info = new VideoInfo;
+ 
+             info->id = query.value(0).toInt();
+@@ -440,7 +461,9 @@ vector<VideoInfo *> *VideoSelector::getVideoListFromDB(void)
+ 
+             info->plot = query.value(2).toString();
+             info->size = 0; //query.value(3).toInt();
+-            info->filename = query.value(4).toString();
++            QString host = query.value(11).toString();
++            info->filename = host.isEmpty() ? filename
++                : generate_file_url("Videos", host, filename);
+             info->coverfile = query.value(5).toString();
+             info->category = categoryMap[query.value(6).toInt()];
+             info->parentalLevel = query.value(7).toInt();
+diff --git a/mythplugins/mytharchive/mytharchivehelper/main.cpp b/mythplugins/mytharchive/mytharchivehelper/main.cpp
+index b0810db..acae16d 100644
+--- a/mythplugins/mytharchive/mytharchivehelper/main.cpp
++++ b/mythplugins/mytharchive/mytharchivehelper/main.cpp
+@@ -68,6 +68,7 @@ using namespace std;
+ #include <mythsystem.h>
+ #include <mythdate.h>
+ #include <mythlogging.h>
++#include <remotefile.h>
+ 
+ extern "C" {
+ #include <avcodec.h>
+@@ -78,6 +79,7 @@ extern "C" {
+ 
+ // mytharchive headers
+ #include "../mytharchive/archiveutil.h"
++#include "../mytharchive/remoteavformatcontext.h"
+ 
+ namespace
+ {
+@@ -1660,16 +1662,12 @@ static int grabThumbnail(QString inFile, QString thumbList, QString outFile, int
+ {
+     av_register_all();
+ 
+-    AVFormatContext *inputFC = NULL;
+-
+     // Open recording
+     LOG(VB_JOBQUEUE, LOG_INFO, QString("grabThumbnail(): Opening '%1'")
+             .arg(inFile));
+ 
+-    QByteArray inFileBA = inFile.toLocal8Bit();
+-
+-    int ret = avformat_open_input(&inputFC, inFileBA.constData(), NULL, NULL);
+-    if (ret)
++    RemoteAVFormatContext inputFC(inFile);
++    if (!inputFC.isOpen())
+     {
+         LOG(VB_JOBQUEUE, LOG_ERR, "grabThumbnail(): Couldn't open input file" +
+                                   ENO);
+@@ -1677,12 +1675,11 @@ static int grabThumbnail(QString inFile, QString thumbList, QString outFile, int
+     }
+ 
+     // Getting stream information
+-    if ((ret = avformat_find_stream_info(inputFC, NULL)) < 0)
++    int ret = avformat_find_stream_info(inputFC, NULL);
++    if (ret < 0)
+     {
+         LOG(VB_JOBQUEUE, LOG_ERR,
+             QString("Couldn't get stream info, error #%1").arg(ret));
+-        avformat_close_input(&inputFC);
+-        inputFC = NULL;
+         return 1;
+     }
+ 
+@@ -1854,9 +1851,6 @@ static int grabThumbnail(QString inFile, QString thumbList, QString outFile, int
+     // close the codec
+     avcodec_close(codecCtx);
+ 
+-    // close the video file
+-    avformat_close_input(&inputFC);
+-
+     return 0;
+ }
+ 
+@@ -1998,25 +1992,14 @@ static int64_t getFrameCount(const QString &filename, float fps)
+ 
+ static int getFileInfo(QString inFile, QString outFile, int lenMethod)
+ {
+-    const char *type = NULL;
+-
+     av_register_all();
+ 
+-    AVFormatContext *inputFC = NULL;
+-    AVInputFormat *fmt = NULL;
+-
+-    if (type)
+-        fmt = av_find_input_format(type);
+-
+     // Open recording
+     LOG(VB_JOBQUEUE, LOG_INFO, QString("getFileInfo(): Opening '%1'")
+             .arg(inFile));
+ 
+-    QByteArray inFileBA = inFile.toLocal8Bit();
+-
+-    int ret = avformat_open_input(&inputFC, inFileBA.constData(), fmt, NULL);
+-
+-    if (ret)
++    RemoteAVFormatContext inputFC(inFile);
++    if (!inputFC.isOpen())
+     {
+         LOG(VB_JOBQUEUE, LOG_ERR, "getFileInfo(): Couldn't open input file" +
+                                   ENO);
+@@ -2024,21 +2007,19 @@ static int getFileInfo(QString inFile, QString outFile, int lenMethod)
+     }
+ 
+     // Getting stream information
+-    ret = avformat_find_stream_info(inputFC, NULL);
++    int ret = avformat_find_stream_info(inputFC, NULL);
+ 
+     if (ret < 0)
+     {
+         LOG(VB_JOBQUEUE, LOG_ERR,
+             QString("Couldn't get stream info, error #%1").arg(ret));
+-        avformat_close_input(&inputFC);
+-        inputFC = NULL;
+         return 1;
+     }
+ 
+     av_estimate_timings(inputFC, 0);
+ 
+     // Dump stream information
+-    av_dump_format(inputFC, 0, inFileBA.constData(), 0);
++    av_dump_format(inputFC, 0, qPrintable(inFile), 0);
+ 
+     QDomDocument doc("FILEINFO");
+ 
+@@ -2149,12 +2130,25 @@ static int getFileInfo(QString inFile, QString outFile, int lenMethod)
+                             // use info from pos map in db
+                             // (only useful if the file is a myth recording)
+                             frameCount = getFrameCount(inFile, fps);
+-                            LOG(VB_JOBQUEUE, LOG_INFO,
+-                                QString("frames = %1").arg(frameCount));
+-                            duration = (uint)(frameCount / fps);
+-                            LOG(VB_JOBQUEUE, LOG_INFO,
+-                                QString("duration = %1").arg(duration));
+-                            root.setAttribute("duration", duration);
++                            if (frameCount)
++                            {
++                                LOG(VB_JOBQUEUE, LOG_INFO,
++                                    QString("frames = %1").arg(frameCount));
++                                duration = (uint)(frameCount / fps);
++                                LOG(VB_JOBQUEUE, LOG_INFO,
++                                    QString("duration = %1").arg(duration));
++                                root.setAttribute("duration", duration);
++                            }
++                            else if (inputFC->duration != (uint) AV_NOPTS_VALUE)
++                            {
++                                duration = (uint) (inputFC->duration / AV_TIME_BASE);
++                                root.setAttribute("duration", duration);
++                                LOG(VB_JOBQUEUE, LOG_INFO,
++                                    QString("duration = %1").arg(duration));
++                                frameCount = (int64_t)(duration * fps);
++                            }
++                            else
++                                root.setAttribute("duration", "N/A");
+                             break;
+                         }
+                         default:
+@@ -2278,10 +2272,6 @@ static int getFileInfo(QString inFile, QString outFile, int lenMethod)
+     t << doc.toString(4);
+     f.close();
+ 
+-    // Close input file
+-    avformat_close_input(&inputFC);
+-    inputFC = NULL;
+-
+     return 0;
+ }
+ 
+@@ -2313,6 +2303,9 @@ static int getDBParamters(QString outFile)
+ 
+ static int isRemote(QString filename)
+ {
++    if (filename.startsWith("myth://"))
++        return 3;
++
+     // check if the file exists
+     if (!QFile::exists(filename))
+         return 0;
+@@ -2336,6 +2329,37 @@ static int isRemote(QString filename)
+     return 1;
+ }
+ 
++static int doRemoteCopy(QString inFile, QString outFile)
++{
++    if (!inFile.startsWith("myth://"))
++    {
++        LOG(VB_JOBQUEUE, LOG_INFO, "doRemoteCopy: Unsupported src file - " + inFile);
++        return 1;
++    }
++
++    RemoteFile src(inFile, false);
++    if (!src.isOpen())
++    {
++        LOG(VB_JOBQUEUE, LOG_INFO, "doRemoteCopy: Failed to open src file - " + inFile);
++        return 1;
++    }
++
++    QFile dst(outFile);
++    if (!dst.open(QIODevice::WriteOnly))
++    {
++        LOG(VB_JOBQUEUE, LOG_INFO, "doRemoteCopy: Failed to open dst file - " + outFile);
++        return 1;
++    }
++
++    QByteArray buf;
++    buf.resize(0x40000);
++    int rc;
++    while ((rc = src.Read(buf.data(), buf.size())) > 0)
++        dst.write(buf.data(), rc);
++
++    return 0;
++}
++
+ class MythArchiveHelperCommandLineParser : public MythCommandLineParser
+ {
+   public:
+@@ -2415,6 +2439,10 @@ void MythArchiveHelperCommandLineParser::LoadArguments(void)
+             "         - 1 file is on a local filesystem\n"
+             "         - 2 file is on a remote filesystem", "");
+ 
++    add("--remotecopy", "remotecopy", false,
++            "Copy file from a remote myth backend\n"
++            "Requires: --infile, --outfile", "");
++
+     add(QStringList( QStringList() << "-b" << "--burndvd" ),
+             "burndvd", false,
+             "Burn a created DVD to a blank disc\n"
+@@ -2501,6 +2529,7 @@ int main(int argc, char **argv)
+     bool bImportArchive   = cmdline.toBool("importarchive");
+     bool bGetFileInfo     = cmdline.toBool("getfileinfo");
+     bool bIsRemote        = cmdline.toBool("isremote");
++    bool bRemoteCopy      = cmdline.toBool("remotecopy");
+     bool bDoBurn          = cmdline.toBool("burndvd");
+     bool bDoBurnIso       = cmdline.toBool("burniso");
+     bool bEraseDVDRW      = cmdline.toBool("erasedvdrw");
+@@ -2563,6 +2592,21 @@ int main(int argc, char **argv)
+         }
+     }
+ 
++    if (bRemoteCopy)
++    {
++        if (inFile.isEmpty())
++        {
++            LOG(VB_GENERAL, LOG_ERR, "Missing --infile in --remotecopy option");
++            return GENERIC_EXIT_INVALID_CMDLINE;
++        }
++
++        if (outFile.isEmpty())
++        {
++            LOG(VB_GENERAL, LOG_ERR, "Missing --outfile in --remotecopy option");
++            return GENERIC_EXIT_INVALID_CMDLINE;
++        }
++    }
++
+     if (bDoBurn || bDoBurnIso)
+     {
+         if (mediaType < 0 || mediaType > 2)
+@@ -2639,6 +2683,8 @@ int main(int argc, char **argv)
+         res = getFileInfo(inFile, outFile, lenMethod);
+     else if (bIsRemote)
+         res = isRemote(inFile);
++    else if (bRemoteCopy)
++        res = doRemoteCopy(inFile, outFile);
+     else if (bDoBurn)
+         res = doBurnDVD(mediaType, bEraseDVDRW, bNativeFormat);
+     else if (bDoBurnIso)
+diff --git a/mythplugins/mytharchive/mythburn/scripts/mythburn.py b/mythplugins/mytharchive/mythburn/scripts/mythburn.py
+index f0c96ea..e7521d9 100755
+--- a/mythplugins/mytharchive/mythburn/scripts/mythburn.py
++++ b/mythplugins/mytharchive/mythburn/scripts/mythburn.py
+@@ -1507,12 +1507,12 @@ def preProcessFile(file, folder, count):
+     else:
+         fatalError("Unknown type of video file it must be 'recording', 'video' or 'file'.")
+ 
+-    if doesFileExist(mediafile) == False:
+-        fatalError("Source file does not exist: " + mediafile)
+-
+     if file.hasAttribute("localfilename"):
+         mediafile = file.attributes["localfilename"].value
+ 
++    if doesFileExist(mediafile) == False:
++        fatalError("Source file does not exist: " + mediafile)
++
+     getStreamInformation(mediafile, os.path.join(folder, "streaminfo.xml"), 0)
+     copy(os.path.join(folder, "streaminfo.xml"), os.path.join(folder, "streaminfo_orig.xml"))
+ 
+@@ -4774,7 +4774,8 @@ def copyRemote(files, tmpPath):
+         filename = os.path.basename(tmpfile)
+ 
+         res = runCommand("mytharchivehelper -q -q --isremote --infile " + quoteCmdArg(tmpfile))
+-        if res == 2:
++        #If User wants to, copy remote files to a tmp dir
++        if res == 2 and copyremoteFiles==True:
+             # file is on a remote filesystem so copy it to a local file
+             write("Copying file from " + tmpfile)
+             write("to " + os.path.join(localTmpPath, filename))
+@@ -4785,6 +4786,18 @@ def copyRemote(files, tmpPath):
+ 
+             # update node
+             node.setAttribute("localfilename", os.path.join(localTmpPath, filename))
++        elif res == 3:
++            # file is on a remote myth backend so copy it to a local file
++            write("Copying file from " + tmpfile)
++            localfile = os.path.join(localTmpPath, filename)
++            write("to " + localfile)
++
++            # Copy file
++            if not doesFileExist(localfile):
++                runCommand("mytharchivehelper -q -q --remotecopy --infile " + quoteCmdArg(tmpfile) + " --outfile " + quoteCmdArg(localfile))
++
++            # update node
++            node.setAttribute("localfilename", localfile)
+     return files
+ 
+ #############################################################
+@@ -4848,13 +4861,9 @@ def processJob(job):
+             if debug_secondrunthrough==False:
+                 #Delete all the temporary files that currently exist
+                 deleteEverythingInFolder(getTempPath())
+-
+-            #If User wants to, copy remote files to a tmp dir
+-            if copyremoteFiles==True:
+-                if debug_secondrunthrough==False:
+-                    localCopyFolder=os.path.join(getTempPath(),"localcopy")
+-                    os.makedirs(localCopyFolder)
+-                files=copyRemote(files,getTempPath())
++                localCopyFolder=os.path.join(getTempPath(),"localcopy")
++                os.makedirs(localCopyFolder)
++            files=copyRemote(files,getTempPath())
+ 
+             #First pass through the files to be recorded - sense check
+             #we dont want to find half way through this long process that
+-- 
+1.7.9.5
+

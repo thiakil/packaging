@@ -1,0 +1,30 @@
+From d95c93f7f23e41c1c242a6d9eca7535f2a3a64ab Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 3 Feb 2012 15:10:18 +0100
+Subject: [PATCH 091/285] mythpreviewgen: Can't create local preview image of
+ a remote recording
+
+This fix allows mythpreviewgen to create a local image from a
+remote recording.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/previewgenerator.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/previewgenerator.cpp b/mythtv/libs/libmythtv/previewgenerator.cpp
+index 62f870e..8227935 100644
+--- a/mythtv/libs/libmythtv/previewgenerator.cpp
++++ b/mythtv/libs/libmythtv/previewgenerator.cpp
+@@ -132,7 +132,7 @@ bool PreviewGenerator::RunReal(void)
+                         "because mode was invalid 0x%2")
+                 .arg(pathname).arg((int)mode,0,16));
+     }
+-    else if (is_local && !!(mode & kLocal) && LocalPreviewRun())
++    else if (!!(mode & kLocal) && LocalPreviewRun())
+     {
+         ok = true;
+         msg = QString("Generated on %1 in %2 seconds, starting at %3")
+-- 
+1.7.9.5
+

@@ -1,0 +1,33 @@
+From f719f8339e6fe6318b69e80bdafd784c0f6fad8d Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 25 Jul 2012 14:34:27 +0200
+Subject: [PATCH 048/227] Subtitles: Avoid changing subtitle state in the
+ decoder thread.
+
+Use the proper API to defer subtitle changes to the UI event loop, to
+avoid creating or deleting MythUI objects in a non-UI thread.
+
+This is in addition to commit b695979 which fixed a similar problem
+in MythPlayer::ReinitVideo
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 0e07826..c94b629 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -3804,7 +3804,7 @@ void MythPlayer::ClearAfterSeek(bool clearvideobuffers)
+     tc_wrap[TC_AUDIO] = savedAudioTimecodeOffset;
+ 
+     audio.Reset();
+-    ResetCaptions();
++    EnableSubtitles(false);
+     deleteMap.TrackerReset(framesPlayed, totalFrames);
+     commBreakMap.SetTracker(framesPlayed);
+     commBreakMap.ResetLastSkip();
+-- 
+1.7.9.5
+

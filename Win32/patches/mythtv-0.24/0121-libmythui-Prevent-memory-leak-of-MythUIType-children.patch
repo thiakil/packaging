@@ -1,0 +1,84 @@
+From 2243409a3f27a84b091ad2e17b05fffebd83861d Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 5 Jun 2012 20:01:01 +0200
+Subject: [PATCH 121/285] libmythui: Prevent memory leak of MythUIType
+ children
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythui/mythuibuttonlist.cpp |    4 +---
+ mythtv/libs/libmythui/mythuitype.cpp       |   12 +++++-------
+ mythtv/libs/libmythui/mythuitype.h         |    4 +++-
+ 3 files changed, 9 insertions(+), 11 deletions(-)
+
+diff --git a/mythtv/libs/libmythui/mythuibuttonlist.cpp b/mythtv/libs/libmythui/mythuibuttonlist.cpp
+index a5d7fd4..f07b790 100644
+--- a/mythtv/libs/libmythui/mythuibuttonlist.cpp
++++ b/mythtv/libs/libmythui/mythuibuttonlist.cpp
+@@ -2435,10 +2435,8 @@ void MythUIButtonList::CopyFrom(MythUIType *base)
+ 
+     for (int i = 0; i < (int)m_itemsVisible; i++)
+     {
+-        MythUIType *deltype;
+         QString name = QString("buttonlist button %1").arg(i);
+-        deltype = GetChild(name);
+-        delete deltype;
++        DeleteChild(name);
+     }
+ 
+     m_ButtonList.clear();
+diff --git a/mythtv/libs/libmythui/mythuitype.cpp b/mythtv/libs/libmythui/mythuitype.cpp
+index 7526a30..8c504f6 100644
+--- a/mythtv/libs/libmythui/mythuitype.cpp
++++ b/mythtv/libs/libmythui/mythuitype.cpp
+@@ -45,13 +45,10 @@ MythUIType::MythUIType(QObject *parent, const QString &name)
+     m_XYSpeed = QPoint(0, 0);
+     m_deferload = false;
+ 
+-    m_Parent = NULL;
+-    if (parent)
+-    {
+-        m_Parent = dynamic_cast<MythUIType *>(parent);
+-        if (m_Parent)
+-            m_Parent->AddChild(this);
+-    }
++    // NB C++ 0X 5.2.7.4: cast of null = null
++    m_Parent = dynamic_cast<MythUIType * >(parent);
++    if (m_Parent)
++        m_Parent->AddChild(this);
+ 
+     m_DirtyRegion = QRegion(QRect(0, 0, 0, 0));
+ 
+@@ -62,6 +59,7 @@ MythUIType::MythUIType(QObject *parent, const QString &name)
+ 
+ MythUIType::~MythUIType()
+ {
++    DeleteAllChildren();
+     delete m_Fonts;
+ }
+ 
+diff --git a/mythtv/libs/libmythui/mythuitype.h b/mythtv/libs/libmythui/mythuitype.h
+index cfc3ac6..b8d65ea9 100644
+--- a/mythtv/libs/libmythui/mythuitype.h
++++ b/mythtv/libs/libmythui/mythuitype.h
+@@ -56,14 +56,16 @@ class MythUIWebBrowser;
+  *
+  * \ingroup MythUI_Widgets
+  */
+-class MPUBLIC MythUIType : public QObject, public XMLParseBase
++class MPUBLIC MythUIType : public QObject, protected XMLParseBase
+ {
+     Q_OBJECT
+ 
+   public:
+     MythUIType(QObject *parent, const QString &name);
++  protected:
+     virtual ~MythUIType();
+ 
++  public:
+     virtual void Reset(void);
+ 
+     void AddChild(MythUIType *child);
+-- 
+1.7.9.5
+

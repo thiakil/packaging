@@ -1,0 +1,38 @@
+From fcd56dee993cca183755db3526dbaa02b2c11d92 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 18 Apr 2011 18:15:13 +0200
+Subject: [PATCH 030/285] Wait in MediaMonitorUnix until UDisks service is
+ available
+
+When booting up, MythTV can start in parallel with DBus.  However, the UDisks
+service is started asynchroously by DBus and isn't available immediately.
+This change makes CheckMountable poll for the UDisks service, which is needed
+to enumerate CD/DVD drives and other hot plug drives.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmyth/mediamonitor-unix.cpp |    5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmyth/mediamonitor-unix.cpp b/mythtv/libs/libmyth/mediamonitor-unix.cpp
+index 82a88cc..6191862 100644
+--- a/mythtv/libs/libmyth/mediamonitor-unix.cpp
++++ b/mythtv/libs/libmyth/mediamonitor-unix.cpp
+@@ -193,11 +193,12 @@ bool MediaMonitorUnix::CheckMountable(void)
+     // Connect to UDisks
+     QDBusInterface iface(UDISKS_SVC, UDISKS_PATH, UDISKS_IFACE,
+         QDBusConnection::systemBus() );
+-    if (!iface.isValid())
++    for (int i = 0; !iface.isValid(); ++i, usleep(500000))
+     {
+         VERBOSE(VB_IMPORTANT, LOC + ":CheckMountable: DBus interface error: " +
+             iface.lastError().message() );
+-        return false;
++        if (i >= 10)
++            return false;
+     }
+ 
+     // Enumerate devices
+-- 
+1.7.9.5
+

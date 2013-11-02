@@ -1,0 +1,3800 @@
+From 0826ad44715f8979f1def46f3872034e262c1238 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 19 Jul 2011 14:49:12 +0200
+Subject: [PATCH 023/227] MHEG: Add InteractionChannel streaming from network
+ URI's
+
+This patch adds MHEG interactive TV content streaming from the internet.
+It adds BBC iPlayer functionality to the MHEG library.
+
+This patch includes fixes for:
+- Prevent memory leak on stream close
+- Improve logging of streams with no content length header
+- Add a mutex to prevent concurrent access to QNetworkAccessManager
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythfreemheg/Actions.cpp     |   18 +-
+ mythtv/libs/libmythfreemheg/BaseClasses.cpp |    2 +
+ mythtv/libs/libmythfreemheg/BaseClasses.h   |    2 +-
+ mythtv/libs/libmythfreemheg/Engine.cpp      |  231 ++++---
+ mythtv/libs/libmythfreemheg/Engine.h        |    1 +
+ mythtv/libs/libmythfreemheg/Presentable.h   |    1 -
+ mythtv/libs/libmythfreemheg/Programs.cpp    |  116 +++-
+ mythtv/libs/libmythfreemheg/Root.cpp        |    2 +-
+ mythtv/libs/libmythfreemheg/Root.h          |    4 +
+ mythtv/libs/libmythfreemheg/Stream.cpp      |  169 +++--
+ mythtv/libs/libmythfreemheg/Stream.h        |   66 +-
+ mythtv/libs/libmythfreemheg/freemheg.h      |   34 +-
+ mythtv/libs/libmythtv/icringbuffer.cpp      |  172 +++++
+ mythtv/libs/libmythtv/icringbuffer.h        |   40 ++
+ mythtv/libs/libmythtv/interactivetv.cpp     |   18 +-
+ mythtv/libs/libmythtv/interactivetv.h       |    2 +
+ mythtv/libs/libmythtv/libmythtv.pro         |    6 +
+ mythtv/libs/libmythtv/mhegic.cpp            |  183 ++++++
+ mythtv/libs/libmythtv/mhegic.h              |   50 ++
+ mythtv/libs/libmythtv/mhi.cpp               |  397 ++++++++----
+ mythtv/libs/libmythtv/mhi.h                 |   34 +-
+ mythtv/libs/libmythtv/mythplayer.cpp        |  186 +++++-
+ mythtv/libs/libmythtv/mythplayer.h          |    7 +
+ mythtv/libs/libmythtv/netstream.cpp         |  924 +++++++++++++++++++++++++++
+ mythtv/libs/libmythtv/netstream.h           |  152 +++++
+ mythtv/libs/libmythtv/ringbuffer.h          |    4 +
+ 26 files changed, 2469 insertions(+), 352 deletions(-)
+ create mode 100644 mythtv/libs/libmythtv/icringbuffer.cpp
+ create mode 100644 mythtv/libs/libmythtv/icringbuffer.h
+ create mode 100644 mythtv/libs/libmythtv/mhegic.cpp
+ create mode 100644 mythtv/libs/libmythtv/mhegic.h
+ create mode 100644 mythtv/libs/libmythtv/netstream.cpp
+ create mode 100644 mythtv/libs/libmythtv/netstream.h
+
+diff --git a/mythtv/libs/libmythfreemheg/Actions.cpp b/mythtv/libs/libmythfreemheg/Actions.cpp
+index 75ede6a..041f6d2 100644
+--- a/mythtv/libs/libmythfreemheg/Actions.cpp
++++ b/mythtv/libs/libmythfreemheg/Actions.cpp
+@@ -44,9 +44,9 @@
+ class MHUnimplementedAction: public MHElemAction
+ {
+   public:
+-    MHUnimplementedAction(int nTag): MHElemAction("")
++    MHUnimplementedAction(int nTag): MHElemAction(""), m_nTag(nTag)
+     {
+-        m_nTag = nTag;
++        MHLOG(MHLogWarning, QString("WARN Unimplemented action %1").arg(m_nTag) );
+     }
+     virtual void Initialise(MHParseNode *, MHEngine *) {}
+     virtual void PrintMe(FILE *fd, int /*nTabs*/) const
+@@ -297,7 +297,7 @@ void MHActionSequence::Initialise(MHParseNode *p, MHEngine *engine)
+                 pAction = new MHUnimplementedAction(pElemAction->GetTagNo());
+                 break; // Stream
+             case C_SET_COUNTER_POSITION:
+-                pAction = new MHUnimplementedAction(pElemAction->GetTagNo());
++                pAction = new MHSetCounterPosition;
+                 break; // Stream
+             case C_SET_COUNTER_TRIGGER:
+                 pAction = new MHUnimplementedAction(pElemAction->GetTagNo());
+@@ -357,7 +357,7 @@ void MHActionSequence::Initialise(MHParseNode *p, MHEngine *engine)
+                 pAction = new MHSetSliderValue;
+                 break;
+             case C_SET_SPEED:
+-                pAction = new MHUnimplementedAction(pElemAction->GetTagNo());
++                pAction = new MHSetSpeed;
+                 break; // ?
+             case C_SET_TIMER:
+                 pAction = new MHSetTimer;
+@@ -442,8 +442,16 @@ void MHActionSequence::Initialise(MHParseNode *p, MHEngine *engine)
+                 pAction = new MHSetSliderParameters;
+                 break;
+ 
++            // Added in ETSI ES 202 184 V2.1.1 (2010-01)
++            case C_GET_COUNTER_POSITION: // Stream position
++                pAction = new MHGetCounterPosition;
++                break;
++            case C_GET_COUNTER_MAX_POSITION: // Stream total size
++                pAction = new MHGetCounterMaxPosition;
++                break;
++
+             default:
+-                MHLOG(MHLogWarning, QString("Unknown action %1").arg(pElemAction->GetTagNo()));
++                MHLOG(MHLogWarning, QString("WARN Unknown action %1").arg(pElemAction->GetTagNo()));
+                 // Future proofing: ignore any actions that we don't know about.
+                 // Obviously these can only arise in the binary coding.
+                 pAction = NULL;
+diff --git a/mythtv/libs/libmythfreemheg/BaseClasses.cpp b/mythtv/libs/libmythfreemheg/BaseClasses.cpp
+index 8bd8ff8..af7245b 100644
+--- a/mythtv/libs/libmythfreemheg/BaseClasses.cpp
++++ b/mythtv/libs/libmythfreemheg/BaseClasses.cpp
+@@ -588,6 +588,8 @@ void MHGenericObjectRef::GetValue(MHObjectRef &ref, MHEngine *engine) const
+     }
+     else
+     {
++        // LVR - Hmm I don't think this is right. Should be: ref.Copy(m_Indirect);
++        // But it's used in several places so workaround in Stream::MHActionGenericObjectRefFix
+         MHUnion result;
+         MHRoot *pBase = engine->FindObject(m_Indirect);
+         pBase->GetVariableValue(result, engine);
+diff --git a/mythtv/libs/libmythfreemheg/BaseClasses.h b/mythtv/libs/libmythfreemheg/BaseClasses.h
+index 587577f..7f7670f 100644
+--- a/mythtv/libs/libmythfreemheg/BaseClasses.h
++++ b/mythtv/libs/libmythfreemheg/BaseClasses.h
+@@ -184,8 +184,8 @@ class MHGenericBase
+ {
+   public:
+     MHObjectRef *GetReference(); // Return the indirect reference or fail if it's direct
+-protected:
+     bool    m_fIsDirect;
++protected:
+     MHObjectRef m_Indirect;
+ };
+ 
+diff --git a/mythtv/libs/libmythfreemheg/Engine.cpp b/mythtv/libs/libmythfreemheg/Engine.cpp
+index 3ef0825..175c7c0 100644
+--- a/mythtv/libs/libmythfreemheg/Engine.cpp
++++ b/mythtv/libs/libmythfreemheg/Engine.cpp
+@@ -32,6 +32,7 @@
+ #include "Logging.h"
+ #include "freemheg.h"
+ #include "Visible.h"  // For MHInteractible
++#include "Stream.h"
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -111,7 +112,7 @@ int MHEngine::RunAll()
+ 
+             if (! Launch(startObj))
+             {
+-                MHLOG(MHLogWarning, "MHEG engine auto-boot failed");
++                MHLOG(MHLogNotifications, "NOTE Engine auto-boot failed");
+                 return -1;
+             }
+         }
+@@ -242,33 +243,45 @@ MHGroup *MHEngine::ParseProgram(QByteArray &text)
+     return pRes;
+ }
+ 
+-// Launch and Spawn
+-bool MHEngine::Launch(const MHObjectRef &target, bool fIsSpawn)
++// Determine protocol for a file
++enum EProtocol { kProtoUnknown, kProtoDSM, kProtoCI, kProtoHTTP, kProtoHybrid };
++static EProtocol PathProtocol(const QString& csPath)
+ {
+-    QString csPath = GetPathName(target.m_GroupId); // Get path relative to root.
++    if (csPath.isEmpty() || csPath.startsWith("DSM:") || csPath.startsWith("~"))
++        return kProtoDSM;
++    if (csPath.startsWith("hybrid:"))
++        return kProtoHybrid;
++    if (csPath.startsWith("http:") || csPath.startsWith("https:"))
++        return kProtoHTTP;
++    if (csPath.startsWith("CI:"))
++        return kProtoCI;
+ 
+-    if (csPath.length() == 0)
+-    {
+-        return false;    // No file name.
+-    }
++    int firstColon = csPath.indexOf(':'), firstSlash = csPath.indexOf('/');
++    if (firstColon > 0 && firstSlash > 0 && firstColon < firstSlash)
++        return kProtoUnknown;
++
++    return kProtoDSM;
++}
+ 
++// Launch and Spawn
++bool MHEngine::Launch(const MHObjectRef &target, bool fIsSpawn)
++{
+     if (m_fInTransition)
+     {
+-        MHLOG(MHLogWarning, "Launch during transition - ignoring");
++        MHLOG(MHLogWarning, "WARN Launch during transition - ignoring");
+         return false;
+     }
+ 
+-    QByteArray text;
++    if (target.m_GroupId.Size() == 0) return false; // No file name.
++    QString csPath = GetPathName(target.m_GroupId); // Get path relative to root.
+ 
+     // Check that the file exists before we commit to the transition.
+     // This may block if we cannot be sure whether the object is present.
++    QByteArray text;
+     if (! m_Context->GetCarouselData(csPath, text))
+     {
+-        if (CurrentApp())
+-        {
+-            EventTriggered(CurrentApp(), EventEngineEvent, 2);    // GroupIDRefError
+-        }
+-
++        if (!m_fBooting)
++            EngineEvent(2); // GroupIDRefError
+         return false;
+     }
+ 
+@@ -351,7 +364,7 @@ void MHEngine::Quit()
+ {
+     if (m_fInTransition)
+     {
+-        MHLOG(MHLogWarning, "Quit during transition - ignoring");
++        MHLOG(MHLogWarning, "WARN Quit during transition - ignoring");
+         return;
+     }
+ 
+@@ -395,7 +408,7 @@ void MHEngine::TransitionToScene(const MHObjectRef &target)
+     if (m_fInTransition)
+     {
+         // TransitionTo is not allowed in OnStartUp or OnCloseDown actions.
+-        MHLOG(MHLogWarning, "TransitionTo during transition - ignoring");
++        MHLOG(MHLogWarning, "WARN TransitionTo during transition - ignoring");
+         return;
+     }
+ 
+@@ -405,12 +418,12 @@ void MHEngine::TransitionToScene(const MHObjectRef &target)
+     }
+ 
+     QString csPath = GetPathName(target.m_GroupId);
+-    QByteArray text;
+ 
+     // Check that the file exists before we commit to the transition.
+-    if (! m_Context->GetCarouselData(csPath, text))
+-    {
+-        EventTriggered(CurrentApp(), EventEngineEvent, 2); // GroupIDRefError
++    // This may block if we cannot be sure whether the object is present.
++    QByteArray text;
++    if (! m_Context->GetCarouselData(csPath, text)) {
++        EngineEvent(2); // GroupIDRefError
+         return;
+     }
+ 
+@@ -482,7 +495,7 @@ void MHEngine::TransitionToScene(const MHObjectRef &target)
+     m_Interacting = 0;
+ 
+     // Switch to the new scene.
+-    CurrentApp()->m_pCurrentScene = (MHScene *) pProgram;
++    CurrentApp()->m_pCurrentScene = static_cast< MHScene* >(pProgram);
+     SetInputRegister(CurrentScene()->m_nEventReg);
+     m_redrawRegion = QRegion(0, 0, CurrentScene()->m_nSceneCoordX, CurrentScene()->m_nSceneCoordY); // Redraw the whole screen
+ 
+@@ -504,33 +517,27 @@ void MHEngine::SetInputRegister(int nReg)
+ // Create a canonical path name.  The rules are given in the UK MHEG document.
+ QString MHEngine::GetPathName(const MHOctetString &str)
+ {
+-    QString csPath;
+-
+-    if (str.Size() != 0)
+-    {
+-        csPath = QString::fromUtf8((const char *)str.Bytes(), str.Size());
+-    }
+-
+-    if (csPath.left(4) == "DSM:")
+-    {
+-        csPath = csPath.mid(4);    // Remove DSM:
+-    }
+-
+-    // If it has any other prefix this isn't a request for a carousel object.
+-    int firstColon = csPath.indexOf(':'), firstSlash = csPath.indexOf('/');
+-
+-    if (firstColon > 0 && firstSlash > 0 && firstColon < firstSlash)
+-    {
++    if (str.Size() == 0)
+         return QString();
+-    }
+ 
+-    if (csPath.left(1) == "~")
++    QString csPath = QString::fromUtf8((const char *)str.Bytes(), str.Size());
++    switch (PathProtocol(csPath))
+     {
+-        csPath = csPath.mid(1);    // Remove ~
++    default:
++    case kProtoUnknown:
++    case kProtoHybrid:
++    case kProtoHTTP:
++    case kProtoCI:
++        return csPath;
++    case kProtoDSM:
++        break;
+     }
+ 
+-    // Ignore "CI://"
+-    if (csPath.left(2) != "//")   //
++    if (csPath.startsWith("DSM:"))
++        csPath = csPath.mid(4); // Remove DSM:
++    else if (csPath.startsWith("~"))
++        csPath = csPath.mid(1); // Remove ~
++    if (!csPath.startsWith("//"))
+     {
+         // Add the current application's path name
+         if (CurrentApp())
+@@ -589,7 +596,7 @@ MHRoot *MHEngine::FindObject(const MHObjectRef &oRef, bool failOnNotFound)
+         // an object that may or may not exist at a particular time.
+         // Another case was a call to CallActionSlot with an object reference variable
+         // that had been initialised to zero.
+-        MHLOG(MHLogWarning, QString("Reference %1 not found").arg(oRef.m_nObjectNo));
++        MHLOG(MHLogWarning, QString("WARN Reference %1 not found").arg(oRef.m_nObjectNo));
+         throw "FindObject failed";
+     }
+ 
+@@ -609,7 +616,7 @@ void MHEngine::RunActions()
+         {
+             if ((__mhlogoptions & MHLogActions) && __mhlogStream != 0)   // Debugging
+             {
+-                fprintf(__mhlogStream, "Action - ");
++                fprintf(__mhlogStream, "[freemheg] Action - ");
+                 pAction->PrintMe(__mhlogStream, 0);
+                 fflush(__mhlogStream);
+             }
+@@ -670,6 +677,7 @@ void MHEngine::EventTriggered(MHRoot *pSource, enum EventType ev, const MHUnion
+         case EventUserInput:
+         case EventFocusMoved: // UK MHEG.  Generated by HyperText class
+         case EventSliderValueChanged: // UK MHEG.  Generated by Slider class
++        default:
+         {
+             // Asynchronous events.  Add to the event queue.
+             MHAsynchEvent *pEvent = new MHAsynchEvent;
+@@ -678,6 +686,7 @@ void MHEngine::EventTriggered(MHRoot *pSource, enum EventType ev, const MHUnion
+             pEvent->eventData = evData;
+             m_EventQueue.enqueue(pEvent);
+         }
++        break;
+     }
+ }
+ 
+@@ -921,6 +930,7 @@ void MHEngine::GenerateUserAction(int nCode)
+         case 101: // Green
+         case 102: // Yellow
+         case 103: // Blue
++        case 300: // EPG
+             EventTriggered(pScene, EventEngineEvent, nCode);
+             break;
+     }
+@@ -939,7 +949,15 @@ void MHEngine::GenerateUserAction(int nCode)
+ 
+ void MHEngine::EngineEvent(int nCode)
+ {
+-    EventTriggered(CurrentApp(), EventEngineEvent, nCode);
++    if (CurrentApp())
++        EventTriggered(CurrentApp(), EventEngineEvent, nCode);
++    else if (!m_fBooting)
++        MHLOG(MHLogWarning, QString("WARN EngineEvent %1 but no app").arg(nCode));
++}
++
++void MHEngine::StreamStarted(MHStream *stream, bool bStarted)
++{
++    EventTriggered(stream, bStarted ? EventStreamPlaying : EventStreamStopped);
+ }
+ 
+ // Called by an ingredient wanting external content.
+@@ -954,27 +972,36 @@ void MHEngine::RequestExternalContent(MHIngredient *pRequester)
+ 
+     // Remove any existing content requests for this ingredient.
+     CancelExternalContentRequest(pRequester);
+-    QString csPath = GetPathName(pRequester->m_ContentRef.m_ContentRef);
+-
+-    // Is this actually a carousel object?  It could be a stream.  We should deal
+-    // with that separately.
+-    if (csPath.isEmpty())
+-    {
+-        MHLOG(MHLogWarning, "RequestExternalContent empty path");
+-        return;
+-    }
+ 
+-    QByteArray text;
+-
+-    if (m_Context->CheckCarouselObject(csPath) && m_Context->GetCarouselData(csPath, text))
++    QString csPath = GetPathName(pRequester->m_ContentRef.m_ContentRef);
++    if (m_Context->CheckCarouselObject(csPath))
+     {
+         // Available now - pass it to the ingredient.
+-        pRequester->ContentArrived((const unsigned char *)text.data(), text.size(), this);
++        QByteArray text;
++        if (m_Context->GetCarouselData(csPath, text))
++        {
++            // If the content is not recognized catch the exception and continue
++            try
++            {
++                pRequester->ContentArrived((const unsigned char *)text.data(), text.size(), this);
++            }
++            catch (char const *)
++            {}
++        }
++        else
++        {
++            MHLOG(MHLogWarning, QString("WARN No file content %1 <= %2")
++                .arg(pRequester->m_ObjectReference.Printable()).arg(csPath));
++            if (kProtoHTTP == PathProtocol(csPath))
++                EngineEvent(203); // 203=RemoteNetworkError if 404 reply
++            EngineEvent(3); // ContentRefError
++        }
+     }
+     else
+     {
+         // Need to record this and check later.
+-        MHLOG(MHLogLinks, QString("RequestExternalContent %1 pending").arg(csPath));
++        MHLOG(MHLogNotifications, QString("Waiting for %1 <= %2")
++            .arg(pRequester->m_ObjectReference.Printable()).arg(csPath.left(128)) );
+         MHExternContent *pContent = new MHExternContent;
+         pContent->m_FileName = csPath;
+         pContent->m_pRequester = pRequester;
+@@ -995,8 +1022,10 @@ void MHEngine::CancelExternalContentRequest(MHIngredient *pRequester)
+ 
+         if (pContent->m_pRequester == pRequester)
+         {
+-            delete pContent;
++            MHLOG(MHLogNotifications, QString("Cancelled wait for %1")
++                .arg(pRequester->m_ObjectReference.Printable()) );
+             it = m_ExternContentTable.erase(it);
++            delete pContent;
+             return;
+         }
+         else
+@@ -1009,40 +1038,56 @@ void MHEngine::CancelExternalContentRequest(MHIngredient *pRequester)
+ // See if we can satisfy any of the outstanding requests.
+ void MHEngine::CheckContentRequests()
+ {
+-    QList<MHExternContent *>::iterator it = m_ExternContentTable.begin();
+-    MHExternContent *pContent;
+-
++    QList<MHExternContent*>::iterator it = m_ExternContentTable.begin();
+     while (it != m_ExternContentTable.end())
+     {
+-        pContent = *it;
+-        QByteArray text;
+-
+-        if (m_Context->CheckCarouselObject(pContent->m_FileName) &&
+-            m_Context->GetCarouselData(pContent->m_FileName, text))
++        MHExternContent *pContent = *it;
++        if (m_Context->CheckCarouselObject(pContent->m_FileName))
+         {
+-            // If the content is not recognized catch the exception and continue
+-            try
++            // Remove from the list.
++            it = m_ExternContentTable.erase(it);
++
++            QByteArray text;
++            if (m_Context->GetCarouselData(pContent->m_FileName, text))
+             {
+-                MHLOG(MHLogLinks, QString("CheckContentRequests %1 arrived")
+-                      .arg(pContent->m_FileName));
+-                pContent->m_pRequester->ContentArrived((const unsigned char *)text.data(),
+-                                                       text.size(), this);
++                MHLOG(MHLogNotifications, QString("Received %1 len %2")
++                    .arg(pContent->m_pRequester->m_ObjectReference.Printable())
++                    .arg(text.size()) );
++                // If the content is not recognized catch the exception and continue
++                try
++                {
++                    pContent->m_pRequester->ContentArrived(
++                        (const unsigned char *)text.data(), text.size(), this);
++                }
++                catch (char const *)
++                {}
+             }
+-            catch (char const *)
++            else
+             {
++                MHLOG(MHLogWarning, QString("WARN No file content %1 <= %2")
++                    .arg(pContent->m_pRequester->m_ObjectReference.Printable())
++                    .arg(pContent->m_FileName));
++                if (kProtoHTTP == PathProtocol(pContent->m_FileName))
++                    EngineEvent(203); // 203=RemoteNetworkError if 404 reply
++                EngineEvent(3); // ContentRefError
+             }
+ 
+-            // Remove from the list.
+             delete pContent;
+-            it = m_ExternContentTable.erase(it);
+         }
+         else if (pContent->m_time.elapsed() > 60000) // TODO Get this from carousel
+         {
+-            MHLOG(MHLogWarning, QString("CheckContentRequests %1 timed out")
+-                  .arg(pContent->m_FileName));
+-            delete pContent;
++            // Remove from the list.
+             it = m_ExternContentTable.erase(it);
+-            EventTriggered(CurrentApp(), EventEngineEvent, 3); // ContentRefError
++
++            MHLOG(MHLogWarning, QString("WARN File timed out %1 <= %2")
++                .arg(pContent->m_pRequester->m_ObjectReference.Printable())
++                .arg(pContent->m_FileName));
++
++            if (kProtoHTTP == PathProtocol(pContent->m_FileName))
++                EngineEvent(203); // 203=RemoteNetworkError if 404 reply
++            EngineEvent(3); // ContentRefError
++
++            delete pContent;
+         }
+         else
+         {
+@@ -1121,6 +1166,8 @@ bool MHEngine::GetEngineSupport(const MHOctetString &feature)
+     QString csFeat = QString::fromUtf8((const char *)feature.Bytes(), feature.Size());
+     QStringList strings = csFeat.split(QRegExp("[\\(\\,\\)]"));
+ 
++    MHLOG(MHLogNotifications, "NOTE GetEngineSupport " + csFeat);
++
+     if (strings[0] == "ApplicationStacking" || strings[0] == "ASt")
+     {
+         return true;
+@@ -1241,7 +1288,11 @@ bool MHEngine::GetEngineSupport(const MHOctetString &feature)
+     // We support bitmaps that are partially off screen (don't we?)
+     if (strings[0] == "BitmapDecodeOffset" || strings[0] == "BDO")
+     {
+-        if (strings.count() >= 3 && strings[1] == "10" && (strings[2] == "0" || strings[2] == "1"))
++        if (strings.count() >= 3 && strings[1] == "2" && (strings[2] == "0" || strings[2] == "1"))
++        {
++            return true;
++        }
++        else if (strings.count() >= 2 && (strings[1] == "4" || strings[1] == "6"))
+         {
+             return true;
+         }
+@@ -1285,6 +1336,16 @@ bool MHEngine::GetEngineSupport(const MHOctetString &feature)
+         }
+     }
+ 
++    // InteractionChannelExtension.
++    if (strings[0] == "ICProfile" || strings[0] == "ICP") {
++        if (strings.count() != 2) return false;
++        if (strings[1] == "0")
++            return true; // // InteractionChannelExtension.
++        if (strings[1] == "1")
++            return false; // ICStreamingExtension.
++        return false;
++    }
++
+     // Otherwise return false.
+     return false;
+ }
+@@ -1442,7 +1503,7 @@ FILE *__mhlogStream = NULL;
+ void __mhlog(QString logtext)
+ {
+     QByteArray tmp = logtext.toAscii();
+-    fprintf(__mhlogStream, "%s\n", tmp.constData());
++    fprintf(__mhlogStream, "[freemheg] %s\n", tmp.constData());
+ }
+ 
+ // Called from the user of the library to set the logging.
+diff --git a/mythtv/libs/libmythfreemheg/Engine.h b/mythtv/libs/libmythfreemheg/Engine.h
+index e392cb1..6d2a1d9 100644
+--- a/mythtv/libs/libmythfreemheg/Engine.h
++++ b/mythtv/libs/libmythfreemheg/Engine.h
+@@ -117,6 +117,7 @@ class MHEngine: public MHEG {
+     // Generate a UserAction event i.e. a key press.
+     virtual void GenerateUserAction(int nCode);
+     virtual void EngineEvent(int nCode);
++    virtual void StreamStarted(MHStream*, bool bStarted);
+ 
+     // Called from an ingredient to request a load of external content.
+     void RequestExternalContent(MHIngredient *pRequester);
+diff --git a/mythtv/libs/libmythfreemheg/Presentable.h b/mythtv/libs/libmythfreemheg/Presentable.h
+index faa4869..fbd4c2c 100644
+--- a/mythtv/libs/libmythfreemheg/Presentable.h
++++ b/mythtv/libs/libmythfreemheg/Presentable.h
+@@ -43,7 +43,6 @@ class MHPresentable : public MHIngredient
+     virtual void Stop(MHEngine *engine);
+ 
+     // Additional actions for stream components.
+-    virtual void SetStreamRef(MHEngine *, const MHContentRef &) {}
+     virtual void BeginPlaying(MHEngine *) {}
+     virtual void StopPlaying(MHEngine *) {}
+ };
+diff --git a/mythtv/libs/libmythfreemheg/Programs.cpp b/mythtv/libs/libmythfreemheg/Programs.cpp
+index ab5658a..0bea727 100644
+--- a/mythtv/libs/libmythfreemheg/Programs.cpp
++++ b/mythtv/libs/libmythfreemheg/Programs.cpp
+@@ -29,6 +29,7 @@
+ #include "Logging.h"
+ #include "freemheg.h"
+ 
++#include <QStringList>
+ #include <sys/timeb.h>
+ #ifdef __FreeBSD__
+ #include <sys/time.h>
+@@ -138,6 +139,15 @@ static int GetInt(MHParameter *parm, MHEngine *engine)
+     return un.m_nIntVal;
+ }
+ 
++// Return a bool value.  May throw an exception if it isn't the correct type.
++static bool GetBool(MHParameter *parm, MHEngine *engine)
++{
++    MHUnion un;
++    un.GetValueFrom(*parm, engine);
++    un.CheckType(MHUnion::U_Bool);
++    return un.m_fBoolVal;
++}
++
+ // Extract a string value.
+ static void GetString(MHParameter *parm, MHOctetString &str, MHEngine *engine)
+ {
+@@ -738,7 +748,14 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
+         else if (m_Name.Equal("SSM"))   // SetSubtitleMode
+         {
+             // Enable or disable subtitles in addition to MHEG.
+-            MHERROR("SetSubtitleMode ResidentProgram is not implemented");
++            if (args.Size() == 1) {
++                bool status = GetBool(args.GetAt(0), engine);
++                MHLOG(MHLogNotifications, QString("NOTE SetSubtitleMode %1")
++                    .arg(status ? "enabled" : "disabled"));
++                // TODO Notify player
++                SetSuccessFlag(success, true, engine);
++            }
++            else SetSuccessFlag(success, false, engine);
+         }
+ 
+         else if (m_Name.Equal("WAI"))   // WhoAmI
+@@ -798,15 +815,98 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
+ 
+         else if (m_Name.Equal("SBI"))   // SetBroadcastInterrupt
+         {
+-            // Required for InteractionChannelExtension
++            // Required for NativeApplicationExtension
+             // En/dis/able program interruptions e.g. green button
+-            MHERROR("SetBroadcastInterrupt ResidentProgram is not implemented");
++            if (args.Size() == 1) {
++                bool status = GetBool(args.GetAt(0), engine);
++                MHLOG(MHLogNotifications, QString("NOTE SetBroadcastInterrupt %1")
++                    .arg(status ? "enabled" : "disabled"));
++                // Nothing todo at present
++                SetSuccessFlag(success, true, engine);
++            }
++            else SetSuccessFlag(success, false, engine);
+         }
+ 
+-        else if (m_Name.Equal("GIS"))   // GetICStatus
+-        {
+-            // Required for NativeApplicationExtension
+-            MHERROR("GetICStatus ResidentProgram is not implemented");
++        // InteractionChannelExtension
++        else if (m_Name.Equal("GIS")) { // GetICStatus
++            if (args.Size() == 1)
++            {
++                int ICstatus = engine->GetContext()->GetICStatus();
++                MHLOG(MHLogNotifications, "NOTE InteractionChannel " + QString(
++                    ICstatus == 0 ? "active" : ICstatus == 1 ? "inactive" :
++                    ICstatus == 2 ? "disabled" : "undefined"));
++                engine->FindObject(*(args.GetAt(0)->GetReference()))->SetVariableValue(ICstatus);
++                SetSuccessFlag(success, true, engine);
++            }
++            else SetSuccessFlag(success, false, engine);
++        }
++        else if (m_Name.Equal("RDa")) { // ReturnData
++            if (args.Size() >= 3)
++            {
++                MHOctetString string;
++                GetString(args.GetAt(0), string, engine);
++                QString url = QString::fromUtf8((const char *)string.Bytes(), string.Size());
++
++                // Variable name/value pairs
++                QStringList params;
++                int i = 1;
++                for (; i + 2 < args.Size(); i += 2)
++                {
++                    GetString(args.GetAt(i), string, engine);
++                    QString name = QString::fromUtf8((const char *)string.Bytes(), string.Size());
++                    QString val;
++                    MHUnion un;
++                    un.GetValueFrom(*(args.GetAt(i+1)), engine);
++                    switch (un.m_Type) {
++                    case MHUnion::U_Int:
++                        val = QString::number(un.m_nIntVal);
++                        break;
++                    case MHParameter::P_Bool:
++                        val = un.m_fBoolVal ? "true" : "false";
++                        break;
++                    case MHParameter::P_String:
++                        val = QString::fromUtf8((const char*)un.m_StrVal.Bytes(), un.m_StrVal.Size());
++                        break;
++                    case MHParameter::P_ObjRef:
++                        val = un.m_ObjRefVal.Printable();
++                        break;
++                    case MHParameter::P_ContentRef:
++                        val = un.m_ContentRefVal.Printable();
++                        break;
++                    case MHParameter::P_Null:
++                        val = "<NULL>";
++                        break;
++                    default:
++                        val = QString("<type %1>").arg(un.m_Type);
++                        break;
++                    }
++                    params += name + "=" + val;
++                }
++                // TODO
++                MHLOG(MHLogNotifications, "NOTE ReturnData '" + url + "' { " + params.join(" ") + " }");
++                // HTTP response code, 0= none
++                engine->FindObject(*(args.GetAt(i)->GetReference()))->SetVariableValue(0);
++                // HTTP response data
++                string = "";
++                engine->FindObject(*(args.GetAt(i+1)->GetReference()))->SetVariableValue(string);
++                SetSuccessFlag(success, false, engine);
++            }
++            else SetSuccessFlag(success, false, engine);
++        }
++        else if (m_Name.Equal("SHF")) { // SetHybridFileSystem
++            if (args.Size() == 2)
++            {
++                MHOctetString string;
++                GetString(args.GetAt(0), string, engine);
++                QString str = QString::fromUtf8((const char *)string.Bytes(), string.Size());
++                GetString(args.GetAt(1), string, engine);
++                QString str2 = QString::fromUtf8((const char *)string.Bytes(), string.Size());
++                // TODO
++                MHLOG(MHLogNotifications, QString("NOTE SetHybridFileSystem %1=%2")
++                    .arg(str).arg(str2));
++                SetSuccessFlag(success, false, engine);
++            }
++            else SetSuccessFlag(success, false, engine);
+         }
+ 
+         else
+@@ -908,7 +1008,7 @@ void MHCall::PrintArgs(FILE *fd, int nTabs) const
+         m_Parameters.GetAt(i)->PrintMe(fd, 0);
+     }
+ 
+-    fprintf(fd, " )\n");
++    fprintf(fd, " )");
+ }
+ 
+ void MHCall::Perform(MHEngine *engine)
+diff --git a/mythtv/libs/libmythfreemheg/Root.cpp b/mythtv/libs/libmythfreemheg/Root.cpp
+index ffa184c..f6d07b4 100644
+--- a/mythtv/libs/libmythfreemheg/Root.cpp
++++ b/mythtv/libs/libmythfreemheg/Root.cpp
+@@ -44,7 +44,7 @@ void MHRoot::PrintMe(FILE *fd, int nTabs) const
+ // An action was attempted on an object of a class which doesn't support this.
+ void MHRoot::InvalidAction(const char *actionName)
+ {
+-    MHLOG(MHLogWarning, QString("Action \"%1\" is not understood by class \"%2\"").arg(actionName).arg(ClassName()));
++    MHLOG(MHLogWarning, QString("WARN Action \"%1\" is not understood by class \"%2\"").arg(actionName).arg(ClassName()));
+     throw "Invalid Action";
+ }
+ 
+diff --git a/mythtv/libs/libmythfreemheg/Root.h b/mythtv/libs/libmythfreemheg/Root.h
+index 929c272..3b436c8 100644
+--- a/mythtv/libs/libmythfreemheg/Root.h
++++ b/mythtv/libs/libmythfreemheg/Root.h
+@@ -175,6 +175,10 @@ class MHRoot
+     virtual void ScaleVideo(int /*xScale*/, int /*yScale*/, MHEngine *) { InvalidAction("ScaleVideo"); }
+     virtual void SetVideoDecodeOffset(int /*newXOffset*/, int /*newYOffset*/, MHEngine *) { InvalidAction("SetVideoDecodeOffset"); }
+     virtual void GetVideoDecodeOffset(MHRoot * /*pXOffset*/, MHRoot * /*pYOffset*/, MHEngine *) { InvalidAction("GetVideoDecodeOffset"); }
++    virtual void GetCounterPosition(MHRoot * /*pPos*/, MHEngine *) { InvalidAction("GetCounterPosition"); }
++    virtual void GetCounterMaxPosition(MHRoot * /*pPos*/, MHEngine *) { InvalidAction("GetCounterMaxPosition"); }
++    virtual void SetCounterPosition(int /*pos*/, MHEngine *) { InvalidAction("SetCounterPosition"); }
++    virtual void SetSpeed(int /*speed 0=stop*/, MHEngine *) { InvalidAction("SetSpeed"); }
+ 
+     // Actions on Interactibles.
+     virtual void SetInteractionStatus(bool /*newStatus*/, MHEngine *) { InvalidAction("SetInteractionStatus"); }
+diff --git a/mythtv/libs/libmythfreemheg/Stream.cpp b/mythtv/libs/libmythfreemheg/Stream.cpp
+index aa20faa..dd0547d 100644
+--- a/mythtv/libs/libmythfreemheg/Stream.cpp
++++ b/mythtv/libs/libmythfreemheg/Stream.cpp
+@@ -65,8 +65,12 @@ void MHStream::Initialise(MHParseNode *p, MHEngine *engine)
+                 m_Multiplex.Append(pRtGraph);
+                 pRtGraph->Initialise(pItem, engine);
+             }
+-
+-            // Ignore unknown items
++            else
++            {
++                // Ignore unknown items
++                MHLOG(MHLogWarning, QString("WARN unknown stream type %1")
++                    .arg(pItem->GetTagNo()));
++            }
+         }
+     }
+ 
+@@ -158,11 +162,8 @@ void MHStream::Activation(MHEngine *engine)
+     MHPresentable::Activation(engine);
+ 
+     // Start playing all active stream components.
+-    for (int i = 0; i < m_Multiplex.Size(); i++)
+-    {
+-        m_Multiplex.GetAt(i)->BeginPlaying(engine);
+-    }
+-
++    BeginPlaying(engine);
++    // subclasses are responsible for setting m_fRunning and generating IsRunning.
+     m_fRunning = true;
+     engine->EventTriggered(this, EventIsRunning);
+ }
+@@ -174,13 +175,8 @@ void MHStream::Deactivation(MHEngine *engine)
+         return;
+     }
+ 
+-    // Stop playing all active Stream components
+-    for (int i = 0; i < m_Multiplex.Size(); i++)
+-    {
+-        m_Multiplex.GetAt(i)->StopPlaying(engine);
+-    }
+-
+     MHPresentable::Deactivation(engine);
++    StopPlaying(engine);
+ }
+ 
+ // The MHEG corrigendum allows SetData to be targeted to a stream so
+@@ -188,16 +184,10 @@ void MHStream::Deactivation(MHEngine *engine)
+ void MHStream::ContentPreparation(MHEngine *engine)
+ {
+     engine->EventTriggered(this, EventContentAvailable); // Perhaps test for the streams being available?
+-
+-    for (int i = 0; i < m_Multiplex.Size(); i++)
+-    {
+-        m_Multiplex.GetAt(i)->SetStreamRef(engine, m_ContentRef);
+-    }
++    if (m_fRunning)
++        BeginPlaying(engine);
+ }
+ 
+-// TODO: Generate StreamPlaying and StreamStopped events.  These are supposed
+-// to be generated as the first and last frames are displayed.
+-
+ // Return an object if there is a matching component.
+ MHRoot *MHStream::FindByObjectNo(int n)
+ {
+@@ -219,6 +209,53 @@ MHRoot *MHStream::FindByObjectNo(int n)
+     return NULL;
+ }
+ 
++void MHStream::BeginPlaying(MHEngine *engine)
++{
++    QString stream;
++    MHOctetString &str = m_ContentRef.m_ContentRef;
++    if (str.Size() != 0) stream = QString::fromUtf8((const char *)str.Bytes(), str.Size());
++    if ( !engine->GetContext()->BeginStream(stream, this))
++        engine->EventTriggered(this, EventEngineEvent, 204); // StreamRefError
++
++    // Start playing all active stream components.
++    for (int i = 0; i < m_Multiplex.Size(); i++)
++        m_Multiplex.GetAt(i)->BeginPlaying(engine);
++
++    //engine->EventTriggered(this, EventStreamPlaying);
++}
++
++void MHStream::StopPlaying(MHEngine *engine)
++{
++    // Stop playing all active Stream components
++    for (int i = 0; i < m_Multiplex.Size(); i++)
++        m_Multiplex.GetAt(i)->StopPlaying(engine);
++    engine->GetContext()->EndStream();
++    engine->EventTriggered(this, EventStreamStopped);
++}
++
++void MHStream::GetCounterPosition(MHRoot *pResult, MHEngine *engine)
++{
++    // StreamCounterUnits (mS)
++    pResult->SetVariableValue((int)engine->GetContext()->GetStreamPos());
++}
++
++void MHStream::GetCounterMaxPosition(MHRoot *pResult, MHEngine *engine)
++{
++    // StreamCounterUnits (mS)
++    pResult->SetVariableValue((int)engine->GetContext()->GetStreamMaxPos());
++}
++
++void MHStream::SetCounterPosition(int pos, MHEngine *engine)
++{
++    // StreamCounterUnits (mS)
++    engine->GetContext()->SetStreamPos(pos);
++}
++
++void MHStream::SetSpeed(int speed, MHEngine *engine)
++{
++    engine->GetContext()->StreamPlay(speed);
++}
++
+ MHAudio::MHAudio()
+ {
+     m_nComponentTag = 0;
+@@ -275,18 +312,8 @@ void MHAudio::Activation(MHEngine *engine)
+     m_fRunning = true;
+     engine->EventTriggered(this, EventIsRunning);
+ 
+-    if (m_fStreamPlaying && m_streamContentRef.IsSet())
+-    {
+-        QString stream;
+-        MHOctetString &str = m_streamContentRef.m_ContentRef;
+-
+-        if (str.Size() != 0)
+-        {
+-            stream = QString::fromUtf8((const char *)str.Bytes(), str.Size());
+-        }
+-
+-        engine->GetContext()->BeginAudio(stream, m_nComponentTag);
+-    }
++    if (m_fStreamPlaying)
++        engine->GetContext()->BeginAudio(m_nComponentTag);
+ }
+ 
+ // Deactivation for Audio is defined in the corrigendum
+@@ -308,32 +335,11 @@ void MHAudio::Deactivation(MHEngine *engine)
+     MHPresentable::Deactivation(engine);
+ }
+ 
+-void MHAudio::SetStreamRef(MHEngine *engine, const MHContentRef &cr)
+-{
+-    m_streamContentRef.Copy(cr);
+-
+-    if (m_fStreamPlaying)
+-    {
+-        BeginPlaying(engine);
+-    }
+-}
+-
+ void MHAudio::BeginPlaying(MHEngine *engine)
+ {
+     m_fStreamPlaying = true;
+-
+-    if (m_fRunning && m_streamContentRef.IsSet())
+-    {
+-        QString stream;
+-        MHOctetString &str = m_streamContentRef.m_ContentRef;
+-
+-        if (str.Size() != 0)
+-        {
+-            stream = QString::fromUtf8((const char *)str.Bytes(), str.Size());
+-        }
+-
+-        engine->GetContext()->BeginAudio(stream, m_nComponentTag);
+-    }
++    if (m_fRunning)
++        engine->GetContext()->BeginAudio(m_nComponentTag);
+ }
+ 
+ void MHAudio::StopPlaying(MHEngine *engine)
+@@ -491,19 +497,8 @@ void MHVideo::Activation(MHEngine *engine)
+     }
+ 
+     MHVisible::Activation(engine);
+-
+-    if (m_fStreamPlaying && m_streamContentRef.IsSet())
+-    {
+-        QString stream;
+-        MHOctetString &str = m_streamContentRef.m_ContentRef;
+-
+-        if (str.Size() != 0)
+-        {
+-            stream = QString::fromUtf8((const char *)str.Bytes(), str.Size());
+-        }
+-
+-        engine->GetContext()->BeginVideo(stream, m_nComponentTag);
+-    }
++    if (m_fStreamPlaying)
++        engine->GetContext()->BeginVideo(m_nComponentTag);
+ }
+ 
+ void MHVideo::Deactivation(MHEngine *engine)
+@@ -521,32 +516,11 @@ void MHVideo::Deactivation(MHEngine *engine)
+     }
+ }
+ 
+-void MHVideo::SetStreamRef(MHEngine *engine, const MHContentRef &cr)
+-{
+-    m_streamContentRef.Copy(cr);
+-
+-    if (m_fStreamPlaying)
+-    {
+-        BeginPlaying(engine);
+-    }
+-}
+-
+ void MHVideo::BeginPlaying(MHEngine *engine)
+ {
+     m_fStreamPlaying = true;
+-
+-    if (m_fRunning && m_streamContentRef.IsSet())
+-    {
+-        QString stream;
+-        MHOctetString &str = m_streamContentRef.m_ContentRef;
+-
+-        if (str.Size() != 0)
+-        {
+-            stream = QString::fromUtf8((const char *)str.Bytes(), str.Size());
+-        }
+-
+-        engine->GetContext()->BeginVideo(stream, m_nComponentTag);
+-    }
++    if (m_fRunning)
++        engine->GetContext()->BeginVideo(m_nComponentTag);
+ }
+ 
+ void MHVideo::StopPlaying(MHEngine *engine)
+@@ -581,3 +555,14 @@ void MHRTGraphics::PrintMe(FILE *fd, int nTabs) const
+     MHVisible::PrintMe(fd, nTabs);
+     //
+ }
++
++// Fix for MHActionGenericObjectRef
++void MHActionGenericObjectRefFix::Perform(MHEngine *engine)
++{
++    MHObjectRef ref;
++    if (m_RefObject.m_fIsDirect)
++        m_RefObject.GetValue(ref, engine);
++    else
++        ref.Copy(*m_RefObject.GetReference());
++    CallAction(engine, Target(engine), engine->FindObject(ref));
++}
+diff --git a/mythtv/libs/libmythfreemheg/Stream.h b/mythtv/libs/libmythfreemheg/Stream.h
+index 18dfb03..78ad2b1 100644
+--- a/mythtv/libs/libmythfreemheg/Stream.h
++++ b/mythtv/libs/libmythfreemheg/Stream.h
+@@ -44,6 +44,16 @@ class MHStream : public MHPresentable
+     virtual void ContentPreparation(MHEngine *engine);
+ 
+     virtual MHRoot *FindByObjectNo(int n);
++
++    virtual void BeginPlaying(MHEngine *engine);
++    virtual void StopPlaying(MHEngine *engine);
++
++    // Actions
++    virtual void GetCounterPosition(MHRoot *, MHEngine *);
++    virtual void GetCounterMaxPosition(MHRoot *, MHEngine *);
++    virtual void SetCounterPosition(int /*pos*/, MHEngine *);
++    virtual void SetSpeed(int, MHEngine *engine);
++
+   protected:
+     MHOwnPtrSequence <MHPresentable> m_Multiplex;
+     enum Storage { ST_Mem = 1, ST_Stream = 2 } m_nStorage;
+@@ -62,7 +72,6 @@ class MHAudio : public MHPresentable
+     virtual void Activation(MHEngine *engine);
+     virtual void Deactivation(MHEngine *engine);
+ 
+-    virtual void SetStreamRef(MHEngine *, const MHContentRef &);
+     virtual void BeginPlaying(MHEngine *engine);
+     virtual void StopPlaying(MHEngine *engine);
+ 
+@@ -71,7 +80,6 @@ class MHAudio : public MHPresentable
+     int m_nOriginalVol;
+ 
+     bool m_fStreamPlaying;
+-    MHContentRef m_streamContentRef;
+ };
+ 
+ class MHVideo : public MHVisible  
+@@ -97,7 +105,6 @@ class MHVideo : public MHVisible
+     virtual void SetVideoDecodeOffset(int newXOffset, int newYOffset, MHEngine *);
+     virtual void GetVideoDecodeOffset(MHRoot *pXOffset, MHRoot *pYOffset, MHEngine *);
+ 
+-    virtual void SetStreamRef(MHEngine *, const MHContentRef &);
+     virtual void BeginPlaying(MHEngine *engine);
+     virtual void StopPlaying(MHEngine *engine);
+ 
+@@ -109,7 +116,6 @@ class MHVideo : public MHVisible
+     int     m_nDecodeWidth, m_nDecodeHeight;
+ 
+     bool m_fStreamPlaying;
+-    MHContentRef m_streamContentRef;
+ };
+ 
+ // Real-time graphics - not needed for UK MHEG.
+@@ -146,5 +152,57 @@ class MHGetVideoDecodeOffset: public MHActionObjectRef2
+     virtual void CallAction(MHEngine *engine, MHRoot *pTarget, MHRoot *pArg1, MHRoot *pArg2) { pTarget->GetVideoDecodeOffset(pArg1, pArg2, engine); }
+ };
+ 
++class MHActionGenericObjectRefFix: public MHActionGenericObjectRef
++{
++public:
++    MHActionGenericObjectRefFix(const char *name) : MHActionGenericObjectRef(name) {}
++    virtual void Perform(MHEngine *engine);
++};
++
++class MHGetCounterPosition: public MHActionGenericObjectRefFix
++{
++public:
++    MHGetCounterPosition(): MHActionGenericObjectRefFix(":GetCounterPosition")  {}
++    virtual void CallAction(MHEngine *engine, MHRoot *pTarget, MHRoot *pArg)
++        { pTarget->GetCounterPosition(pArg, engine); }
++};
++
++class MHGetCounterMaxPosition: public MHActionGenericObjectRefFix
++{
++public:
++    MHGetCounterMaxPosition(): MHActionGenericObjectRefFix(":GetCounterMaxPosition")  {}
++    virtual void CallAction(MHEngine *engine, MHRoot *pTarget, MHRoot *pArg)
++        { pTarget->GetCounterMaxPosition(pArg, engine); }
++};
++
++class MHSetCounterPosition: public MHActionInt
++{
++public:
++    MHSetCounterPosition(): MHActionInt(":SetCounterPosition")  {}
++    virtual void CallAction(MHEngine *engine, MHRoot *pTarget, int nArg)
++        { pTarget->SetCounterPosition(nArg, engine); }
++};
++
++
++class MHSetSpeed: public MHElemAction
++{
++    typedef MHElemAction base;
++public:
++    MHSetSpeed(): base(":SetSpeed") {}
++    virtual void Initialise(MHParseNode *p, MHEngine *engine) {
++        //printf("SetSpeed Initialise args: "); p->PrintMe(stdout);
++        base::Initialise(p, engine);
++        MHParseNode *pn = p->GetArgN(1);
++        if (pn->m_nNodeType == MHParseNode::PNSeq) pn = pn->GetArgN(0);
++        m_Argument.Initialise(pn, engine);
++    }
++    virtual void Perform(MHEngine *engine) {
++        Target(engine)->SetSpeed(m_Argument.GetValue(engine), engine);
++    }
++protected:
++    virtual void PrintArgs(FILE *fd, int) const { m_Argument.PrintMe(fd, 0); }
++    MHGenericInteger m_Argument;
++};
++
+ 
+ #endif
+diff --git a/mythtv/libs/libmythfreemheg/freemheg.h b/mythtv/libs/libmythfreemheg/freemheg.h
+index 327818a..8a9a983 100644
+--- a/mythtv/libs/libmythfreemheg/freemheg.h
++++ b/mythtv/libs/libmythfreemheg/freemheg.h
+@@ -22,7 +22,12 @@
+ #if !defined(FREEMHEG_H)
+ #define FREEMHEG_H
+ 
++#include <QtGlobal>
++#include <QString>
++#include <QByteArray>
+ #include <QRegion>
++#include <QRect>
++#include <QSize>
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -32,6 +37,7 @@ class MHTextDisplay;
+ class MHBitmapDisplay;
+ class MHContext;
+ class MHEG;
++class MHStream;
+ 
+ // Called to create a new instance of the module.
+ extern MHEG *MHCreateEngine(MHContext *context);
+@@ -51,6 +57,7 @@ class MHEG
+     // Generate a UserAction event i.e. a key press.
+     virtual void GenerateUserAction(int nCode) = 0;
+     virtual void EngineEvent(int) = 0;
++    virtual void StreamStarted(MHStream*, bool bStarted = true) = 0;
+ };
+ 
+ // Logging control
+@@ -128,18 +135,33 @@ class MHContext
+     // the m_stopped condition if we have.
+     virtual bool CheckStop(void) = 0;
+ 
+-    // Begin playing audio from the specified stream
+-    virtual bool BeginAudio(const QString &stream, int tag) = 0;
++    // Begin playing the specified stream
++    virtual bool BeginStream(const QString &str, MHStream* notify = 0) = 0;
++    // Stop playing stream
++    virtual void EndStream() = 0;
++    // Begin playing audio component
++    virtual bool BeginAudio(int tag) = 0;
+     // Stop playing audio
+-    virtual void StopAudio(void) = 0;
+-    // Begin displaying video from the specified stream
+-    virtual bool BeginVideo(const QString &stream, int tag) = 0;
++    virtual void StopAudio() = 0;
++    // Begin displaying video component
++    virtual bool BeginVideo(int tag) = 0;
+     // Stop displaying video
+-    virtual void StopVideo(void) = 0;
++    virtual void StopVideo() = 0;
++    // Get current stream position in mS, -1 if unknown
++    virtual long GetStreamPos() = 0;
++    // Get current stream size in mS, -1 if unknown
++    virtual long GetStreamMaxPos() = 0;
++    // Set current stream position in mS
++    virtual long SetStreamPos(long) = 0;
++    // Play or pause a stream
++    virtual void StreamPlay(bool play = true) = 0;
+ 
+     // Get the context id strings.
+     virtual const char *GetReceiverId(void) = 0;
+     virtual const char *GetDSMCCId(void) = 0;
++
++    // InteractionChannel
++    virtual int GetICStatus() = 0; // 0= Active, 1= Inactive, 2= Disabled
+ };
+ 
+ // Dynamic Line Art objects record a sequence of drawing actions.
+diff --git a/mythtv/libs/libmythtv/icringbuffer.cpp b/mythtv/libs/libmythtv/icringbuffer.cpp
+new file mode 100644
+index 0000000..d23bc3c
+--- /dev/null
++++ b/mythtv/libs/libmythtv/icringbuffer.cpp
+@@ -0,0 +1,172 @@
++#include "icringbuffer.h"
++
++#include <stdio.h> // SEEK_SET
++
++#include <QScopedPointer>
++#include <QWriteLocker>
++
++#include "netstream.h"
++#include "mythlogging.h"
++
++
++#define LOC QString("ICRingBuf ")
++
++
++ICRingBuffer::ICRingBuffer(const QString &url, RingBuffer *parent)
++  : RingBuffer(kRingBufferType), m_stream(0), m_parent(parent)
++{
++    startreadahead = true;
++    OpenFile(url);
++}
++
++ICRingBuffer::~ICRingBuffer()
++{
++    delete m_stream;
++    delete m_parent;
++}
++
++bool ICRingBuffer::IsOpen(void) const
++{
++    return m_stream ? m_stream->IsOpen() : false;
++}
++
++bool ICRingBuffer::OpenFile(const QString &url, uint retry_ms)
++{
++    if (!NetStream::IsSupported(url))
++    {
++        LOG(VB_GENERAL, LOG_ERR, LOC + QString("Unsupported URL %1").arg(url) );
++        return false;
++    }
++
++    QScopedPointer<NetStream> stream(new NetStream(url, NetStream::kNeverCache));
++    if (!stream || !stream->IsOpen())
++    {
++        LOG(VB_GENERAL, LOG_ERR, LOC + QString("Failed to open %1").arg(url) );
++        return false;
++    }
++
++    if (!stream->WaitTillReady(30000))
++    {
++        LOG(VB_GENERAL, LOG_ERR, LOC + QString("Stream not ready%1").arg(url) );
++        return false;
++    }
++
++    if (m_parent)
++        m_parent->Pause();
++
++    QWriteLocker locker(&rwlock);
++
++    safefilename = url;
++    filename = url;
++
++    delete m_stream;
++    m_stream = stream.take();
++
++    // The initial bitrate needs to be set with consideration for low bit rate
++    // streams (e.g. radio @ 64Kbps) such that fill_min bytes are received
++    // in a reasonable time period to enable decoders to peek the first few KB
++    // to determine type & settings.
++    rawbitrate = 128; // remotefile
++    CalcReadAheadThresh();
++
++    locker.unlock();
++    Reset(true, false, true);
++
++    LOG(VB_GENERAL, LOG_INFO, LOC + QString("Opened %1").arg(url));
++    return true;
++}
++
++long long ICRingBuffer::GetReadPosition(void) const
++{
++    return m_stream ? m_stream->GetReadPosition() : 0;
++}
++
++long long ICRingBuffer::Seek(long long pos, int whence, bool has_lock)
++{
++    if (!m_stream)
++        return -1;
++
++    // lockForWrite takes priority over lockForRead, so this will
++    // take priority over the lockForRead in the read ahead thread.
++    if (!has_lock)
++        rwlock.lockForWrite();
++
++    poslock.lockForWrite();
++
++    long long ret;
++
++    // Optimize no-op seeks
++    if (readaheadrunning &&
++        ((whence == SEEK_SET && pos == readpos) ||
++         (whence == SEEK_CUR && pos == 0)))
++    {
++        ret = readpos;
++
++        poslock.unlock();
++        if (!has_lock)
++            rwlock.unlock();
++
++        return ret;
++    }
++
++    switch (whence)
++    {
++        case SEEK_SET:
++            break;
++        case SEEK_CUR:
++            pos += m_stream->GetReadPosition();
++            break;
++        case SEEK_END:
++            pos += m_stream->GetSize();
++            break;
++        default:
++            errno = EINVAL;
++            ret = -1;
++            goto err;
++    }
++
++    ret = m_stream->Seek(pos);
++    if (ret >= 0)
++    {
++        readpos = ret;
++
++        ignorereadpos = -1;
++
++        if (readaheadrunning)
++            ResetReadAhead(readpos);
++
++        readAdjust = 0;
++    }
++
++err:
++    poslock.unlock();
++
++    generalWait.wakeAll();
++
++    if (!has_lock)
++        rwlock.unlock();
++
++    return ret;
++}
++
++int ICRingBuffer::safe_read(void *data, uint sz)
++{
++    return m_stream ? m_stream->safe_read(data, sz, 1000) : (ateof = true, 0);
++}
++
++long long ICRingBuffer::GetRealFileSize(void) const
++{
++    return m_stream ? m_stream->GetSize() : -1;
++}
++
++// Take ownership of parent RingBuffer
++RingBuffer *ICRingBuffer::Take()
++{
++    RingBuffer *parent = m_parent;
++    if (parent && IsOpen())
++        parent->Unpause();
++    m_parent = 0;
++    return parent;
++}
++
++// End of file
+diff --git a/mythtv/libs/libmythtv/icringbuffer.h b/mythtv/libs/libmythtv/icringbuffer.h
+new file mode 100644
+index 0000000..dc7585d
+--- /dev/null
++++ b/mythtv/libs/libmythtv/icringbuffer.h
+@@ -0,0 +1,40 @@
++#ifndef ICRINGBUFFER_H
++#define ICRINGBUFFER_H
++
++#include "ringbuffer.h"
++
++class NetStream;
++
++class ICRingBuffer : public RingBuffer
++{
++  public:
++    static enum RingBufferType const kRingBufferType = kRingBuffer_MHEG;
++
++    ICRingBuffer(const QString &url, RingBuffer *parent = 0);
++    virtual ~ICRingBuffer();
++
++    // RingBuffer implementation
++    virtual bool IsOpen(void) const;
++    virtual long long GetReadPosition(void) const;
++    virtual bool OpenFile(const QString &url,
++                          uint retry_ms = kDefaultOpenTimeout);
++    virtual long long Seek(long long pos, int whence, bool has_lock);
++    virtual long long GetRealFileSize(void) const;
++    virtual bool IsStreamed(void)       { return false;  }
++    virtual bool IsSeekingAllowed(void) { return true; }
++    virtual bool IsBookmarkAllowed(void) { return false; }
++
++  protected:
++    virtual int safe_read(void *data, uint sz);
++
++    // Operations
++  public:
++    // Take ownership of parent RingBuffer
++    RingBuffer *Take();
++
++  private:
++    NetStream *m_stream;
++    RingBuffer *m_parent; // parent RingBuffer
++};
++
++#endif // ICRINGBUFFER_H
+diff --git a/mythtv/libs/libmythtv/interactivetv.cpp b/mythtv/libs/libmythtv/interactivetv.cpp
+index 7ed2e4b..24cd1a6 100644
+--- a/mythtv/libs/libmythtv/interactivetv.cpp
++++ b/mythtv/libs/libmythtv/interactivetv.cpp
+@@ -17,14 +17,11 @@ InteractiveTV::InteractiveTV(MythPlayer *nvp)
+ {
+     Restart(0, 0, false);
+ 
+-    if (VERBOSE_LEVEL_CHECK(VB_MHEG, LOG_ANY))
+-    {
+-        MHSetLogging(stdout, MHLogAll);
+-    }
+-    else
+-    {
+-        MHSetLogging(stdout, MHLogError);
+-    }
++    MHSetLogging(stdout,
++        VERBOSE_LEVEL_CHECK(VB_MHEG, LOG_DEBUG) ? MHLogAll :
++        VERBOSE_LEVEL_CHECK(VB_MHEG, LOG_ANY) ?
++            MHLogError | MHLogWarning | MHLogNotifications /*| MHLogLinks | MHLogActions | MHLogDetail*/ :
++        MHLogError | MHLogWarning );
+ }
+ 
+ InteractiveTV::~InteractiveTV()
+@@ -79,3 +76,8 @@ void InteractiveTV::SetNetBootInfo(const unsigned char *data, uint length)
+ {
+     m_context->SetNetBootInfo(data, length);
+ }
++
++bool InteractiveTV::StreamStarted(bool bStarted)
++{
++    return m_context->StreamStarted(bStarted);
++}
+diff --git a/mythtv/libs/libmythtv/interactivetv.h b/mythtv/libs/libmythtv/interactivetv.h
+index b26cbd0..27974ad 100644
+--- a/mythtv/libs/libmythtv/interactivetv.h
++++ b/mythtv/libs/libmythtv/interactivetv.h
+@@ -39,6 +39,8 @@ class InteractiveTV
+ 
+     // Get the initial component tags.
+     void GetInitialStreams(int &audioTag, int &videoTag);
++    // Called when a stream starts or stops. Returns true if event is handled
++    bool StreamStarted(bool bStarted = true);
+ 
+     MythPlayer *GetNVP(void) { return m_nvp; }
+ 
+diff --git a/mythtv/libs/libmythtv/libmythtv.pro b/mythtv/libs/libmythtv/libmythtv.pro
+index c815431..342a272 100644
+--- a/mythtv/libs/libmythtv/libmythtv.pro
++++ b/mythtv/libs/libmythtv/libmythtv.pro
+@@ -123,6 +123,7 @@ HEADERS += mythsystemevent.h
+ HEADERS += avfringbuffer.h          ThreadedFileWriter.h
+ HEADERS += ringbuffer.h             fileringbuffer.h
+ HEADERS += streamingringbuffer.h    metadataimagehelper.h
++HEADERS += icringbuffer.h
+ 
+ SOURCES += recordinginfo.cpp
+ SOURCES += dbcheck.cpp
+@@ -150,6 +151,7 @@ SOURCES += mythsystemevent.cpp
+ SOURCES += avfringbuffer.cpp        ThreadedFileWriter.cpp
+ SOURCES += ringbuffer.cpp           fileringBuffer.cpp
+ SOURCES += streamingringbuffer.cpp  metadataimagehelper.cpp
++SOURCES += icringbuffer.cpp
+ 
+ # DiSEqC
+ HEADERS += diseqc.h                 diseqcsettings.h
+@@ -420,6 +422,10 @@ using_frontend {
+         SOURCES += dsmcc.cpp                dsmcccache.cpp
+         SOURCES += dsmccbiop.cpp            dsmccobjcarousel.cpp
+ 
++         # MHEG interaction channel
++        HEADERS += mhegic.h                 netstream.h
++        SOURCES += mhegic.cpp               netstream.cpp
++
+         # MHEG/MHI stuff
+         HEADERS += interactivetv.h          mhi.h
+         SOURCES += interactivetv.cpp        mhi.cpp
+diff --git a/mythtv/libs/libmythtv/mhegic.cpp b/mythtv/libs/libmythtv/mhegic.cpp
+new file mode 100644
+index 0000000..4452c90
+--- /dev/null
++++ b/mythtv/libs/libmythtv/mhegic.cpp
+@@ -0,0 +1,183 @@
++/* MHEG Interaction Channel
++ * Copyright 2011 Lawrence Rust <lvr at softsystem dot co dot uk>
++ */
++#include "mhegic.h"
++
++// C/C++ lib
++#include <cstdlib>
++using std::getenv;
++
++// Qt
++#include <QByteArray>
++#include <QMutexLocker>
++#include <QNetworkRequest>
++#include <QStringList>
++#include <QScopedPointer>
++#include <QApplication>
++
++// Myth
++#include "netstream.h"
++#include "mythlogging.h"
++
++#define LOC QString("[mhegic] ")
++
++
++MHInteractionChannel::MHInteractionChannel(QObject* parent) : QObject(parent)
++{
++    setObjectName("MHInteractionChannel");
++    moveToThread(&NAMThread::manager());
++}
++
++// virtual
++MHInteractionChannel::~MHInteractionChannel()
++{
++    QMutexLocker locker(&m_mutex);
++    for ( map_t::iterator it = m_pending.begin(); it != m_pending.end(); ++it)
++        (*it)->deleteLater();
++    for ( map_t::iterator it = m_finished.begin(); it != m_finished.end(); ++it)
++        (*it)->deleteLater();
++}
++
++// Get network status
++// static
++MHInteractionChannel::EStatus MHInteractionChannel::status()
++{
++    if (!NetStream::isAvailable())
++    {
++        LOG(VB_MHEG, LOG_INFO, LOC + "WARN network is unavailable");
++        return kInactive;
++    }
++
++    // TODO get this from mythdb
++    QStringList opts = QString(getenv("MYTHMHEG")).split(':');
++    if (opts.contains("noice", Qt::CaseInsensitive))
++        return kDisabled;
++    else if (opts.contains("ice", Qt::CaseInsensitive))
++        return kActive;
++    else // Default
++        return kActive;
++}
++
++static inline bool isCached(const QString& csPath)
++{
++    return NetStream::GetLastModified(csPath).isValid();
++}
++
++// Is a file ready to read?
++bool MHInteractionChannel::CheckFile(const QString& csPath)
++{
++    QMutexLocker locker(&m_mutex);
++
++    // Is it complete?
++    if (m_finished.contains(csPath))
++        return true;
++
++    // Is it pending?
++    if (m_pending.contains(csPath))
++        return false; // It's pending so unavailable
++
++    // Is it in the cache?
++    if (isCached(csPath))
++        return true; // It's cached
++
++    // Queue a request
++    LOG(VB_MHEG, LOG_DEBUG, LOC + QString("CheckFile queue %1").arg(csPath));
++    QScopedPointer< NetStream > p(new NetStream(csPath));
++    if (!p || !p->IsOpen())
++    {
++        LOG(VB_MHEG, LOG_WARNING, LOC + QString("CheckFile failed %1").arg(csPath) );
++        return false;
++    }
++
++    connect(p.data(), SIGNAL(Finished(QObject*)), this, SLOT(slotFinished(QObject*)) );
++    m_pending.insert(csPath, p.take());
++
++    return false; // It's now pending so unavailable
++}
++
++// Read a file. -1= error, 0= OK, 1= not ready
++MHInteractionChannel::EResult
++MHInteractionChannel::GetFile(const QString &csPath, QByteArray &data)
++{
++    QMutexLocker locker(&m_mutex);
++
++    // Is it pending?
++    if (m_pending.contains(csPath))
++        return kPending;
++
++    // Is it complete?
++    QScopedPointer< NetStream > p(m_finished.take(csPath));
++    if (p)
++    {
++        if (p->GetError() == QNetworkReply::NoError)
++        {
++            data = p->ReadAll();
++            LOG(VB_MHEG, LOG_DEBUG, LOC + QString("GetFile finished %1").arg(csPath) );
++            return kSuccess;
++        }
++
++        LOG(VB_MHEG, LOG_WARNING, LOC + QString("GetFile failed %1").arg(csPath) );
++        return kError;
++    }
++
++    // Is it in the cache?
++    if (isCached(csPath))
++    {
++        LOG(VB_MHEG, LOG_DEBUG, LOC + QString("GetFile cache read %1").arg(csPath) );
++
++        NetStream req(csPath, NetStream::kAlwaysCache);
++        if (req.WaitTillFinished(3000) && req.GetError() == QNetworkReply::NoError)
++        {
++            data = req.ReadAll();
++            LOG(VB_MHEG, LOG_DEBUG, LOC + QString("GetFile cache read %1 bytes %2")
++                .arg(data.size()).arg(csPath) );
++            return kSuccess;
++        }
++
++        LOG(VB_MHEG, LOG_WARNING, LOC + QString("GetFile cache read failed %1").arg(csPath) );
++        //return kError;
++        // Retry
++    }
++
++    // Queue a download
++    LOG(VB_MHEG, LOG_DEBUG, LOC + QString("GetFile queue %1").arg(csPath) );
++    p.reset(new NetStream(csPath));
++    if (!p || !p->IsOpen())
++    {
++        LOG(VB_MHEG, LOG_WARNING, LOC + QString("GetFile failed %1").arg(csPath) );
++        return kError;
++    }
++
++    connect(p.data(), SIGNAL(Finished(QObject*)), this, SLOT(slotFinished(QObject*)) );
++    m_pending.insert(csPath, p.take());
++
++    return kPending;
++}
++
++// signal from NetStream
++void MHInteractionChannel::slotFinished(QObject *obj)
++{
++    NetStream* p = dynamic_cast< NetStream* >(obj);
++    if (!p)
++        return;
++
++    QString url = p->Url().toString();
++
++    if (p->GetError() == QNetworkReply::NoError)
++    {
++        LOG(VB_MHEG, LOG_DEBUG, LOC + QString("Finished %1").arg(url) );
++    }
++    else
++    {
++        LOG(VB_MHEG, LOG_WARNING, LOC + QString("Finished %1").arg(p->GetErrorString()) );
++    }
++
++    p->disconnect();
++
++    QMutexLocker locker(&m_mutex);
++
++    m_pending.remove(url);
++    m_finished.insert(url, p);
++}
++
++/* End of file */
+diff --git a/mythtv/libs/libmythtv/mhegic.h b/mythtv/libs/libmythtv/mhegic.h
+new file mode 100644
+index 0000000..fcad95f
+--- /dev/null
++++ b/mythtv/libs/libmythtv/mhegic.h
+@@ -0,0 +1,50 @@
++/* MHEG Interaction Channel
++ * Copyright 2011 Lawrence Rust <lvr at softsystem dot co dot uk>
++ */
++#ifndef MHEGIC_H
++#define MHEGIC_H
++
++#include <QObject>
++#include <QString>
++#include <QMutex>
++#include <QHash>
++
++class QByteArray;
++class NetStream;
++
++class MHInteractionChannel : public QObject
++{
++    Q_OBJECT
++    Q_DISABLE_COPY(MHInteractionChannel)
++
++public:
++    MHInteractionChannel(QObject* parent = 0);
++    virtual ~MHInteractionChannel();
++
++    // Properties
++public:
++    // Get network status
++    enum EStatus { kActive = 0, kInactive, kDisabled };
++    static EStatus status();
++
++    // Operations
++public:
++    // Is a file ready to read?
++    bool CheckFile(const QString &url);
++    // Read a file
++    enum EResult { kError = -1, kSuccess = 0, kPending };
++    EResult GetFile(const QString &url, QByteArray &data);
++
++    // Implementation
++private slots:
++    // NetStream signals
++    void slotFinished(QObject*);
++
++private:
++    mutable QMutex m_mutex;
++    typedef QHash< QString, NetStream* > map_t;
++    map_t m_pending; // Pending requests
++    map_t m_finished; // Completed requests
++};
++
++#endif /* ndef MHEGIC_H */
+diff --git a/mythtv/libs/libmythtv/mhi.cpp b/mythtv/libs/libmythtv/mhi.cpp
+index 1e5fc10..8e23718 100644
+--- a/mythtv/libs/libmythtv/mhi.cpp
++++ b/mythtv/libs/libmythtv/mhi.cpp
+@@ -1,10 +1,12 @@
++#include "mhi.h"
++
+ #include <unistd.h>
+ 
+ #include <QRegion>
+ #include <QBitArray>
+ #include <QVector>
++#include <QUrl>
+ 
+-#include "mhi.h"
+ #include "interactivescreen.h"
+ #include "mythpainter.h"
+ #include "mythimage.h"
+@@ -360,6 +362,13 @@ void MHIContext::NetworkBootRequested(void)
+ // Called by the engine to check for the presence of an object in the carousel.
+ bool MHIContext::CheckCarouselObject(QString objectPath)
+ {
++    if (objectPath.startsWith("http:") || objectPath.startsWith("https:"))
++    {
++        // TODO verify access to server in carousel file auth.servers
++        // TODO use TLS cert from carousel auth.tls.<x>
++        return m_ic.CheckFile(objectPath);
++    }
++
+     QStringList path = objectPath.split(QChar('/'), QString::SkipEmptyParts);
+     QByteArray result; // Unused
+     int res = m_dsmcc->GetDSMCCObject(path, result);
+@@ -369,6 +378,8 @@ bool MHIContext::CheckCarouselObject(QString objectPath)
+ // Called by the engine to request data from the carousel.
+ bool MHIContext::GetCarouselData(QString objectPath, QByteArray &result)
+ {
++    bool const isIC = objectPath.startsWith("http:") || objectPath.startsWith("https:");
++
+     // Get the path components.  The string will normally begin with "//"
+     // since this is an absolute path but that will be removed by split.
+     QStringList path = objectPath.split(QChar('/'), QString::SkipEmptyParts);
+@@ -377,108 +388,171 @@ bool MHIContext::GetCarouselData(QString objectPath, QByteArray &result)
+     // the result.
+ 
+     QMutexLocker locker(&m_runLock);
++    bool bReported = false;
+     QTime t; t.start();
+     while (!m_stop)
+     {
+         locker.unlock();
+ 
+-        int res = m_dsmcc->GetDSMCCObject(path, result);
+-        if (res == 0)
+-            return true; // Found it
+-        else if (res < 0)
+-            return false; // Not there.
+-        else if (t.elapsed() > 60000) // TODO get this from carousel info
+-            return false; // Not there.
++        if (isIC)
++        {
++            // TODO verify access to server in carousel file auth.servers
++            // TODO use TLS cert from carousel file auth.tls.<x>
++            switch (m_ic.GetFile(objectPath, result))
++            {
++            case MHInteractionChannel::kSuccess:
++                if (bReported)
++                    LOG(VB_MHEG, LOG_INFO, QString("[mhi] Received %1").arg(objectPath));
++                return true;
++            case MHInteractionChannel::kError:
++                if (bReported)
++                    LOG(VB_MHEG, LOG_INFO, QString("[mhi] Not found %1").arg(objectPath));
++                return false;
++            case MHInteractionChannel::kPending:
++                break;
++            }
++        }
++        else
++        {
++            int res = m_dsmcc->GetDSMCCObject(path, result);
++            if (res == 0)
++            {
++                if (bReported)
++                    LOG(VB_MHEG, LOG_INFO, QString("[mhi] Received %1").arg(objectPath));
++                return true; // Found it
++            }
++            else if (res < 0)
++            {
++                if (bReported)
++                    LOG(VB_MHEG, LOG_INFO, QString("[mhi] Not found %1").arg(objectPath));
++                return false; // Not there.
++            }
++        }
++
++        if (t.elapsed() > 60000) // TODO get this from carousel info
++             return false; // Not there.
+         // Otherwise we block.
+-        // Process DSMCC packets then block for a second or until we receive
++        if (!bReported)
++        {
++            bReported = true;
++            LOG(VB_MHEG, LOG_INFO, QString("[mhi] Waiting for %1").arg(objectPath));
++        }
++        // Process DSMCC packets then block for a while or until we receive
+         // some more packets.  We should eventually find out if this item is
+         // present.
+         ProcessDSMCCQueue();
+ 
+         locker.relock();
+-        if (!m_stop)
+-            m_engine_wait.wait(locker.mutex(), 1000);
++        m_engine_wait.wait(locker.mutex(), 300);
+     }
+     return false; // Stop has been set.  Say the object isn't present.
+ }
+ 
+-// Called from tv_play when a key is pressed.
+-// If it is one in the current profile we queue it for the engine
+-// and return true otherwise we return false.
+-bool MHIContext::OfferKey(QString key)
++// Mapping from key name & UserInput register to UserInput EventData
++class MHKeyLookup
+ {
+-    int action = 0;
+-    QMutexLocker locker(&m_keyLock);
++    typedef QPair< QString, int /*UserInput register*/ > key_t;
++
++public:
++    MHKeyLookup();
++
++    int Find(const QString &name, int reg) const
++        { return m_map.value(key_t(name,reg), 0); }
++
++private:
++    void key(const QString &name, int code, int r1,
++        int r2=0, int r3=0, int r4=0, int r5=0, int r6=0, int r7=0, int r8=0, int r9=0);
++
++    QHash<key_t,int /*EventData*/ > m_map;
++};
+ 
++void MHKeyLookup::key(const QString &name, int code, int r1,
++    int r2, int r3, int r4, int r5, int r6, int r7, int r8, int r9)
++{
++    m_map.insert(key_t(name,r1), code);
++    if (r2 > 0)
++        m_map.insert(key_t(name,r2), code);
++    if (r3 > 0)
++        m_map.insert(key_t(name,r3), code);
++    if (r4 > 0)
++        m_map.insert(key_t(name,r4), code);
++    if (r5 > 0)
++        m_map.insert(key_t(name,r5), code);
++    if (r6 > 0)
++        m_map.insert(key_t(name,r6), code);
++    if (r7 > 0)
++        m_map.insert(key_t(name,r7), code);
++    if (r8 > 0)
++        m_map.insert(key_t(name,r8), code);
++    if (r9 > 0)
++        m_map.insert(key_t(name,r9), code);
++}
++
++MHKeyLookup::MHKeyLookup()
++{
+     // This supports the UK and NZ key profile registers.
+     // The UK uses 3, 4 and 5 and NZ 13, 14 and 15.  These are
+     // similar but the NZ profile also provides an EPG key.
++    // ETSI ES 202 184 V2.2.1 (2011-03) adds group 6 for ICE.
++    // The BBC use group 7 for ICE
++    key(ACTION_UP,           1, 4,5,6,7,14,15);
++    key(ACTION_DOWN,         2, 4,5,6,7,14,15);
++    key(ACTION_LEFT,         3, 4,5,6,7,14,15);
++    key(ACTION_RIGHT,        4, 4,5,6,7,14,15);
++    key(ACTION_0,            5, 4,6,7,14);
++    key(ACTION_1,            6, 4,6,7,14);
++    key(ACTION_2,            7, 4,6,7,14);
++    key(ACTION_3,            8, 4,6,7,14);
++    key(ACTION_4,            9, 4,6,7,14);
++    key(ACTION_5,           10, 4,6,7,14);
++    key(ACTION_6,           11, 4,6,7,14);
++    key(ACTION_7,           12, 4,6,7,14);
++    key(ACTION_8,           13, 4,6,7,14);
++    key(ACTION_9,           14, 4,6,7,14);
++    key(ACTION_SELECT,      15, 4,5,6,7,14,15);
++    key(ACTION_TEXTEXIT,    16, 3,4,5,6,7,13,14,15); // 16= Cancel
++    // 17= help
++    // 18..99 reserved by DAVIC
++    key(ACTION_MENURED,    100, 3,4,5,6,7,13,14,15);
++    key(ACTION_MENUGREEN,  101, 3,4,5,6,7,13,14,15);
++    key(ACTION_MENUYELLOW, 102, 3,4,5,6,7,13,14,15);
++    key(ACTION_MENUBLUE,   103, 3,4,5,6,7,13,14,15);
++    key(ACTION_MENUTEXT,   104, 3,4,5,6,7);
++    key(ACTION_MENUTEXT,   105, 13,14,15); // NB from original Myth code
++    // 105..119 reserved for future spec
++    key(ACTION_STOP,       120, 6,7);
++    key(ACTION_PLAY,       121, 6,7);
++    key(ACTION_PAUSE,      122, 6,7);
++    key(ACTION_JUMPFFWD,   123, 6,7); // 123= Skip Forward
++    key(ACTION_JUMPRWND,   124, 6,7); // 124= Skip Back
++#if 0 // These conflict with left & right
++    key(ACTION_SEEKFFWD,   125, 6,7); // 125= Fast Forward
++    key(ACTION_SEEKRWND,   126, 6,7); // 126= Rewind
++#endif
++    key(ACTION_PLAYBACK,   127, 6,7);
++    // 128..256 reserved for future spec
++    // 257..299 vendor specific
++    key(ACTION_MENUEPG,    300, 13,14,15);
++    // 301.. Vendor specific
++}
+ 
+-    if (key == ACTION_UP)
+-    {
+-        if (m_keyProfile == 4 || m_keyProfile == 5 ||
+-            m_keyProfile == 14 || m_keyProfile == 15)
+-            action = 1;
+-    }
+-    else if (key == ACTION_DOWN)
+-    {
+-        if (m_keyProfile == 4 || m_keyProfile == 5 ||
+-            m_keyProfile == 14 || m_keyProfile == 15)
+-            action = 2;
+-    }
+-    else if (key == ACTION_LEFT)
+-    {
+-        if (m_keyProfile == 4 || m_keyProfile == 5 ||
+-            m_keyProfile == 14 || m_keyProfile == 15)
+-            action = 3;
+-    }
+-    else if (key == ACTION_RIGHT)
+-    {
+-        if (m_keyProfile == 4 || m_keyProfile == 5 ||
+-            m_keyProfile == 14 || m_keyProfile == 15)
+-            action = 4;
+-    }
+-    else if (key == ACTION_0 || key == ACTION_1 || key == ACTION_2 ||
+-             key == ACTION_3 || key == ACTION_4 || key == ACTION_5 ||
+-             key == ACTION_6 || key == ACTION_7 || key == ACTION_8 ||
+-             key == ACTION_9)
+-    {
+-        if (m_keyProfile == 4 || m_keyProfile == 14)
+-            action = key.toInt() + 5;
+-    }
+-    else if (key == ACTION_SELECT)
+-    {
+-        if (m_keyProfile == 4 || m_keyProfile == 5 ||
+-            m_keyProfile == 14 || m_keyProfile == 15)
+-            action = 15;
+-    }
+-    else if (key == ACTION_TEXTEXIT)
+-        action = 16;
+-    else if (key == ACTION_MENURED)
+-        action = 100;
+-    else if (key == ACTION_MENUGREEN)
+-        action = 101;
+-    else if (key == ACTION_MENUYELLOW)
+-        action = 102;
+-    else if (key == ACTION_MENUBLUE)
+-        action = 103;
+-    else if (key == ACTION_MENUTEXT)
+-        action = m_keyProfile > 12 ? 105 : 104;
+-    else if (key == ACTION_MENUEPG)
+-        action = m_keyProfile > 12 ? 300 : 0;
+-
+-    if (action != 0)
+-    {
+-        m_keyQueue.enqueue(action);
+-        LOG(VB_GENERAL, LOG_INFO, QString("Adding MHEG key %1:%2:%3").arg(key)
+-                .arg(action).arg(m_keyQueue.size()));
+-        locker.unlock();
+-        QMutexLocker locker2(&m_runLock);
+-        m_engine_wait.wakeAll();
+-        return true;
+-    }
++// Called from tv_play when a key is pressed.
++// If it is one in the current profile we queue it for the engine
++// and return true otherwise we return false.
++bool MHIContext::OfferKey(QString key)
++{
++    static const MHKeyLookup s_keymap;
++    int action = s_keymap.Find(key, m_keyProfile);
++    if (action == 0)
++        return false;
+ 
+-    return false;
++    LOG(VB_GENERAL, LOG_INFO, QString("[mhi] Adding MHEG key %1:%2:%3")
++        .arg(key).arg(action).arg(m_keyQueue.size()) );
++    { QMutexLocker locker(&m_keyLock);
++    m_keyQueue.enqueue(action);}
++    QMutexLocker locker2(&m_runLock);
++    m_engine_wait.wakeAll();
++    return true;
+ }
+ 
+ void MHIContext::Reinit(const QRect &display)
+@@ -493,11 +567,17 @@ void MHIContext::Reinit(const QRect &display)
+ 
+ void MHIContext::SetInputRegister(int num)
+ {
++    LOG(VB_MHEG, LOG_INFO, QString("[mhi] SetInputRegister %1").arg(num));
+     QMutexLocker locker(&m_keyLock);
+     m_keyQueue.clear();
+     m_keyProfile = num;
+ }
+ 
++int MHIContext::GetICStatus()
++{
++   // 0= Active, 1= Inactive, 2= Disabled
++    return m_ic.status();
++}
+ 
+ // Called by the video player to redraw the image.
+ void MHIContext::UpdateOSD(InteractiveScreen *osdWindow,
+@@ -703,7 +783,7 @@ int MHIContext::GetChannelIndex(const QString &str)
+             nResult = query.value(0).toInt();
+     }
+     else if (str == "rec://svc/cur")
+-        nResult = m_currentStream;
++        nResult = m_currentStream > 0 ? m_currentStream : m_currentChannel;
+     else if (str == "rec://svc/def")
+         nResult = m_currentChannel;
+     else if (str.startsWith("rec://"))
+@@ -719,7 +799,6 @@ int MHIContext::GetChannelIndex(const QString &str)
+ bool MHIContext::GetServiceInfo(int channelId, int &netId, int &origNetId,
+                                 int &transportId, int &serviceId)
+ {
+-    LOG(VB_MHEG, LOG_INFO, QString("[mhi] GetServiceInfo %1").arg(channelId));
+     MSqlQuery query(MSqlQuery::InitCon());
+     query.prepare("SELECT networkid, transportid, serviceid "
+                   "FROM channel, dtv_multiplex "
+@@ -732,19 +811,26 @@ bool MHIContext::GetServiceInfo(int channelId, int &netId, int &origNetId,
+         origNetId = netId; // We don't have this in the database.
+         transportId = query.value(1).toInt();
+         serviceId = query.value(2).toInt();
++        LOG(VB_MHEG, LOG_INFO, QString("[mhi] GetServiceInfo %1 => NID=%2 TID=%3 SID=%4")
++            .arg(channelId).arg(netId).arg(transportId).arg(serviceId));
+         return true;
+     }
+-    else return false;
++
++    LOG(VB_MHEG, LOG_WARNING, QString("[mhi] GetServiceInfo %1 failed").arg(channelId));
++    return false;
+ }
+ 
+ bool MHIContext::TuneTo(int channel, int tuneinfo)
+ {
+-    LOG(VB_MHEG, LOG_INFO, QString("[mhi] TuneTo %1 0x%2")
+-        .arg(channel).arg(tuneinfo,0,16));
+-
+     if (!m_isLive)
++    {
++        LOG(VB_MHEG, LOG_WARNING, QString("[mhi] Can't TuneTo %1 0x%2 while not live")
++            .arg(channel).arg(tuneinfo,0,16));
+         return false; // Can't tune if this is a recording.
++    }
+ 
++    LOG(VB_GENERAL, LOG_INFO, QString("[mhi] TuneTo %1 0x%2")
++        .arg(channel).arg(tuneinfo,0,16));
+     m_tuneinfo.append(tuneinfo);
+ 
+     // Post an event requesting a channel change.
+@@ -757,68 +843,138 @@ bool MHIContext::TuneTo(int channel, int tuneinfo)
+     return true;
+ }
+ 
+-// Begin playing audio from the specified stream
+-bool MHIContext::BeginAudio(const QString &stream, int tag)
++
++// Begin playing the specified stream
++bool MHIContext::BeginStream(const QString &stream, MHStream *notify)
+ {
+-    LOG(VB_MHEG, LOG_INFO, QString("[mhi] BeginAudio %1 %2").arg(stream).arg(tag));
++    LOG(VB_MHEG, LOG_INFO, QString("[mhi] BeginStream %1 0x%2")
++        .arg(stream).arg((quintptr)notify,0,16));
++
++    m_audioTag = -1;
++    m_videoTag = -1;
++    m_notify = notify;
++
++    if (stream.startsWith("http://") || stream.startsWith("https://"))
++    {
++        m_currentStream = -1;
++
++        // The url is sometimes only http:// during stream startup
++        if (QUrl(stream).authority().isEmpty())
++            return false;
++
++        return m_parent->GetNVP()->SetStream(stream);
++    }
+ 
+     int chan = GetChannelIndex(stream);
+     if (chan < 0)
+         return false;
++    if (VERBOSE_LEVEL_CHECK(VB_MHEG, LOG_ANY))
++    {
++        int netId, origNetId, transportId, serviceId;
++        GetServiceInfo(chan, netId, origNetId, transportId, serviceId);
++    }
+ 
+     if (chan != m_currentStream)
+     {
+-        // We have to tune to the channel where the audio is to be found.
++        // We have to tune to the channel where the stream is to be found.
+         // Because the audio and video are both components of an MHEG stream
+         // they will both be on the same channel.
+         m_currentStream = chan;
+-        m_audioTag = tag;
+         return TuneTo(chan, kTuneKeepChnl|kTuneQuietly|kTuneKeepApp);
+     }
+ 
++    return true;
++}
++
++void MHIContext::EndStream()
++{
++    LOG(VB_MHEG, LOG_INFO, QString("[mhi] EndStream 0x%1")
++        .arg((quintptr)m_notify,0,16) );
++
++    m_notify = 0;
++    (void)m_parent->GetNVP()->SetStream(QString());
++}
++
++// Callback from MythPlayer when a stream starts or stops
++bool MHIContext::StreamStarted(bool bStarted)
++{
++    if (!m_engine || !m_notify)
++        return false;
++
++    LOG(VB_MHEG, LOG_INFO, QString("[mhi] Stream 0x%1 %2")
++        .arg((quintptr)m_notify,0,16).arg(bStarted ? "started" : "stopped"));
++
++    m_engine->StreamStarted(m_notify, bStarted);
++    if (!bStarted)
++        m_notify = 0;
++    return m_currentStream == -1; // Return true if it's an http stream
++}
++
++// Begin playing audio
++bool MHIContext::BeginAudio(int tag)
++{
++    LOG(VB_MHEG, LOG_INFO, QString("[mhi] BeginAudio %1").arg(tag));
++
+     if (tag < 0)
+         return true; // Leave it at the default.
+-    else if (m_parent->GetNVP())
++
++    m_audioTag = tag;
++    if (m_parent->GetNVP())
+         return m_parent->GetNVP()->SetAudioByComponentTag(tag);
+-    else
+-        return false;
+-}
++    return false;
++ }
+ 
+ // Stop playing audio
+-void MHIContext::StopAudio(void)
++void MHIContext::StopAudio()
+ {
+     // Do nothing at the moment.
+ }
+ 
+ // Begin displaying video from the specified stream
+-bool MHIContext::BeginVideo(const QString &stream, int tag)
++bool MHIContext::BeginVideo(int tag)
+ {
+-    LOG(VB_MHEG, LOG_INFO, QString("[mhi] BeginVideo %1 %2").arg(stream).arg(tag));
++    LOG(VB_MHEG, LOG_INFO, QString("[mhi] BeginVideo %1").arg(tag));
+ 
+-    int chan = GetChannelIndex(stream);
+-    if (chan < 0)
+-        return false;
+-    if (chan != m_currentStream)
+-    {
+-        // We have to tune to the channel where the video is to be found.
+-        m_currentStream = chan;
+-        m_videoTag = tag;
+-        return TuneTo(chan, kTuneKeepChnl|kTuneQuietly|kTuneKeepApp);
+-    }
+     if (tag < 0)
+         return true; // Leave it at the default.
+-    else if (m_parent->GetNVP())
+-        return m_parent->GetNVP()->SetVideoByComponentTag(tag);
+ 
++    m_videoTag = tag;
++    if (m_parent->GetNVP())
++        return m_parent->GetNVP()->SetVideoByComponentTag(tag);
+     return false;
+ }
+ 
+-// Stop displaying video
+-void MHIContext::StopVideo(void)
++ // Stop displaying video
++void MHIContext::StopVideo()
+ {
+     // Do nothing at the moment.
+ }
+ 
++// Get current stream position, -1 if unknown
++long MHIContext::GetStreamPos()
++{
++    return m_parent->GetNVP() ? m_parent->GetNVP()->GetStreamPos() : -1;
++}
++
++// Get current stream size, -1 if unknown
++long MHIContext::GetStreamMaxPos()
++{
++    return m_parent->GetNVP() ? m_parent->GetNVP()->GetStreamMaxPos() : -1;
++}
++
++// Set current stream position
++long MHIContext::SetStreamPos(long pos)
++{
++    return m_parent->GetNVP() ? m_parent->GetNVP()->SetStreamPos(pos) : -1;
++}
++
++// Play or pause a stream
++void MHIContext::StreamPlay(bool play)
++{
++    if (m_parent->GetNVP())
++        m_parent->GetNVP()->StreamPlay(play);
++}
++
+ // Create a new object to draw dynamic line art.
+ MHDLADisplay *MHIContext::CreateDynamicLineArt(
+     bool isBoxed, MHRgba lineColour, MHRgba fillColour)
+@@ -869,16 +1025,15 @@ void MHIContext::DrawRect(int xPos, int yPos, int width, int height,
+ // and usually that will be the same as the origin of the bounding
+ // box (clipRect).
+ void MHIContext::DrawImage(int x, int y, const QRect &clipRect,
+-                           const QImage &qImage)
++                           const QImage &qImage, bool bScaled /* = false */)
+ {
+     if (qImage.isNull())
+         return;
+ 
+     QRect imageRect(x, y, qImage.width(), qImage.height());
+-    QRect displayRect = QRect(clipRect.x(), clipRect.y(),
+-                              clipRect.width(), clipRect.height()) & imageRect;
++    QRect displayRect = clipRect & imageRect;
+ 
+-    if (displayRect == imageRect) // No clipping required
++    if (bScaled || displayRect == imageRect) // No clipping required
+     {
+         QImage q_scaled =
+             qImage.scaled(
+@@ -892,8 +1047,7 @@ void MHIContext::DrawImage(int x, int y, const QRect &clipRect,
+     else if (!displayRect.isEmpty())
+     { // We must clip the image.
+         QImage clipped = qImage.convertToFormat(QImage::Format_ARGB32)
+-            .copy(displayRect.x() - x, displayRect.y() - y,
+-                  displayRect.width(), displayRect.height());
++            .copy(displayRect.translated(-x, -y));
+         QImage q_scaled =
+             clipped.scaled(
+                 SCALED_X(displayRect.width()),
+@@ -1497,11 +1651,12 @@ void MHIBitmap::Draw(int x, int y, QRect rect, bool tiled)
+                 tiledImage.setPixel(i, j, m_image.pixel(i % m_image.width(), j % m_image.height()));
+             }
+         }
+-        m_parent->DrawImage(rect.x(), rect.y(), rect, tiledImage);
++        m_parent->DrawImage(rect.x(), rect.y(), rect, tiledImage, true);
+     }
+     else
+     {
+-        m_parent->DrawImage(x, y, rect, m_image);
++        // NB THe BBC expects bitmaps to be scaled, not clipped
++        m_parent->DrawImage(x, y, rect, m_image, true);
+     }
+ }
+ 
+diff --git a/mythtv/libs/libmythtv/mhi.h b/mythtv/libs/libmythtv/mhi.h
+index d2eded6..e54023b 100644
+--- a/mythtv/libs/libmythtv/mhi.h
++++ b/mythtv/libs/libmythtv/mhi.h
+@@ -21,6 +21,7 @@ using namespace std;
+ #include "../libmythfreemheg/freemheg.h"
+ #include "interactivetv.h"
+ #include "dsmcc.h"
++#include "mhegic.h"
+ #include "mythcontext.h"
+ #include "mythdbcon.h"
+ #include "mythdeque.h"
+@@ -99,7 +100,7 @@ class MHIContext : public MHContext, public QRunnable
+     virtual void DrawBackground(const QRegion &reg);
+     virtual void DrawVideo(const QRect &videoRect, const QRect &displayRect);
+ 
+-    void DrawImage(int x, int y, const QRect &rect, const QImage &image);
++    void DrawImage(int x, int y, const QRect &rect, const QImage &image, bool bScaled = false);
+ 
+     virtual int GetChannelIndex(const QString &str);
+     /// Get netId etc from the channel index.
+@@ -107,14 +108,27 @@ class MHIContext : public MHContext, public QRunnable
+                                 int &transportId, int &serviceId);
+     virtual bool TuneTo(int channel, int tuneinfo);
+ 
+-    /// Begin playing audio from the specified stream
+-    virtual bool BeginAudio(const QString &stream, int tag);
++    /// Begin playing the specified stream
++    virtual bool BeginStream(const QString &str, MHStream* notify);
++    virtual void EndStream();
++    // Called when the stream starts or stops
++    bool StreamStarted(bool bStarted = true);
++    /// Begin playing audio
++    virtual bool BeginAudio(int tag);
+     /// Stop playing audio
+-    virtual void StopAudio(void);
+-    /// Begin displaying video from the specified stream
+-    virtual bool BeginVideo(const QString &stream, int tag);
++    virtual void StopAudio();
++    /// Begin displaying video
++    virtual bool BeginVideo(int tag);
+     /// Stop displaying video
+-    virtual void StopVideo(void);
++    virtual void StopVideo();
++    // Get current stream position, -1 if unknown
++    virtual long GetStreamPos();
++    // Get current stream size, -1 if unknown
++    virtual long GetStreamMaxPos();
++    // Set current stream position
++    virtual long SetStreamPos(long);
++    // Play or pause a stream
++    virtual void StreamPlay(bool);
+ 
+     // Get the context id strings.  The format of these strings is specified
+     // by the UK MHEG profile.
+@@ -123,6 +137,9 @@ class MHIContext : public MHContext, public QRunnable
+     virtual const char *GetDSMCCId(void)
+         { return "DSMMYT001"; } // DSMCC version.
+ 
++    // InteractionChannel
++    virtual int GetICStatus(); // 0= Active, 1= Inactive, 2= Disabled
++
+     // Operations used by the display classes
+     // Add an item to the display vector
+     void AddToDisplay(const QImage &image, int x, int y);
+@@ -150,6 +167,9 @@ class MHIContext : public MHContext, public QRunnable
+     QMutex           m_dsmccLock;
+     MythDeque<DSMCCPacket*> m_dsmccQueue;
+ 
++    MHInteractionChannel m_ic;  // Interaction channel
++    MHStream        *m_notify;
++
+     QMutex           m_keyLock;
+     MythDeque<int>   m_keyQueue;
+     int              m_keyProfile;
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index f820686..abbede8 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -60,6 +60,7 @@ using namespace std;
+ #include "mythuiimage.h"
+ #include "mythlogging.h"
+ #include "mythmiscutil.h"
++#include "icringbuffer.h"
+ 
+ extern "C" {
+ #include "vbitext/vbi.h"
+@@ -898,7 +899,7 @@ int MythPlayer::OpenFile(uint retries)
+     if (!player_ctx || !player_ctx->buffer)
+         return -1;
+ 
+-    livetv = player_ctx->tvchain;
++    livetv = player_ctx->tvchain && player_ctx->buffer->LiveMode();
+ 
+     if (player_ctx->tvchain &&
+         player_ctx->tvchain->GetCardType(player_ctx->tvchain->GetCurPos()) ==
+@@ -924,7 +925,8 @@ int MythPlayer::OpenFile(uint retries)
+         MythTimer peekTimer; peekTimer.start();
+         while (player_ctx->buffer->Peek(testbuf, testreadsize) != testreadsize)
+         {
+-            if (peekTimer.elapsed() > 1000 || bigTimer.elapsed() > timeout)
++            // NB need to allow for streams encountering network congestion
++            if (peekTimer.elapsed() > 30000 || bigTimer.elapsed() > timeout)
+             {
+                 LOG(VB_GENERAL, LOG_ERR, LOC +
+                     QString("OpenFile(): Could not read first %1 bytes of '%2'")
+@@ -2046,6 +2048,7 @@ void MythPlayer::DisplayPauseFrame(void)
+     SetBuffering(false);
+ 
+     RefreshPauseFrame();
++    PreProcessNormalFrame(); // Allow interactiveTV to draw on pause frame
+ 
+     osdLock.lock();
+     videofiltersLock.lock();
+@@ -2110,7 +2113,7 @@ bool MythPlayer::PrebufferEnoughFrames(int min_buffers)
+             // to recover from serious problems if frames get leaked.
+             DiscardVideoFrames(true);
+         }
+-        if (waited_for > 20000) // 20 seconds
++        if (waited_for > 30000) // 30 seconds for internet streamed media
+         {
+             LOG(VB_GENERAL, LOG_ERR, LOC +
+                 "Waited too long for decoder to fill video buffers. Exiting..");
+@@ -2485,6 +2488,14 @@ void MythPlayer::SwitchToProgram(void)
+         return;
+     }
+ 
++    if (player_ctx->buffer->GetType() == ICRingBuffer::kRingBufferType)
++    {
++        // Restore original ringbuffer
++        ICRingBuffer *ic = dynamic_cast< ICRingBuffer* >(player_ctx->buffer);
++        player_ctx->buffer = ic->Take();
++        delete ic;
++    }
++
+     player_ctx->buffer->OpenFile(
+         pginfo->GetPlaybackURL(), RingBuffer::kLiveTVOpenTimeout);
+ 
+@@ -2619,6 +2630,14 @@ void MythPlayer::JumpToProgram(void)
+ 
+     SendMythSystemPlayEvent("PLAY_CHANGED", pginfo);
+ 
++    if (player_ctx->buffer->GetType() == ICRingBuffer::kRingBufferType)
++    {
++        // Restore original ringbuffer
++        ICRingBuffer *ic = dynamic_cast< ICRingBuffer* >(player_ctx->buffer);
++        player_ctx->buffer = ic->Take();
++        delete ic;
++    }
++
+     player_ctx->buffer->OpenFile(
+         pginfo->GetPlaybackURL(), RingBuffer::kLiveTVOpenTimeout);
+ 
+@@ -2819,6 +2838,16 @@ void MythPlayer::EventLoop(void)
+         JumpToProgram();
+     }
+ 
++    // Change interactive stream if requested
++    { QMutexLocker locker(&itvLock);
++    if (!m_newStream.isEmpty())
++    {
++        QString stream = m_newStream;
++        m_newStream.clear();
++        locker.unlock();
++        JumpToStream(stream);
++    }}
++
+     // Disable fastforward if we are too close to the end of the buffer
+     if (ffrew_skip > 1 && (CalcMaxFFTime(100, false) < 100))
+     {
+@@ -2855,22 +2884,24 @@ void MythPlayer::EventLoop(void)
+     }
+ 
+     // Handle end of file
+-    if (GetEof())
++    if (GetEof() && !allpaused)
+     {
+-        if (player_ctx->tvchain)
++#ifdef USING_MHEG
++        if (interactiveTV && interactiveTV->StreamStarted(false))
+         {
+-            if (!allpaused && player_ctx->tvchain->HasNext())
+-            {
+-                LOG(VB_GENERAL, LOG_NOTICE, LOC + "LiveTV forcing JumpTo 1");
+-                player_ctx->tvchain->JumpToNext(true, 1);
+-                return;
+-            }
++            Pause();
++            return;
+         }
+-        else if (!allpaused)
++#endif
++        if (player_ctx->tvchain && player_ctx->tvchain->HasNext())
+         {
+-            SetPlaying(false);
++            LOG(VB_GENERAL, LOG_NOTICE, LOC + "LiveTV forcing JumpTo 1");
++            player_ctx->tvchain->JumpToNext(true, 1);
+             return;
+         }
++
++        SetPlaying(false);
++        return;
+     }
+ 
+     // Handle rewind
+@@ -4898,6 +4929,135 @@ bool MythPlayer::SetVideoByComponentTag(int tag)
+     return false;
+ }
+ 
++static inline double SafeFPS(DecoderBase *decoder)
++{
++    if (!decoder)
++        return 25;
++    double fps = decoder->GetFPS();
++    return fps > 0 ? fps : 25.0;
++}
++
++// Called from MHIContext::Begin/End/Stream on the MHIContext::StartMHEGEngine thread
++bool MythPlayer::SetStream(const QString &stream)
++{
++    // The stream name is empty if the stream is closing
++    LOG(VB_PLAYBACK, LOG_INFO, LOC + QString("SetStream '%1'").arg(stream));
++
++    QMutexLocker locker(&itvLock);
++    m_newStream = stream;
++    m_newStream.detach();
++    // Stream will be changed by JumpToStream called from EventLoop
++    // If successful will call interactiveTV->StreamStarted();
++
++    if (stream.isEmpty() && player_ctx->tvchain &&
++        player_ctx->buffer->GetType() == ICRingBuffer::kRingBufferType)
++    {
++        // Restore livetv
++        SetEof(true);
++        player_ctx->tvchain->JumpToNext(false, 1);
++        player_ctx->tvchain->JumpToNext(true, 1);
++    }
++
++    return !stream.isEmpty();
++}
++
++// Called from EventLoop pn the main application thread
++void MythPlayer::JumpToStream(const QString &stream)
++{
++    LOG(VB_PLAYBACK, LOG_INFO, LOC + "JumpToStream - begin");
++
++    if (stream.isEmpty())
++        return; // Shouldn't happen
++
++    Pause();
++    ResetCaptions();
++
++    ProgramInfo pginfo(stream);
++    SetPlayingInfo(pginfo);
++
++    if (player_ctx->buffer->GetType() != ICRingBuffer::kRingBufferType)
++        player_ctx->buffer = new ICRingBuffer(stream, player_ctx->buffer);
++    else
++        player_ctx->buffer->OpenFile(stream);
++
++    if (!player_ctx->buffer->IsOpen())
++    {
++        LOG(VB_GENERAL, LOG_ERR, LOC + "JumpToStream buffer OpenFile failed");
++        SetEof(true);
++        SetErrored(QObject::tr("Error opening remote stream buffer"));
++        return;
++    }
++
++    watchingrecording = false;
++    totalLength = 0;
++    totalFrames = 0;
++    totalDuration = 0;
++
++    if (OpenFile(120) < 0) // 120 retries ~= 60 seconds
++    {
++        LOG(VB_GENERAL, LOG_ERR, LOC + "JumpToStream OpenFile failed.");
++        SetEof(true);
++        SetErrored(QObject::tr("Error opening remote stream"));
++        return;
++    }
++
++    if (totalLength == 0)
++    {
++        long long len = player_ctx->buffer->GetRealFileSize();
++        totalLength = (int)(len / ((decoder->GetRawBitrate() * 1000) / 8));
++        totalFrames = (int)(totalLength * SafeFPS(decoder));
++    }
++    LOG(VB_PLAYBACK, LOG_INFO, LOC +
++        QString("JumpToStream length %1 bytes @ %2 Kbps = %3 Secs, %4 frames @ %5 fps")
++        .arg(player_ctx->buffer->GetRealFileSize()).arg(decoder->GetRawBitrate())
++        .arg(totalLength).arg(totalFrames).arg(decoder->GetFPS()) );
++
++    SetEof(false);
++
++    // the bitrate is reset by player_ctx->buffer->OpenFile()...
++    player_ctx->buffer->UpdateRawBitrate(decoder->GetRawBitrate());
++    decoder->SetProgramInfo(pginfo);
++
++    Play();
++    ChangeSpeed();
++
++    player_ctx->SetPlayerChangingBuffers(false);
++#ifdef USING_MHEG
++    if (interactiveTV) interactiveTV->StreamStarted();
++#endif
++
++    LOG(VB_PLAYBACK, LOG_INFO, LOC + "JumpToStream - end");
++}
++
++long MythPlayer::GetStreamPos()
++{
++    return (long)((1000 * GetFramesPlayed()) / SafeFPS(decoder));
++}
++
++long MythPlayer::GetStreamMaxPos()
++{
++    long maxpos = (long)(1000 * (totalDuration > 0 ? totalDuration : totalLength));
++    long pos = GetStreamPos();
++    return maxpos > pos ? maxpos : pos;
++}
++
++long MythPlayer::SetStreamPos(long ms)
++{
++    uint64_t frameNum = (uint64_t)((ms * SafeFPS(decoder)) / 1000);
++    LOG(VB_PLAYBACK, LOG_INFO, LOC + QString("SetStreamPos %1 mS = frame %2, now=%3")
++        .arg(ms).arg(frameNum).arg(GetFramesPlayed()) );
++    JumpToFrame(frameNum);
++    return ms;
++}
++
++void MythPlayer::StreamPlay(bool play)
++{
++    if (play)
++        Play();
++    else
++        Pause();
++}
++
+ /** \fn MythPlayer::SetDecoder(DecoderBase*)
+  *  \brief Sets the stream decoder, deleting any existing recorder.
+  */
+diff --git a/mythtv/libs/libmythtv/mythplayer.h b/mythtv/libs/libmythtv/mythplayer.h
+index 5d86d7a..2efbab6 100644
+--- a/mythtv/libs/libmythtv/mythplayer.h
++++ b/mythtv/libs/libmythtv/mythplayer.h
+@@ -292,6 +292,11 @@ class MTV_PUBLIC MythPlayer
+     // Public MHEG/MHI stream selection
+     bool SetAudioByComponentTag(int tag);
+     bool SetVideoByComponentTag(int tag);
++    bool SetStream(const QString &);
++    long GetStreamPos(); // mS
++    long GetStreamMaxPos(); // mS
++    long SetStreamPos(long); // mS
++    void StreamPlay(bool play = true);
+ 
+     // LiveTV public stuff
+     void CheckTVChain();
+@@ -578,6 +583,7 @@ class MTV_PUBLIC MythPlayer
+     // Private LiveTV stuff
+     void  SwitchToProgram(void);
+     void  JumpToProgram(void);
++    void  JumpToStream(const QString&);
+ 
+   protected:
+     PlayerFlags    playerFlags;
+@@ -711,6 +717,7 @@ class MTV_PUBLIC MythPlayer
+     InteractiveTV *interactiveTV;
+     bool       itvEnabled;
+     QMutex     itvLock;
++    QString    m_newStream; // Guarded by itvLock
+ 
+     // OSD stuff
+     OSD  *osd;
+diff --git a/mythtv/libs/libmythtv/netstream.cpp b/mythtv/libs/libmythtv/netstream.cpp
+new file mode 100644
+index 0000000..ad53281
+--- /dev/null
++++ b/mythtv/libs/libmythtv/netstream.cpp
+@@ -0,0 +1,924 @@
++/* Network stream
++ * Copyright 2011 Lawrence Rust <lvr at softsystem dot co dot uk>
++ */
++#include "netstream.h"
++
++// C/C++ lib
++#include <cstdlib>
++using std::getenv;
++#include <cstddef>
++#include <cstdio>
++
++// Qt
++#include <QNetworkAccessManager>
++#include <QNetworkRequest>
++#include <QNetworkReply>
++#include <QNetworkProxy>
++#include <QNetworkDiskCache>
++#include <QSslConfiguration>
++#include <QSslError>
++#include <QSslSocket>
++#include <QUrl>
++#include <QThread>
++#include <QMutexLocker>
++#include <QEvent>
++#include <QCoreApplication>
++#include <QAtomicInt>
++#include <QMetaType> // qRegisterMetaType
++#include <QDesktopServices>
++#include <QScopedPointer>
++
++// Myth
++#include "mythlogging.h"
++#include "mythcorecontext.h"
++#include "mythdirs.h"
++
++
++/*
++ * Constants
++ */
++#define LOC "[netstream] "
++
++
++/*
++ * Private data
++ */
++static QAtomicInt s_nRequest(1); // Unique NetStream request ID
++static QMutex s_mtx; // Guard local static data e.g. NAMThread singleton
++const qint64 kMaxBuffer = 4 * 1024 * 1024L; // 0= unlimited, 1MB => 4secs @ 1.5Mbps
++
++
++/*
++ * Private types
++ */
++// Custom event posted to NAMThread
++class NetStreamRequest : public QEvent
++{
++public:
++    static const QEvent::Type kType = QEvent::User;
++
++    NetStreamRequest(int id, const QNetworkRequest &req) :
++        QEvent(kType),
++        m_id(id),
++        m_req(req),
++        m_bCancelled(false)
++    { }
++
++    const int m_id;
++    const QNetworkRequest m_req;
++    volatile bool m_bCancelled;
++};
++
++class NetStreamAbort : public QEvent
++{
++public:
++    static const QEvent::Type kType = static_cast< QEvent::Type >(QEvent::User + 1);
++
++    NetStreamAbort(int id, QNetworkReply *reply) :
++        QEvent(kType),
++        m_id(id),
++        m_reply(reply)
++    { }
++
++    const int m_id;
++    QNetworkReply * const m_reply;
++};
++
++
++/**
++ * Network streaming request
++ */
++NetStream::NetStream(const QUrl &url, EMode mode /*= kPreferCache*/) :
++    m_id(s_nRequest.fetchAndAddRelaxed(1)),
++    m_state(kClosed),
++    m_pending(0),
++    m_reply(0),
++    m_nRedirections(0),
++    m_size(-1),
++    m_pos(0)
++{
++    setObjectName("NetStream " + url.toString());
++
++    m_request.setAttribute(QNetworkRequest::CacheLoadControlAttribute,
++        mode == kAlwaysCache ? QNetworkRequest::AlwaysCache :
++        mode == kPreferCache ? QNetworkRequest::PreferCache :
++        mode == kNeverCache ? QNetworkRequest::AlwaysNetwork :
++            QNetworkRequest::PreferNetwork );
++
++    // Receive requestStarted signals from NAMThread when it processes a NetStreamRequest
++    connect(&NAMThread::manager(), SIGNAL(requestStarted(int, QNetworkReply*)),
++        this, SLOT(slotRequestStarted(int, QNetworkReply*)), Qt::DirectConnection );
++
++    QMutexLocker locker(&m_mutex);
++
++    if (Request(url))
++        m_state = kPending;
++}
++
++// virtual
++NetStream::~NetStream()
++{
++    Abort();
++
++    QMutexLocker locker(&m_mutex);
++
++    if (m_reply)
++    {
++        m_reply->disconnect(this);
++        m_reply->deleteLater();
++    }
++}
++
++static inline QString Source(const QNetworkRequest &request)
++{
++    switch (request.attribute(QNetworkRequest::CacheLoadControlAttribute).toInt())
++    {
++    case QNetworkRequest::AlwaysCache: return "cache";
++    case QNetworkRequest::PreferCache: return "cache-preferred";
++    case QNetworkRequest::PreferNetwork: return "net-preferred";
++    case QNetworkRequest::AlwaysNetwork: return "net";
++    }
++    return "unknown";
++}
++
++static inline QString Source(const QNetworkReply* reply)
++{
++    return reply->attribute(QNetworkRequest::SourceIsFromCacheAttribute).toBool() ?
++        "cache" : "host";
++}
++
++// Send request to the network manager
++// Caller must hold m_mutex
++bool NetStream::Request(const QUrl& url)
++{
++    if (!IsSupported(url))
++    {
++        LOG(VB_GENERAL, LOG_WARNING, LOC +
++            QString("(%1) Request unsupported URL: %2")
++            .arg(m_id).arg(url.toString()) );
++        return false;
++    }
++
++    if (m_pending)
++    {
++        // Cancel the pending request
++        m_pending->m_bCancelled = true;
++        m_pending = 0;
++    }
++
++    if (m_reply)
++    {
++        // Abort the current reply
++        // NB the abort method appears to only work if called from NAMThread
++        m_reply->disconnect(this);
++        NAMThread::PostEvent(new NetStreamAbort(m_id, m_reply));
++        // NAMthread will delete the reply
++        m_reply = 0;
++    }
++
++    m_request.setUrl(url);
++
++    const QByteArray ua("User-Agent");
++    if (!m_request.hasRawHeader(ua))
++        m_request.setRawHeader(ua, "UK-MHEG/2 MYT001/001 MHGGNU/001");
++
++    if (m_pos > 0 || m_size >= 0)
++        m_request.setRawHeader("Range", QString("bytes=%1-").arg(m_pos).toAscii());
++
++#ifndef QT_NO_OPENSSL
++#if 1 // The BBC use a self certified cert so don't verify it
++    if (m_request.url().scheme() == "https")
++    {
++        // TODO use cert from carousel auth.tls.<x>
++        QSslConfiguration ssl(QSslConfiguration::defaultConfiguration());
++        ssl.setPeerVerifyMode(QSslSocket::VerifyNone);
++        m_request.setSslConfiguration(ssl);
++    }
++#endif
++#endif
++
++    LOG(VB_FILE, LOG_INFO, LOC + QString("(%1) Request %2 bytes=%3- from %4")
++        .arg(m_id).arg(m_request.url().toString())
++        .arg(m_pos).arg(Source(m_request)) );
++    m_pending = new NetStreamRequest(m_id, m_request);
++    NAMThread::PostEvent(m_pending);
++    return true;
++}
++
++// signal from NAMThread manager that a request has been started
++void NetStream::slotRequestStarted(int id, QNetworkReply *reply)
++{
++    QMutexLocker locker(&m_mutex);
++
++    if (m_id != id)
++        return;
++
++    m_pending = 0; // Event is no longer valid
++
++    if (!m_reply)
++    {
++        LOG(VB_FILE, LOG_INFO, LOC + QString("(%1) Started 0x%2")
++            .arg(m_id).arg(quintptr(reply),0,16) );
++
++        m_reply = reply;
++        m_state = kStarted;
++
++        reply->setReadBufferSize(kMaxBuffer);
++
++        // NB The following signals must be Qt::DirectConnection 'cos this slot
++        // was connected Qt::DirectConnection so the current thread is NAMThread
++
++        // QNetworkReply signals
++        connect(reply, SIGNAL(finished()), this, SLOT(slotFinished()), Qt::DirectConnection );
++#ifndef QT_NO_OPENSSL
++        connect(reply, SIGNAL(sslErrors(const QList<QSslError> &)), this,
++            SLOT(slotSslErrors(const QList<QSslError> &)), Qt::DirectConnection );
++#endif
++        // QIODevice signals
++        connect(reply, SIGNAL(readyRead()), this, SLOT(slotReadyRead()), Qt::DirectConnection );
++    }
++    else
++        LOG(VB_GENERAL, LOG_ERR, LOC +
++            QString("(%1) Started but m_reply not NULL").arg(m_id));
++}
++
++static qlonglong inline ContentLength(const QNetworkReply *reply)
++{
++    bool ok;
++    qlonglong len = reply->header(QNetworkRequest::ContentLengthHeader)
++        .toLongLong(&ok);
++    return ok ? len : -1;
++}
++
++static qlonglong inline ContentRange(const QNetworkReply *reply,
++    qlonglong &first, qlonglong &last)
++{
++    first = last = -1;
++
++    QByteArray range = reply->rawHeader("Content-Range");
++    if (range.isEmpty())
++        return -1;
++
++    // See RFC 2616 14.16: 'bytes begin-end/size'
++    qlonglong len;
++    if (3 != std::sscanf(range.constData(), " bytes %lld - %lld / %lld", &first, &last, &len))
++    {
++        LOG(VB_GENERAL, LOG_ERR, LOC + QString("Invalid Content-Range:'%1'")
++            .arg(range.constData()) );
++        return -1;
++    }
++
++    return len;
++}
++
++static bool inline RequestRange(const QNetworkRequest &request,
++    qlonglong &first, qlonglong &last)
++{
++    first = last = -1;
++
++    QByteArray range = request.rawHeader("Range");
++    if (range.isEmpty())
++        return false;
++
++    if (1 > std::sscanf(range.constData(), " bytes %lld - %lld", &first, &last))
++    {
++        LOG(VB_GENERAL, LOG_ERR, LOC + QString("Invalid Range:'%1'")
++            .arg(range.constData()) );
++        return false;
++    }
++
++    return true;
++}
++
++// signal from QNetworkReply
++void NetStream::slotReadyRead()
++{
++    QMutexLocker locker(&m_mutex);
++
++    if (m_reply)
++    {
++        qint64 avail = m_reply->bytesAvailable();
++        LOG(VB_FILE, (avail <= 2 * kMaxBuffer) ? LOG_DEBUG :
++                (avail <= 4 * kMaxBuffer) ? LOG_INFO : LOG_WARNING,
++             LOC + QString("(%1) Ready 0x%2, %3 bytes available").arg(m_id)
++                .arg(quintptr(m_reply),0,16).arg(avail) );
++
++        if (m_size < 0 || m_state < kReady)
++        {
++            qlonglong first, last, len = ContentRange(m_reply, first, last);
++            if (len >= 0)
++            {
++                m_size = len;
++                LOG(VB_FILE, LOG_INFO, LOC + QString("(%1) Ready 0x%2, range %3-%4/%5")
++                    .arg(m_id).arg(quintptr(m_reply),0,16).arg(first).arg(last).arg(len) );
++            }
++            else
++            {
++                m_size = ContentLength(m_reply);
++                if (m_state < kReady || m_size >= 0)
++                    LOG(VB_FILE, LOG_INFO, LOC +
++                        QString("(%1) Ready 0x%2, content length %3")
++                        .arg(m_id).arg(quintptr(m_reply),0,16).arg(m_size) );
++            }
++        }
++
++        if (m_state < kReady)
++            m_state = kReady;
++
++        locker.unlock();
++        emit ReadyRead(this);
++        locker.relock();
++
++        m_ready.wakeAll();
++    }
++    else
++        LOG(VB_GENERAL, LOG_ERR, LOC +
++            QString("(%1) ReadyRead but m_reply = NULL").arg(m_id));
++}
++
++// signal from QNetworkReply
++void NetStream::slotFinished()
++{
++    QMutexLocker locker(&m_mutex);
++
++    if (m_reply)
++    {
++        QNetworkReply::NetworkError error = m_reply->error();
++        if (QNetworkReply::NoError == error)
++        {
++            // Check for a re-direct
++            QUrl url = m_reply->attribute(
++                QNetworkRequest::RedirectionTargetAttribute).toUrl();
++            if (!url.isValid())
++            {
++                m_state = kFinished;
++            }
++            else if (m_nRedirections++ > 0)
++            {
++                LOG(VB_FILE, LOG_WARNING, LOC + QString("(%1) Too many redirections")
++                    .arg(m_id));
++                m_state = kFinished;
++            }
++            else if ((url = m_request.url().resolved(url)) == m_request.url())
++            {
++                LOG(VB_FILE, LOG_WARNING, LOC + QString("(%1) Redirection loop to %2")
++                    .arg(m_id).arg(url.toString()) );
++                m_state = kFinished;
++            }
++            else
++            {
++                LOG(VB_FILE, LOG_INFO, LOC + QString("(%1) Redirecting").arg(m_id));
++                m_state = Request(url) ? kPending : kFinished;
++            }
++        }
++        else
++        {
++            LOG(VB_FILE, LOG_WARNING, LOC + QString("(%1): %2")
++                .arg(m_id).arg(m_reply->errorString()) );
++            m_state = kFinished;
++        }
++
++        if (m_state == kFinished)
++        {
++            if (m_size < 0)
++                m_size = m_pos + m_reply->size();
++
++            LOG(VB_FILE, LOG_INFO, LOC + QString("(%1) Finished 0x%2 %3/%4 bytes from %5")
++                .arg(m_id).arg(quintptr(m_reply),0,16).arg(m_pos).arg(m_size).arg(Source(m_reply)) );
++
++            locker.unlock();
++            emit Finished(this);
++            locker.relock();
++
++            m_finished.wakeAll();
++        }
++    }
++    else
++        LOG(VB_GENERAL, LOG_ERR, LOC + QString("(%1) Finished but m_reply = NULL")
++            .arg(m_id));
++}
++
++#ifndef QT_NO_OPENSSL
++// signal from QNetworkReply
++void NetStream::slotSslErrors(const QList<QSslError> &errors)
++{
++    QMutexLocker locker(&m_mutex);
++
++    if (m_reply)
++    {
++        bool bIgnore = true;
++        Q_FOREACH(const QSslError &e, errors)
++        {
++            LOG(VB_FILE, LOG_INFO, LOC + QString("(%1) SSL error %2: ")
++                .arg(m_id).arg(e.error()) + e.errorString() );
++            switch (e.error())
++            {
++#if 1 // The BBC use a self certified cert
++            case QSslError::SelfSignedCertificateInChain:
++                break;
++#endif
++            default:
++                bIgnore = false;
++                break;
++            }
++        }
++
++        if (bIgnore)
++        {
++            LOG(VB_FILE, LOG_INFO, LOC + QString("(%1) SSL errors ignored").arg(m_id));
++            m_reply->ignoreSslErrors(errors);
++        }
++    }
++    else
++        LOG(VB_GENERAL, LOG_ERR, LOC +
++            QString("(%1) SSL error but m_reply = NULL").arg(m_id) );
++}
++#endif
++
++
++/**
++ * RingBuffer interface
++ */
++// static
++bool NetStream::IsSupported(const QUrl &url)
++{
++    return url.isValid() &&
++        (url.scheme() == "http" || url.scheme() == "https") &&
++        !url.authority().isEmpty() &&
++        !url.path().isEmpty();
++}
++
++bool NetStream::IsOpen() const
++{
++    QMutexLocker locker(&m_mutex);
++    return m_state > kClosed;
++}
++
++void NetStream::Abort()
++{
++    QMutexLocker locker(&m_mutex);
++
++    if (m_pending)
++    {
++        LOG(VB_FILE, LOG_INFO, LOC + QString("(%1) Cancelled").arg(m_id) );
++        m_pending->m_bCancelled = true;
++        m_pending = 0;
++    }
++
++    if (m_reply)
++    {
++        if (m_state >= kStarted && m_state < kFinished)
++            LOG(VB_FILE, LOG_INFO, LOC + QString("(%1) Abort 0x%2")
++                .arg(m_id).arg(quintptr(m_reply),0,16) );
++
++        NAMThread::PostEvent(new NetStreamAbort(m_id, m_reply));
++        // NAMthread will delete the reply
++        m_reply = 0;
++    }
++
++    m_state = kFinished;
++}
++
++int NetStream::safe_read(void *data, unsigned sz, unsigned millisecs /* = 0 */)
++{
++    QTime t; t.start();
++    QMutexLocker locker(&m_mutex);
++
++    if (m_size >= 0 && m_pos >= m_size)
++        return 0; // EOF
++
++    while (m_state < kFinished && (!m_reply || m_reply->bytesAvailable() < sz))
++    {
++        unsigned elapsed = t.elapsed();
++        if (elapsed >= millisecs)
++            break;
++        m_ready.wait(&m_mutex, millisecs - elapsed);
++    }
++
++    locker.unlock();
++    QMutexLocker lockNAM(NAMThread::GetMutex());
++    locker.relock();
++    if (!m_reply)
++        return -1;
++
++    qint64 avail = m_reply->read(reinterpret_cast< char* >(data), sz);
++    if (avail <= 0)
++        return m_state >= kFinished ? 0 : -1; // 0= EOF
++
++    LOG(VB_FILE, LOG_DEBUG, LOC + QString("(%1) safe_read @ %4 => %2/%3, %5 mS")
++        .arg(m_id).arg(avail).arg(sz).arg(m_pos).arg(t.elapsed()) );
++    m_pos += avail;
++    return (int)avail;
++}
++
++qlonglong NetStream::Seek(qlonglong pos)
++{
++    QMutexLocker locker(&m_mutex);
++
++    if (pos == m_pos)
++        return pos;
++
++    if (pos < 0 || (m_size >= 0 && pos > m_size))
++    {
++        LOG(VB_GENERAL, LOG_ERR, LOC +
++            QString("(%1) Seek(%2) out of range [0..%3]")
++            .arg(m_id).arg(pos).arg(m_size) );
++        return -1;
++    }
++
++    LOG(VB_FILE, LOG_INFO, LOC + QString("(%1) Seek(%2) curr %3 end %4")
++        .arg(m_id).arg(pos).arg(m_pos).arg(m_size) );
++    m_pos = pos;
++    return Request(m_request.url()) ? m_pos : -1;
++}
++
++qlonglong NetStream::GetReadPosition() const
++{
++    QMutexLocker locker(&m_mutex);
++
++    return m_pos;
++}
++
++qlonglong NetStream::GetSize() const
++{
++    QMutexLocker locker(&m_mutex);
++
++    return m_size;
++}
++
++
++/**
++ * Synchronous interface
++ */
++bool NetStream::WaitTillReady(unsigned long time)
++{
++    QMutexLocker locker(&m_mutex);
++
++    QTime t; t.start();
++    while (m_state < kReady)
++    {
++        unsigned elapsed = t.elapsed();
++        if (elapsed > time)
++            return false;
++
++        m_ready.wait(&m_mutex, time - elapsed);
++    }
++
++    return true;
++}
++
++bool NetStream::WaitTillFinished(unsigned long time)
++{
++    QMutexLocker locker(&m_mutex);
++
++    QTime t; t.start();
++    while (m_state < kFinished)
++    {
++        unsigned elapsed = t.elapsed();
++        if (elapsed > time)
++            return false;
++
++        m_finished.wait(&m_mutex, time - elapsed);
++    }
++
++    return true;
++}
++
++QNetworkReply::NetworkError NetStream::GetError() const
++{
++    QMutexLocker locker(&m_mutex);
++    return !m_reply ? QNetworkReply::OperationCanceledError : m_reply->error();
++}
++
++QString NetStream::GetErrorString() const
++{
++    QMutexLocker locker(&m_mutex);
++    return !m_reply ? "Operation cancelled" : m_reply->errorString();
++}
++
++qlonglong NetStream::BytesAvailable() const
++{
++    QMutexLocker locker(&m_mutex);
++    return m_reply ? m_reply->bytesAvailable() : 0;
++}
++
++QByteArray NetStream::ReadAll()
++{
++    QMutexLocker locker(&m_mutex);
++
++    if (!m_reply)
++        return 0;
++
++    QByteArray data =  m_reply->readAll();
++    m_pos += data.size();
++    return data;
++}
++
++/**
++ * Asynchronous interface
++ */
++bool NetStream::isStarted() const
++{
++    QMutexLocker locker(&m_mutex);
++    return m_state >= kStarted;
++}
++
++bool NetStream::isReady() const
++{
++    QMutexLocker locker(&m_mutex);
++    return m_state >= kReady;
++}
++
++bool NetStream::isFinished() const
++{
++    QMutexLocker locker(&m_mutex);
++    return m_state >= kFinished;
++}
++
++/**
++ * Public helpers
++ */
++// static
++bool NetStream::isAvailable()
++{
++    return NAMThread::isAvailable();
++}
++
++// Time when URI was last written to cache or invalid if not cached.
++// static
++QDateTime NetStream::GetLastModified(const QString &url)
++{
++    return NAMThread::GetLastModified(url);
++}
++
++
++/**
++ * NetworkAccessManager event loop thread
++ */
++//static
++NAMThread & NAMThread::manager()
++{
++    QMutexLocker locker(&s_mtx);
++
++    // Singleton
++    static NAMThread thread;
++    thread.start();
++    return thread;
++}
++
++NAMThread::NAMThread() : m_bQuit(false), m_mutexNAM(QMutex::Recursive), m_nam(0)
++{
++    setObjectName("NAMThread");
++
++#ifndef QT_NO_OPENSSL
++    // This ought to be done by the Qt lib but isn't in 4.7
++    //Q_DECLARE_METATYPE(QList<QSslError>)
++    qRegisterMetaType< QList<QSslError> >();
++#endif
++}
++
++// virtual
++NAMThread::~NAMThread()
++{
++    QMutexLocker locker(&m_mutex);
++    delete m_nam;
++}
++
++// virtual
++void NAMThread::run()
++{
++    LOG(VB_FILE, LOG_INFO, LOC "NAMThread starting");
++
++    m_nam = new QNetworkAccessManager();
++    m_nam->setObjectName("NetStream NAM");
++
++    // Setup cache
++    QScopedPointer<QNetworkDiskCache> cache(new QNetworkDiskCache());
++    cache->setCacheDirectory(
++        QDesktopServices::storageLocation(QDesktopServices::CacheLocation) );
++    m_nam->setCache(cache.take());
++
++    // Setup a network proxy e.g. for TOR: socks://localhost:9050
++    // TODO get this from mythdb
++    QString proxy(getenv("MYTHMHEG_PROXY"));
++    if (!proxy.isEmpty())
++    {
++        QUrl url(proxy, QUrl::TolerantMode);
++        QNetworkProxy::ProxyType type =
++            url.scheme().isEmpty() ? QNetworkProxy::HttpProxy :
++            url.scheme() == "socks" ? QNetworkProxy::Socks5Proxy :
++            url.scheme() == "http" ? QNetworkProxy::HttpProxy :
++            url.scheme() == "https" ? QNetworkProxy::HttpProxy :
++            url.scheme() == "cache" ? QNetworkProxy::HttpCachingProxy :
++            url.scheme() == "ftp" ? QNetworkProxy::FtpCachingProxy :
++            QNetworkProxy::NoProxy;
++        if (QNetworkProxy::NoProxy != type)
++        {
++            LOG(VB_GENERAL, LOG_INFO, LOC "Using proxy: " + proxy);
++            m_nam->setProxy(QNetworkProxy(
++                type, url.host(), url.port(), url.userName(), url.password() ));
++        }
++        else
++        {
++            LOG(VB_MHEG, LOG_ERR, LOC + QString("Unknown proxy type %1")
++                .arg(url.scheme()) );
++        }
++    }
++
++    // Quit when main app quits
++    connect(QCoreApplication::instance(), SIGNAL(aboutToQuit()), this, SLOT(quit()) );
++
++    m_running.release();
++
++    QMutexLocker lockNAM(&m_mutexNAM);
++    while(!m_bQuit)
++    {
++        // Process NAM events
++        QCoreApplication::processEvents();
++
++        lockNAM.unlock();
++
++        QMutexLocker locker(&m_mutex);
++        m_work.wait(&m_mutex, 100);
++
++        lockNAM.relock();
++
++        while (!m_workQ.isEmpty())
++        {
++            QScopedPointer< QEvent > ev(m_workQ.dequeue());
++            locker.unlock();
++            NewRequest(ev.data());
++            locker.relock();
++        }
++    }
++
++    m_running.acquire();
++
++    delete m_nam;
++    m_nam = 0;
++
++    LOG(VB_FILE, LOG_INFO, LOC "NAMThread stopped");
++}
++
++// slot
++void NAMThread::quit()
++{
++    m_bQuit = true;
++    QThread::quit();
++}
++
++void NAMThread::Post(QEvent *event)
++{
++    QMutexLocker locker(&m_mutex);
++    m_workQ.enqueue(event);
++}
++
++bool NAMThread::NewRequest(QEvent *event)
++{
++    switch (event->type())
++    {
++    case NetStreamRequest::kType:
++        return StartRequest(dynamic_cast< NetStreamRequest* >(event));
++    case NetStreamAbort::kType:
++        return AbortRequest(dynamic_cast< NetStreamAbort* >(event));
++    default:
++        break;
++    }
++    return false;
++}
++
++bool NAMThread::StartRequest(NetStreamRequest *p)
++{
++    if (!p)
++    {
++        LOG(VB_GENERAL, LOG_ERR, LOC "Invalid NetStreamRequest");
++        return false;
++    }
++
++    if (!p->m_bCancelled)
++    {
++        QNetworkReply *reply = m_nam->get(p->m_req);
++        LOG(VB_FILE, LOG_DEBUG, LOC + QString("(%1) StartRequest 0x%2")
++            .arg(p->m_id).arg(quintptr(reply),0,16) );
++        emit requestStarted(p->m_id, reply);
++    }
++    else
++        LOG(VB_FILE, LOG_INFO, LOC + QString("(%1) NetStreamRequest cancelled").arg(p->m_id) );
++    return true;
++}
++
++bool NAMThread::AbortRequest(NetStreamAbort *p)
++{
++    if (!p)
++    {
++        LOG(VB_GENERAL, LOG_ERR, LOC "Invalid NetStreamAbort");
++        return false;
++    }
++
++    LOG(VB_FILE, LOG_DEBUG, LOC + QString("(%1) AbortRequest 0x%2").arg(p->m_id)
++        .arg(quintptr(p->m_reply),0,16) );
++    p->m_reply->abort();
++    p->m_reply->disconnect();
++    delete p->m_reply;
++    return true;
++}
++
++// static
++bool NAMThread::isAvailable()
++{
++    NAMThread &m = manager();
++
++    if (!m.m_running.tryAcquire(1, 3000))
++        return false;
++
++    m.m_running.release();
++
++    QMutexLocker locker(&m.m_mutex);
++
++    if (!m.m_nam)
++        return false;
++
++    switch (m.m_nam->networkAccessible())
++    {
++    case QNetworkAccessManager::Accessible: return true;
++    case QNetworkAccessManager::NotAccessible: return false;
++    case QNetworkAccessManager::UnknownAccessibility: return true;
++    }
++    return false;
++}
++
++// Time when URI was last written to cache or invalid if not cached.
++// static
++QDateTime NAMThread::GetLastModified(const QString &url)
++{
++    NAMThread &m = manager();
++
++    QMutexLocker locker(&m.m_mutex);
++
++    if (!m.m_nam)
++        return QDateTime(); // Invalid
++
++    QAbstractNetworkCache *cache = m.m_nam->cache();
++    if (!cache)
++        return QDateTime(); // Invalid
++
++    QNetworkCacheMetaData meta = cache->metaData(QUrl(url));
++    if (!meta.isValid())
++    {
++        LOG(VB_FILE, LOG_DEBUG, LOC + QString("GetLastModified('%1') not in cache")
++            .arg(url));
++        return QDateTime(); // Invalid
++    }
++
++    // Check if expired
++    QDateTime const now(QDateTime::currentDateTime()); // local time
++    QDateTime expire = meta.expirationDate();
++    if (expire.isValid() && expire.toLocalTime() < now)
++    {
++        LOG(VB_FILE, LOG_INFO, LOC + QString("GetLastModified('%1') past expiration %2")
++            .arg(url).arg(expire.toString()));
++        return QDateTime(); // Invalid
++    }
++
++    // Get time URI was modified (Last-Modified header)  NB this may be invalid
++    QDateTime lastMod = meta.lastModified();
++
++    QNetworkCacheMetaData::RawHeaderList headers = meta.rawHeaders();
++    Q_FOREACH(const QNetworkCacheMetaData::RawHeader &h, headers)
++    {
++        // RFC 1123 date format: Thu, 01 Dec 1994 16:00:00 GMT
++        static const char kszFormat[] = "ddd, dd MMM yyyy HH:mm:ss 'GMT'";
++
++        QString const first(h.first.toLower());
++        if (first == "cache-control")
++        {
++            QString const second(h.second.toLower());
++            if (second == "no-cache" || second == "no-store")
++            {
++                LOG(VB_FILE, LOG_INFO, LOC +
++                    QString("GetLastModified('%1') Cache-Control disabled").arg(url));
++                cache->remove(QUrl(url));
++                return QDateTime(); // Invalid
++            }
++        }
++        else if (first == "date")
++        {
++            QDateTime d = QDateTime::fromString(h.second, kszFormat);
++            if (!d.isValid())
++            {
++                LOG(VB_GENERAL, LOG_WARNING, LOC +
++                    QString("GetLastModified invalid Date header '%1'")
++                    .arg(h.second.constData()));
++                continue;
++            }
++            d.setTimeSpec(Qt::UTC);
++            lastMod = d;
++        }
++    }
++
++    LOG(VB_FILE, LOG_DEBUG, LOC + QString("GetLastModified('%1') last modified %2")
++        .arg(url).arg(lastMod.toString()));
++    return lastMod;
++}
++
++/* End of file */
+diff --git a/mythtv/libs/libmythtv/netstream.h b/mythtv/libs/libmythtv/netstream.h
+new file mode 100644
+index 0000000..9a56c92
+--- /dev/null
++++ b/mythtv/libs/libmythtv/netstream.h
+@@ -0,0 +1,152 @@
++/* Network stream
++ * Copyright 2011 Lawrence Rust <lvr at softsystem dot co dot uk>
++ */
++#ifndef NETSTREAM_H
++#define NETSTREAM_H
++
++#include <QList>
++#include <QString>
++#include <QByteArray>
++#include <QObject>
++#include <QMutex>
++#include <QSemaphore>
++#include <QThread>
++#include <QNetworkRequest>
++#include <QNetworkReply>
++#include <QSslError>
++#include <QWaitCondition>
++#include <QQueue>
++#include <QDateTime>
++
++class QUrl;
++class QNetworkAccessManager;
++class NetStreamRequest;
++class NetStreamAbort;
++
++
++/**
++ * Stream content from a URI
++ */
++class NetStream : public QObject
++{
++    Q_OBJECT
++    Q_DISABLE_COPY(NetStream)
++
++public:
++    enum EMode { kNeverCache, kPreferCache, kAlwaysCache };
++    NetStream(const QUrl &, EMode mode = kPreferCache);
++    virtual ~NetStream();
++
++public:
++    // RingBuffer interface
++    static bool IsSupported(const QUrl &);
++    bool IsOpen() const;
++    void Abort();
++    int safe_read(void *data, unsigned size, unsigned millisecs = 0);
++    qlonglong Seek(qlonglong);
++    qlonglong GetReadPosition() const;
++    qlonglong GetSize() const;
++
++    // Properties
++    QUrl Url() const { return m_request.url(); }
++
++    // Synchronous interface
++    bool WaitTillReady(unsigned long millisecs);
++    bool WaitTillFinished(unsigned long millisecs);
++    QNetworkReply::NetworkError GetError() const;
++    QString GetErrorString() const;
++    qlonglong BytesAvailable() const;
++    QByteArray ReadAll();
++
++    // Async interface
++    bool isStarted() const;
++    bool isReady() const;
++    bool isFinished() const;
++
++signals:
++    void ReadyRead(QObject*);
++    void Finished(QObject*);
++
++public:
++    // Time when a URI was last written to cache or invalid if not cached.
++    static QDateTime GetLastModified(const QString &url);
++    // Is the network accessible
++    static bool isAvailable();
++
++    // Implementation
++private slots:
++    // NAMThread signals
++    void slotRequestStarted(int, QNetworkReply *);
++    // QNetworkReply signals
++    void slotFinished();
++#ifndef QT_NO_OPENSSL
++    void slotSslErrors(const QList<QSslError> & errors);
++#endif
++    // QIODevice signals
++    void slotReadyRead();
++
++private:
++    bool Request(const QUrl &);
++
++    const int m_id; // Unique request ID
++
++    mutable QMutex m_mutex; // Protects r/w access to the following data
++    QNetworkRequest m_request;
++    enum { kClosed, kPending, kStarted, kReady, kFinished } m_state;
++    NetStreamRequest* m_pending;
++    QNetworkReply* m_reply;
++    int m_nRedirections;
++    qlonglong m_size;
++    qlonglong m_pos;
++    QWaitCondition m_ready;
++    QWaitCondition m_finished;
++};
++
++
++/**
++ * Thread to process NetStream requests
++ */
++class NAMThread : public QThread
++{
++    Q_OBJECT
++    Q_DISABLE_COPY(NAMThread)
++
++    // Use manager() to create
++    NAMThread();
++
++public:
++    static NAMThread & manager(); // Singleton
++    virtual ~NAMThread();
++
++    static inline void PostEvent(QEvent *e) { manager().Post(e); }
++    void Post(QEvent *event);
++
++    static inline QMutex* GetMutex() { return &manager().m_mutexNAM; }
++
++    static bool isAvailable(); // is network usable
++    static QDateTime GetLastModified(const QString &url);
++
++signals:
++     void requestStarted(int, QNetworkReply *);
++
++    // Implementation
++protected:
++    virtual void run(); // QThread override
++    bool NewRequest(QEvent *);
++    bool StartRequest(NetStreamRequest *);
++    bool AbortRequest(NetStreamAbort *);
++
++private slots:
++    void quit();
++
++private:
++    volatile bool m_bQuit;
++    QSemaphore m_running;
++    mutable QMutex m_mutexNAM; // Provides recursive access to m_nam
++    QNetworkAccessManager *m_nam;
++    mutable QMutex m_mutex; // Protects r/w access to the following data
++    QQueue< QEvent * > m_workQ;
++    QWaitCondition m_work;
++};
++
++#endif /* ndef NETSTREAM_H */
+diff --git a/mythtv/libs/libmythtv/ringbuffer.h b/mythtv/libs/libmythtv/ringbuffer.h
+index 3195163..27bae64 100644
+--- a/mythtv/libs/libmythtv/ringbuffer.h
++++ b/mythtv/libs/libmythtv/ringbuffer.h
+@@ -39,10 +39,13 @@ enum RingBufferType
+     kRingBuffer_BD,
+     kRingBuffer_HTTP,
+     kRingBuffer_HLS,
++    kRingBuffer_MHEG
+ };
+ 
+ class MTV_PUBLIC RingBuffer : protected MThread
+ {
++    friend class ICRingBuffer;
++
+   public:
+     static RingBuffer *Create(const QString &lfilename, bool write,
+                               bool usereadahead = true,
+@@ -85,6 +88,7 @@ class MTV_PUBLIC RingBuffer : protected MThread
+     virtual bool IsBookmarkAllowed(void) { return true; }
+     virtual int  BestBufferSize(void)   { return 32768; }
+     static QString BitrateToString(uint64_t rate, bool hz = false);
++    RingBufferType GetType() const { return type; }
+ 
+     // DVD and bluray methods
+     bool IsDisc(void) const { return IsDVD() || IsBD(); }
+-- 
+1.7.9.5
+

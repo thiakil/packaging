@@ -1,0 +1,59 @@
+From 91dc12086a09d8b4c49d08c1ee01080067138ad6 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Tue, 20 Aug 2013 14:54:06 +0100
+Subject: [PATCH 270/285] Player: DecoderLoop sleeps until audio buffers
+ available
+
+DVB radio streams (e.g. UK FreeView & FreeSat) burn 100% CPU time when
+playing back a recording.
+
+This patch adds a 1mS sleep loop until the audio buffer has space
+available.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |   18 +++++++++++-------
+ 1 file changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 54f1426..53335dd 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -2964,23 +2964,27 @@ bool MythPlayer::DecoderGetFrame(DecodeType decodetype, bool unsafe)
+         return false;
+ 
+     // Wait for frames to be available for decoding onto
+-    if (!videoOutput->EnoughFreeFrames() && !unsafe && !killdecoder)
++    int tries = 0;
++    while (!unsafe &&
++        (!videoOutput->EnoughFreeFrames() || GetAudio()->IsBufferAlmostFull()) )
+     {
+-        int tries = 0;
+-        while (!videoOutput->EnoughFreeFrames() && (tries++ < 10))
+-            usleep(1000);
+-        if (!videoOutput->EnoughFreeFrames())
++        if (killdecoder)
++            return false;
++
++        if (++tries > 10)
+         {
+             if (++videobuf_retries >= 2000)
+             {
+                 VERBOSE(VB_IMPORTANT, LOC +
+-                        "Timed out waiting for free video buffers.");
++                        "Timed out waiting for free a/v buffers.");
+                 videobuf_retries = 0;
+             }
+             return false;
+         }
+-        videobuf_retries = 0;
++
++        usleep(1000);
+     }
++    videobuf_retries = 0;
+ 
+     if (!decoder_change_lock.tryLock(5))
+         return false;
+-- 
+1.7.9.5
+

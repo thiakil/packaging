@@ -1,0 +1,104 @@
+From 49e5646fea012435ea5c60a021c850aecdf9ad94 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 28 Sep 2013 14:28:46 +0100
+Subject: [PATCH 191/207] AFD: Fix playback of MPEG1 recordings with Xv and
+ VAAAPI
+
+1. Ffmpeg's avcodec_open2 fails if the stream's type doesn't match
+the decoder's type.  This patch forces the codec type to mpeg2 as
+well as the stream to work around this limitation.
+
+2. Ffmpeg cannot decode MPEG1 to a VAAPI supported pixel format so it
+is necessary for VAAPI to refuse to handle an MPEG1 stream.  In this
+case the decoder will fallback to Xvideo.
+
+Without this patch the playback of mpeg1 videos is broken.
+This bug affects older videos and cameras using MPEG1 encoding.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/avformatdecoder.cpp |   20 +++++++++-----------
+ mythtv/libs/libmythtv/vaapicontext.cpp    |    2 +-
+ 2 files changed, 10 insertions(+), 12 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/avformatdecoder.cpp b/mythtv/libs/libmythtv/avformatdecoder.cpp
+index 3740779..7bb3e33 100644
+--- a/mythtv/libs/libmythtv/avformatdecoder.cpp
++++ b/mythtv/libs/libmythtv/avformatdecoder.cpp
+@@ -2195,28 +2195,23 @@ int AvFormatDecoder::ScanStreams(bool novideo)
+ 
+             if (version)
+             {
+-#if defined(USING_VDPAU)
++#ifdef USING_VDPAU
+                 // HACK -- begin
+                 // Force MPEG2 decoder on MPEG1 streams.
+                 // Needed for broken transmitters which mark
+                 // MPEG2 streams as MPEG1 streams, and should
+                 // be harmless for unbroken ones.
+-                if (enc->codec_id == AV_CODEC_ID_MPEG1VIDEO)
+-                    enc->codec_id = AV_CODEC_ID_MPEG2VIDEO;
++                enum AVCodecID cid = (enc->codec_id != AV_CODEC_ID_MPEG1VIDEO) ?
++                                        enc->codec_id : AV_CODEC_ID_MPEG2VIDEO;
+                 // HACK -- end
+-#endif // USING_VDPAU
+-#ifdef USING_VDPAU
+                 MythCodecID vdpau_mcid;
+                 vdpau_mcid =
+                     VideoOutputVDPAU::GetBestSupportedCodec(width, height, dec,
+-                                                            mpeg_version(enc->codec_id),
++                                                            mpeg_version(cid),
+                                                             !FlagIsSet(kDecodeAllowGPU));
+ 
+                 if (vdpau_mcid >= video_codec_id)
+-                {
+-                    enc->codec_id = (CodecID) myth2av_codecid(vdpau_mcid);
+                     video_codec_id = vdpau_mcid;
+-                }
+ #endif // USING_VDPAU
+ #ifdef USING_GLVAAPI
+                 MythCodecID vaapi_mcid;
+@@ -2229,7 +2224,6 @@ int AvFormatDecoder::ScanStreams(bool novideo)
+ 
+                 if (vaapi_mcid >= video_codec_id)
+                 {
+-                    enc->codec_id = (CodecID)myth2av_codecid(vaapi_mcid);
+                     video_codec_id = vaapi_mcid;
+                     if (FlagIsSet(kDecodeAllowGPU) &&
+                         codec_is_vaapi(video_codec_id))
+@@ -2247,7 +2241,6 @@ int AvFormatDecoder::ScanStreams(bool novideo)
+ 
+                 if (dxva2_mcid >= video_codec_id)
+                 {
+-                    enc->codec_id = (CodecID)myth2av_codecid(dxva2_mcid);
+                     video_codec_id = dxva2_mcid;
+                     if (FlagIsSet(kDecodeAllowGPU) &&
+                         codec_is_dxva2(video_codec_id))
+@@ -2265,6 +2258,11 @@ int AvFormatDecoder::ScanStreams(bool novideo)
+                     "Unknown video codec - defaulting to MPEG2");
+                 video_codec_id = kCodec_MPEG2;
+             }
++            else
++            {
++                enc->codec_id = (CodecID)myth2av_codecid(video_codec_id);
++                codec = avcodec_find_decoder(enc->codec_id);
++            }
+ 
+             if (enc->codec)
+             {
+diff --git a/mythtv/libs/libmythtv/vaapicontext.cpp b/mythtv/libs/libmythtv/vaapicontext.cpp
+index 4adff42..a003eb0 100644
+--- a/mythtv/libs/libmythtv/vaapicontext.cpp
++++ b/mythtv/libs/libmythtv/vaapicontext.cpp
+@@ -70,7 +70,7 @@ VAProfile preferredProfile(MythCodecID codec)
+     if (kCodec_VC1_VAAPI   == codec) return VAProfileVC1Advanced;
+     if (kCodec_WMV3_VAAPI  == codec) return VAProfileVC1Main;
+     if (kCodec_MPEG2_VAAPI == codec) return VAProfileMPEG2Main;
+-    if (kCodec_MPEG1_VAAPI == codec) return VAProfileMPEG2Main;
++    // NB Ffmpeg 1.2.2 doesn't support MPEG1 with VAAPI pix_fmts
+     return VAProfileMPEG2Simple; // error
+ }
+ 
+-- 
+1.7.9.5
+

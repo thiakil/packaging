@@ -1,0 +1,52 @@
+From d69b609f6ebcb4a021fba9592a2ca1fe021ecda6 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 29 Oct 2011 11:24:57 +0200
+Subject: [PATCH 068/285] dvbrecorder: Correct test for MPEG TS continuity
+ counter
+
+The transport stream continuity counter is only incremented iff the packet
+has a payload.  This change only reports a continuity error iff the
+packet has a payload.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/dvbrecorder.cpp |   12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/dvbrecorder.cpp b/mythtv/libs/libmythtv/dvbrecorder.cpp
+index 5f0b3a7..18a21b5 100644
+--- a/mythtv/libs/libmythtv/dvbrecorder.cpp
++++ b/mythtv/libs/libmythtv/dvbrecorder.cpp
+@@ -475,10 +475,12 @@ bool DVBRecorder::ProcessAVTSPacket(const TSPacket &tspacket)
+     const uint pid = tspacket.PID();
+ 
+     // Check continuity counter
+-    if ((pid != 0x1fff) && !CheckCC(pid, tspacket.ContinuityCounter()))
++    if ((pid != 0x1fff) && tspacket.HasPayload() && !CheckCC(pid, tspacket.ContinuityCounter()))
+     {
+         VERBOSE(VB_RECORD, LOC +
+-                QString("PID 0x%1 discontinuity detected").arg(pid,0,16));
++            QString("ProcessAVTSPacket PID 0x%1 discontinuity expected %2 got %3").
++                arg(pid,0,16).arg((_continuity_counter[pid] + 1) & 0xf).
++                arg(tspacket.ContinuityCounter()) );
+         _continuity_error_count++;
+     }
+ 
+@@ -509,10 +511,12 @@ bool DVBRecorder::ProcessTSPacket(const TSPacket &tspacket)
+     const uint pid = tspacket.PID();
+ 
+     // Check continuity counter
+-    if ((pid != 0x1fff) && !CheckCC(pid, tspacket.ContinuityCounter()))
++    if ((pid != 0x1fff) && tspacket.HasPayload() && !CheckCC(pid, tspacket.ContinuityCounter()))
+     {
+         VERBOSE(VB_RECORD, LOC +
+-                QString("PID 0x%1 discontinuity detected").arg(pid,0,16));
++            QString("ProcessTSPacket PID 0x%1 discontinuity expected %2 got %3").
++                arg(pid,0,16).arg((_continuity_counter[pid] + 1) & 0xf).
++                arg(tspacket.ContinuityCounter()) );
+         _continuity_error_count++;
+     }
+ 
+-- 
+1.7.9.5
+

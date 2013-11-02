@@ -1,0 +1,55 @@
+From b53f79a97fba8849aa27d23672590a52868f24e4 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 9 Sep 2011 17:37:32 +0200
+Subject: [PATCH 065/285] mythcommflag: Fix SEGV when invoked with --skipdb
+ option
+
+A NULL deref of MSqlQuery::m_db occurs in MSqlQuery::prepare() if the query
+was contructed using MSqlQuery::InitCon() and db->m_db.hostName is empty.
+This situation is expected if mythcommflag is started with the skipdb option.
+
+This patch checks the value of m_db in the prepare() and exec() methods before
+dereferencing the pointer.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythdb/mythdbcon.cpp |    9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/mythtv/libs/libmythdb/mythdbcon.cpp b/mythtv/libs/libmythdb/mythdbcon.cpp
+index 829f448..013c8fe 100644
+--- a/mythtv/libs/libmythdb/mythdbcon.cpp
++++ b/mythtv/libs/libmythdb/mythdbcon.cpp
+@@ -504,6 +504,9 @@ MSqlQueryInfo MSqlQuery::DDCon()
+ 
+ bool MSqlQuery::exec()
+ {
++    if (!m_db)
++        return false;
++
+     // Database connection down.  Try to restart it, give up if it's still
+     // down
+     if (!m_db->isOpen() && !m_db->Reconnect())
+@@ -548,6 +551,9 @@ bool MSqlQuery::exec()
+ 
+ bool MSqlQuery::exec(const QString &query)
+ {
++    if (!m_db)
++        return false;
++
+     // Database connection down.  Try to restart it, give up if it's still
+     // down
+     if (!m_db->isOpen() && !m_db->Reconnect())
+@@ -613,6 +619,9 @@ bool MSqlQuery::prepare(const QString& query)
+     }
+ #endif
+ 
++    if (!m_db)
++        return false;
++
+     // Database connection down.  Try to restart it, give up if it's still
+     // down
+     if (!m_db->isOpen() && !m_db->Reconnect())
+-- 
+1.7.9.5
+

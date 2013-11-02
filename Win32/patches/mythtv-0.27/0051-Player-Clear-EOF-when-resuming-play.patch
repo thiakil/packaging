@@ -1,0 +1,40 @@
+From 270ad249b2e39131ce52c21dea4c579378bc5b67 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 12 Jun 2013 14:55:08 +0100
+Subject: [PATCH 051/207] Player: Clear EOF when resuming play
+
+RingBuffer::Read returns 0 (eof) when the buffer is paused.  This causes
+ffmpeg to set eof and prevent any further reads by the decoder.
+
+This patch clears the decoder's eof on restarting play which in turn
+resets ffmpeg's eof.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |    3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 23c0ac5..663b945 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -377,6 +377,8 @@ bool MythPlayer::Pause(void)
+     audio.Pause(true);
+     PauseDecoder();
+     PauseBuffer();
++    if (!decoderPaused)
++        PauseDecoder(); // Retry in case audio only stream
+     allpaused = decoderPaused && videoPaused && bufferPaused;
+     {
+         if (FlagIsSet(kVideoIsNull) && decoder)
+@@ -401,6 +403,7 @@ bool MythPlayer::Play(float speed, bool normal, bool unpauseaudio)
+         return false;
+     }
+ 
++    SetEof(kEofStateNone);
+     UnpauseBuffer();
+     UnpauseDecoder();
+     if (unpauseaudio)
+-- 
+1.7.9.5
+

@@ -1,0 +1,27 @@
+From 54d595111ff02f706f4e7070595e2069dec4e38d Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 2 May 2013 16:09:52 +0100
+Subject: [PATCH 182/285] SSDP: Prevent an abort with empty request
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythupnp/ssdp.cpp |    3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythupnp/ssdp.cpp b/mythtv/libs/libmythupnp/ssdp.cpp
+index fefa781..9ecaa99 100644
+--- a/mythtv/libs/libmythupnp/ssdp.cpp
++++ b/mythtv/libs/libmythupnp/ssdp.cpp
+@@ -268,7 +268,8 @@ void SSDP::ProcessData( MSocketDevice *pSocket )
+         QStringList lines        = str.split("\r\n", QString::SkipEmptyParts);
+         QString     sRequestLine = lines.size() ? lines[0] : "";
+ 
+-        lines.pop_front();
++        if (lines.size())
++            lines.pop_front();
+ 
+         // ------------------------------------------------------------------
+         // Parse request Type
+-- 
+1.7.9.5
+

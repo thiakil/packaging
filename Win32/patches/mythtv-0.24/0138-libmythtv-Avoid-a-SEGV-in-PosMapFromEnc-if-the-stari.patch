@@ -1,0 +1,37 @@
+From 809fea145d7105de9dbdd87362451073f9b6d4c5 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 14 Jul 2012 12:48:11 +0200
+Subject: [PATCH 138/285] libmythtv: Avoid a SEGV in PosMapFromEnc if the
+ staring posmap is empty
+
+Over time I've seen a few core dumps like this:
+Program terminated with signal 11, Segmentation fault.
+    at decoderbase.cpp:226
+    long long last_index = m_positionMap.back().index;
+
+The reference to m_positionMap.back() is only valid if m_positionMap
+isn't empty.  If not then dereferencing index accesses unallocated memory
+and can cause a SEGV fault.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/decoderbase.cpp |    3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/decoderbase.cpp b/mythtv/libs/libmythtv/decoderbase.cpp
+index 30cb36b..ddb28c3 100644
+--- a/mythtv/libs/libmythtv/decoderbase.cpp
++++ b/mythtv/libs/libmythtv/decoderbase.cpp
+@@ -223,7 +223,8 @@ bool DecoderBase::PosMapFromEnc(void)
+ 
+     // append this new position map to class's
+     m_positionMap.reserve(m_positionMap.size() + posMap.size());
+-    long long last_index = m_positionMap.back().index;
++    long long last_index = m_positionMap.size()
++        ? m_positionMap.back().index : -1LL;
+     for (QMap<long long,long long>::const_iterator it = posMap.begin();
+          it != posMap.end(); it++)
+     {
+-- 
+1.7.9.5
+

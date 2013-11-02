@@ -1,0 +1,28 @@
+From b6da4c3444b9a8be8a39a19948fa5ff1eeaf863e Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 12 Aug 2013 20:33:22 +0100
+Subject: [PATCH 163/202] SSDP Reduce select timeout to reduce latency on exit
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythupnp/ssdp.cpp |    4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/libs/libmythupnp/ssdp.cpp b/mythtv/libs/libmythupnp/ssdp.cpp
+index 60b0cfa..d720c5c 100644
+--- a/mythtv/libs/libmythupnp/ssdp.cpp
++++ b/mythtv/libs/libmythupnp/ssdp.cpp
+@@ -286,8 +286,8 @@ void SSDP::run()
+             }
+         }
+         
+-        timeout.tv_sec  = 1;
+-        timeout.tv_usec = 0;
++        timeout.tv_sec  = 0;
++        timeout.tv_usec = 300000;
+ 
+         int count;
+         count = select(nMaxSocket + 1, &read_set, NULL, NULL, &timeout);
+-- 
+1.7.9.5
+

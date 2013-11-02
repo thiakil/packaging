@@ -1,0 +1,49 @@
+From 2dd57b0a3db6b925d7377f5f57825bdcb111a453 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 6 Nov 2011 13:53:58 +0100
+Subject: [PATCH 096/202] libmythtv: Set the modulation system for all dvb-s2
+ channels
+
+This works around a change in Linux 3.x handling of ioctl FE_SET_PROPERTY
+when DTV_DELIVERY_SYSTEM is set to 0.  In previous versions dvb_frontend
+interpreted this as meaning dvb-s and passed that value on to the frontend
+driver.  In versions 3.0 and later the value 0 is left unchanged and so the
+tune operation fails.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/dtvmultiplex.cpp |   18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/mythtv/libs/libmythtv/dtvmultiplex.cpp b/mythtv/libs/libmythtv/dtvmultiplex.cpp
+index de0574f..e6441da 100644
+--- a/mythtv/libs/libmythtv/dtvmultiplex.cpp
++++ b/mythtv/libs/libmythtv/dtvmultiplex.cpp
+@@ -280,6 +280,24 @@ bool DTVMultiplex::ParseDVB_S2(
+         return false;
+     }
+ 
++    switch (mod_sys)
++    {
++    case DTVModulationSystem::kModulationSystem_UNDEFINED:
++        // Force dvb-s if using qpsk
++        if (DTVModulation::kModulationQPSK == modulation)
++            mod_sys = DTVModulationSystem::kModulationSystem_DVBS;
++        else
++            mod_sys = DTVModulationSystem::kModulationSystem_DVBS2;
++        break;
++    case DTVModulationSystem::kModulationSystem_DVBS:
++    case DTVModulationSystem::kModulationSystem_DVBS2:
++        break;
++    default:
++        LOG(VB_GENERAL, LOG_ERR, LOC + "Unsupported S2 modulation system " +
++                QString("parameter '%1', aborting.").arg(_mod_sys));
++        return false;
++    }
++
+     if (!_rolloff.isEmpty())
+         ok &= rolloff.Parse(_rolloff);
+ 
+-- 
+1.7.9.5
+

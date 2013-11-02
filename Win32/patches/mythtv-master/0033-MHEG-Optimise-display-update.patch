@@ -1,0 +1,30 @@
+From 9b48bdee7029706952b16ce3a008421a429bd247 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 4 Mar 2012 19:56:13 +0100
+Subject: [PATCH 033/202] MHEG: Optimise display update
+
+This patch optimises the MHEG drawing functions and centralises the
+function to scale between MHEG coordinates and the OSD.  It also
+replaces floating point arithmetic with simple integer ops.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mhi.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/mhi.cpp b/mythtv/libs/libmythtv/mhi.cpp
+index 839d6cc..91521fc 100644
+--- a/mythtv/libs/libmythtv/mhi.cpp
++++ b/mythtv/libs/libmythtv/mhi.cpp
+@@ -706,7 +706,7 @@ void MHIContext::UpdateOSD(InteractiveScreen *osdWindow,
+     }
+     osdWindow->OptimiseDisplayedArea();
+     // N.B. bypasses OSD class hence no expiry set
+-    osdWindow->SetVisible(true);
++    osdWindow->SetVisible(!m_display.empty());
+ }
+ 
+ void MHIContext::GetInitialStreams(int &audioTag, int &videoTag)
+-- 
+1.7.9.5
+

@@ -1,0 +1,71 @@
+From d606acd57b04b0f82514853b3a63f0e296298350 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 18 Jul 2011 20:52:44 +0200
+Subject: [PATCH 054/285] RingBuffer: Fix deadlock after remotefile safe_read
+ error
+
+This patch fixes an error in lock acquisition heirarchy in the safe_read
+function for remote files.  If an error is encountered in Read() then poslock
+is read locked prior to callinf Seek but the caller has already locked
+rbwlock.
+
+This patch ensures the lock heirarchy: rwlock->poslock->rbrlock->rbwlock
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/RingBuffer.cpp |   16 +++++++++-------
+ 1 file changed, 9 insertions(+), 7 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/RingBuffer.cpp b/mythtv/libs/libmythtv/RingBuffer.cpp
+index 731dc09..be3ed1a 100644
+--- a/mythtv/libs/libmythtv/RingBuffer.cpp
++++ b/mythtv/libs/libmythtv/RingBuffer.cpp
+@@ -1244,36 +1244,38 @@ void RingBuffer::run(void)
+                         "Reading enough data to start playback");
+             }
+ 
++            int rbwposcopy = rbwpos;
++            rbwlock.unlock();
++
+             VERBOSE(VB_FILE|VB_EXTRA,
+                     LOC + QString("safe_read(...@%1, %2) -- begin")
+-                    .arg(rbwpos).arg(totfree));
++                    .arg(rbwposcopy).arg(totfree));
+             if (remotefile)
+             {
+                 if (livetvchain && livetvchain->HasNext())
+                     remotefile->SetTimeout(true);
+                 read_return = safe_read(
+-                    remotefile, readAheadBuffer + rbwpos, totfree);
++                    remotefile, readAheadBuffer + rbwposcopy, totfree);
+             }
+ #ifdef USING_FRONTEND
+             else if (dvdPriv)
+             {
+                 read_return = dvdPriv->safe_read(
+-                    readAheadBuffer + rbwpos, totfree);
++                    readAheadBuffer + rbwposcopy, totfree);
+             }
+             else if (bdPriv)
+             {
+                 read_return = bdPriv->safe_read(
+-                    readAheadBuffer + rbwpos, totfree);
++                    readAheadBuffer + rbwposcopy, totfree);
+             }
+ #endif // USING_FRONTEND
+             else
+             {
+-                read_return = safe_read(fd2, readAheadBuffer + rbwpos, totfree);
++                read_return = safe_read(fd2, readAheadBuffer + rbwposcopy, totfree);
+             }
+             VERBOSE(VB_FILE|VB_EXTRA, LOC +
+                     QString("safe_read(...@%1, %2) -> %3")
+-                    .arg(rbwpos).arg(totfree).arg(read_return));
+-            rbwlock.unlock();
++                    .arg(rbwposcopy).arg(totfree).arg(read_return));
+         }
+ 
+         if (read_return >= 0)
+-- 
+1.7.9.5
+

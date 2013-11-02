@@ -1,0 +1,37 @@
+From e52c47374903c58d3536034363df45ff9ea00567 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 29 Jul 2012 15:10:34 +0200
+Subject: [PATCH 142/285] mythplayer: Prevent a SEGV when closing a PiP
+
+When closing a PiP window, StopPlaying stops the decoder thread and then
+shuts down video and audio output.  Under some circumstances stopping the
+decoder times out because the decoder thread is stuck in a loop in
+AvFormatDecoder::GetFrame.  In this case it can call
+MythPlayer::GetNextVideoFrame which then attempts to call
+videoOutput->GetNextFreeFrame but videoOutput is NULL and results in
+a SEGV.
+
+This patch makes MythPlayer::GetNextVideoFrame return a null frame if
+videoOutput is null which then causes the decoder loop to exit.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythplayer.cpp |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 955587c..790147a 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -1094,7 +1094,7 @@ void MythPlayer::InitFilters(void)
+  */
+ VideoFrame *MythPlayer::GetNextVideoFrame(bool allow_unsafe)
+ {
+-    return videoOutput->GetNextFreeFrame(false, allow_unsafe);
++    return videoOutput ? videoOutput->GetNextFreeFrame(false, allow_unsafe) : 0;
+ }
+ 
+ /** \fn MythPlayer::ReleaseNextVideoFrame(VideoFrame*, int64_t)
+-- 
+1.7.9.5
+

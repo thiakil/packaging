@@ -1,0 +1,59 @@
+From e5007bd919d4517520bf466f9c545c72e8b21c91 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 6 Aug 2012 16:21:25 +0200
+Subject: [PATCH 013/124] ringbuffer: Increase read timeout to 30Secs for low
+ bit rate streams
+
+Increase timeout in WaitForReadsAllowed to 30 Secs to allow for http
+congestion.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/ringbuffer.cpp |   27 +++++++++++++++------------
+ 1 file changed, 15 insertions(+), 12 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/ringbuffer.cpp b/mythtv/libs/libmythtv/ringbuffer.cpp
+index b2a870f..7d826fb7 100644
+--- a/mythtv/libs/libmythtv/ringbuffer.cpp
++++ b/mythtv/libs/libmythtv/ringbuffer.cpp
+@@ -1020,22 +1020,25 @@ bool RingBuffer::WaitForReadsAllowed(void)
+     while (!readsallowed && !stopreads &&
+            !request_pause && !commserror && readaheadrunning)
+     {
+-        generalWait.wait(&rwlock, 1000);
+-        if (!readsallowed && t.elapsed() > 1000)
++        // The timeout should allow for congestion of internet streamed media
++        if (t.elapsed() >= 30000 || (t.elapsed() >= 10000 && !low_buffers))
+         {
+-            LOG(VB_GENERAL, LOG_WARNING, LOC +
+-                "Taking too long to be allowed to read..");
+-
+-            if (t.elapsed() > 10000)
+-            {
+-                LOG(VB_GENERAL, LOG_ERR, LOC + "Took more than 10 seconds to "
+-                                               "be allowed to read, aborting.");
+-                return false;
+-            }
++            LOG(VB_GENERAL, LOG_ERR, LOC +
++                QString("Waited %1 seconds to be allowed to read, aborting.")
++                .arg(t.elapsed()/1000) );
++            return false;
+         }
++
++        generalWait.wait(&rwlock, 250);
+     }
+ 
+-    return readsallowed;
++    if (t.elapsed() >= 500)
++    {
++        LOG(VB_GENERAL, LOG_WARNING, LOC +
++            QString("Waited %1 mS to be allowed to read (avail=%2 fill_min=%3)..")
++            .arg(t.elapsed()).arg(ReadBufAvail()).arg(fill_min) );
++    }
++    return true;
+ }
+ 
+ bool RingBuffer::WaitForAvail(int count)
+-- 
+1.7.9.5
+

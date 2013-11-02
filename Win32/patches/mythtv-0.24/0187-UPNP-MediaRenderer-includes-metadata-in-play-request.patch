@@ -1,0 +1,197 @@
+From 2a7d6749dba5947e85cc8295fcb232b2468fbf18 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 15 May 2013 15:28:06 +0100
+Subject: [PATCH 187/285] UPNP: MediaRenderer includes metadata in play
+ request
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythui/mythmainwindow.cpp |   23 +++++++-
+ mythtv/libs/libmythupnp/upnpavt.cpp      |   95 +++++++++++++++++++++++++-----
+ 2 files changed, 101 insertions(+), 17 deletions(-)
+
+diff --git a/mythtv/libs/libmythui/mythmainwindow.cpp b/mythtv/libs/libmythui/mythmainwindow.cpp
+index 48907b8..f11805c 100644
+--- a/mythtv/libs/libmythui/mythmainwindow.cpp
++++ b/mythtv/libs/libmythui/mythmainwindow.cpp
+@@ -2088,10 +2088,31 @@ void MythMainWindow::customEvent(QEvent *ce)
+ 
+         if (message.left(12) == "HANDLE_MEDIA")
+         {
++            QString plot, title, subtitle, director, year;
++            int season = 0, episode = 0, lenMins = 0;
++
++            switch ( me->ExtraDataCount())
++            {
++            default:
++            case 8: year = me->ExtraData(7);
++            // NB fall thru...
++            case 7: lenMins = me->ExtraData(6).toLong();
++            case 6: episode = me->ExtraData(5).toLong();
++            case 5: season = me->ExtraData(4).toLong();
++            case 4: director = me->ExtraData(3);
++            case 3: subtitle = me->ExtraData(2);
++            case 2: title = me->ExtraData(1);
++            case 1: plot = me->ExtraData(0);
++            case 0:
++                break;
++            }
++
+             QStringList tokens = message.split(' ', QString::SkipEmptyParts);
+             HandleMedia(tokens[1],
+                         message.mid(tokens[0].length() +
+-                                    tokens[1].length() + 2));
++                                    tokens[1].length() + 2),
++                        plot, title, subtitle, director,
++                        season, episode, lenMins, year );
+         }
+     }
+ }
+diff --git a/mythtv/libs/libmythupnp/upnpavt.cpp b/mythtv/libs/libmythupnp/upnpavt.cpp
+index a14729f..a10dea8 100644
+--- a/mythtv/libs/libmythupnp/upnpavt.cpp
++++ b/mythtv/libs/libmythupnp/upnpavt.cpp
+@@ -7,7 +7,9 @@
+ #include "upnp.h"
+ 
+ #include "QString"
++#include <QStringList>
+ #include "QCoreApplication"
++#include <QXmlStreamReader>
+ 
+ #include "mythuihelper.h" // for GetMythUI() in libmythui
+ #include "mythmainwindow.h" // for GetMythMainWindow
+@@ -137,9 +139,9 @@ bool UPnpAVTransport::ProcessRequest( HttpWorkerThread *pThread, HTTPRequest *pR
+     return( false );
+ }
+ 
+-static inline void PostEvent(const QString &msg)
++static inline void PostEvent(const QString &msg, const QStringList &extra = QStringList())
+ {
+-    MythEvent me(msg);
++    MythEvent me(msg, extra);
+     QCoreApplication::postEvent(GetMythMainWindow(), me.clone());
+ }
+ 
+@@ -191,6 +193,10 @@ void UPnpAVTransport::SetAVTransportURI( HTTPRequest *pRequest )
+          QString("UPnpAVTransport::SetAVTransportURI metadata: '%1'").arg(sMeta));
+     SetValue< QString >( "AVTransportURIMetaData", sMeta );
+ 
++    // For GetMediaInfo
++    SetValue< QString >( "NumberOfTracks", "1" ); // NB no playlists
++    SetValue< QString >( "CurrentMediaDuration", "0" );
++
+     if ( GetValue<QString>("TransportState") == "PLAYING")
+     {
+         UPnPResultCode res = StartPlay();
+@@ -203,16 +209,6 @@ void UPnpAVTransport::SetAVTransportURI( HTTPRequest *pRequest )
+         }
+     }
+ 
+-    // For GetMediaInfo
+-    SetValue< QString >( "NumberOfTracks", "1" ); // NB no playlists
+-    SetValue< QString >( "CurrentMediaDuration", "0" ); // TODO
+-
+-    // For GetPositionInfo
+-    SetValue< QString >( "CurrentTrack", "1" );
+-    SetValue< QString >( "CurrentTrackDuration", "0" ); // TODO
+-    SetValue< QString >( "CurrentTrackMetaData", sMeta );
+-    SetValue< QString >( "CurrentTrackURI", uri );
+-
+     pRequest->FormatActionResponse(NameValues());
+ }
+ 
+@@ -431,6 +427,60 @@ UPnPResultCode UPnpAVTransport::StartPlay()
+         return UPnPResult_InvalidSequence;
+     }
+ 
++    // Parse the metadata
++    QString plot, title, subtitle, director, year;
++    int season = 0, episode = 0, lenMins = -1;
++    QStringList protocol;
++    QString xpath;
++    QXmlStreamReader xml(GetValue<QString>("AVTransportURIMetaData"));
++    while (!xml.atEnd())
++    {
++        xml.readNext();
++        if (xml.isStartElement())
++        {
++            xpath += "/" + xml.name().toString();
++
++            if (xpath == "/DIDL-Lite/item/res")
++            {
++                // duration: 00:00:00
++                QString dur = xml.attributes().value("duration").toString();
++                SetValue< QString >( "CurrentMediaDuration", dur );
++
++                lenMins = 60 * dur.section(':',0,0).toUInt()
++                        + dur.section(':',1,1).toUInt();
++
++                // protocolInfo: http-get:*:video/mpeg:...
++                protocol = xml.attributes().value("protocolInfo").toString().split(':');
++                // also size
++            }
++        }
++        else if (xml.isEndElement())
++        {
++            // Drop last name
++            xpath = xpath.section('/', 0, -2);
++        }
++        else if (xml.isCharacters() && !xml.isWhitespace()) {
++            VERBOSE(VB_UPNP|VB_EXTRA,
++                 QString("%1 = '%2'").arg(xpath).arg(xml.text().toString()) );
++
++            if (xpath == "/DIDL-Lite/item/title")
++            {
++                title = xml.text().toString();
++                subtitle = title.section(':',-1,-1);
++                title = title.section(':',0,-2);
++            }
++            else if (xpath == "/DIDL-Lite/item/date")
++                year = xml.text().toString().section('-',0,0); // e.g. 2012-05-19T15:00:00
++            // also actor album artist creator
++        }
++    }
++
++    VERBOSE(VB_UPNP, QString(
++        "UPnpAVTransport::StartPlay title='%1' subtitle='%2' year='%3' len=%4mins")
++        .arg(title).arg(subtitle).arg(year).arg(lenMins) );
++
++    // TODO validate protocol
++
+     SendEvent("NETWORK_CONTROL STOP");
+     SetValue< QString >( "TransportState", "STOPPED" );
+ 
+@@ -452,12 +502,25 @@ UPnPResultCode UPnpAVTransport::StartPlay()
+         }
+     }
+ 
+-    // TODO from metadata append
+-    // plot, title, subtitle, director, season, episode, lenMins, year
+-    //QString meta = GetValue<QString>("AVTransportURIMetaData");
+-    PostEvent( QString("HANDLE_MEDIA UPnP %1").arg(uri) );
++    QStringList extra;
++    extra << plot;
++    extra << title;
++    extra << subtitle;
++    extra << director;
++    extra << QString::number( season);
++    extra << QString::number( episode);
++    extra << QString::number( lenMins);
++    extra << year;
++
++    PostEvent(QString("HANDLE_MEDIA UPnP %1").arg(uri), extra);
+     SetValue< QString >( "TransportState", "PLAYING" );
+ 
++    // For GetPositionInfo
++    SetValue< QString >( "CurrentTrack", "1" );
++    SetValue< QString >( "CurrentTrackDuration", GetValue<QString>("CurrentMediaDuration") );
++    SetValue< QString >( "CurrentTrackMetaData", GetValue<QString>("AVTransportURIMetaData") );
++    SetValue< QString >( "CurrentTrackURI", uri );
++
+     return UPnPResult_Success;
+ }
+ 
+-- 
+1.7.9.5
+

@@ -1,0 +1,26 @@
+From 6f39ed158d2e0df3c1c9bee3d75a7e15edce4234 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sat, 19 May 2012 16:08:41 +0200
+Subject: [PATCH 111/285] mythplugins: profile build includes debug symbols
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythplugins/settings.pro |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mythplugins/settings.pro b/mythplugins/settings.pro
+index 4ddc739..908c8bc 100644
+--- a/mythplugins/settings.pro
++++ b/mythplugins/settings.pro
+@@ -32,7 +32,7 @@ QMAKE_CXXFLAGS += $$CONFIG_DIRECTFB_CXXFLAGS
+ QMAKE_CXXFLAGS_SHLIB = -DPIC -fPIC
+ QMAKE_CXXFLAGS += $$ECXXFLAGS
+ 
+-profile:CONFIG += release
++profile:!win32:!macx:CONFIG += debug
+ 
+ QMAKE_CXXFLAGS_RELEASE = $$OPTFLAGS -fomit-frame-pointer
+ release:contains( TARGET_ARCH_POWERPC, yes ) {
+-- 
+1.7.9.5
+

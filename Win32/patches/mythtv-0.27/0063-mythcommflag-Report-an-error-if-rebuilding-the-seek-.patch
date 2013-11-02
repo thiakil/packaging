@@ -1,0 +1,58 @@
+From 2a0a0373ef33814ed8eaa597eecb3de4af6a1e9a Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Fri, 3 Feb 2012 15:04:16 +0100
+Subject: [PATCH 063/207] mythcommflag: Report an error if rebuilding the seek
+ table fails
+
+If mythcommflag --rebuild is executed and no seek table is generated
+the failure is ignored.  This patch adds a warning message.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/mythcommflagplayer.cpp |    3 ++-
+ mythtv/programs/mythcommflag/main.cpp        |    9 ++++++---
+ 2 files changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/mythcommflagplayer.cpp b/mythtv/libs/libmythtv/mythcommflagplayer.cpp
+index b521e01..aef8ef5 100644
+--- a/mythtv/libs/libmythtv/mythcommflagplayer.cpp
++++ b/mythtv/libs/libmythtv/mythcommflagplayer.cpp
+@@ -218,5 +218,6 @@ bool MythCommFlagPlayer::RebuildSeekTable(
+         "RebuildSaver");
+     RebuildSaver::Wait(decoder);
+ 
+-    return true;
++    // Return true iff the DB contains a valid pos map
++    return decoder->PosMapFromDb();
+ }
+diff --git a/mythtv/programs/mythcommflag/main.cpp b/mythtv/programs/mythcommflag/main.cpp
+index 596320d..dd78fc1 100644
+--- a/mythtv/programs/mythcommflag/main.cpp
++++ b/mythtv/programs/mythcommflag/main.cpp
+@@ -1057,17 +1057,20 @@ static int RebuildSeekTable(ProgramInfo *pginfo, int jobid)
+         cerr << "Rebuild started at " << qPrintable(time) << endl;
+     }
+ 
+-    cfp->RebuildSeekTable(progress);
++    bool ok = cfp->RebuildSeekTable(progress);
+ 
+     if (progress)
+     {
+         QString time = QDateTime::currentDateTime().toString(Qt::TextDate);
+-        cerr << "Rebuild completed at " << qPrintable(time) << endl;
++        if (ok)
++            cerr << "Rebuild completed at " << qPrintable(time) << endl;
++        else
++            cerr << "Rebuild failed at " << qPrintable(time) << endl;
+     }
+ 
+     delete ctx;
+ 
+-    return GENERIC_EXIT_OK;
++    return ok ? GENERIC_EXIT_OK : GENERIC_EXIT_NOT_OK ;
+ }
+ 
+ static int RebuildSeekTable(QString filename, int jobid)
+-- 
+1.7.9.5
+

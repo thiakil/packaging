@@ -1,0 +1,44 @@
+From b83cd6d23484c96b5ad69c6c4e9454fd62f28bf9 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Wed, 2 Oct 2013 18:19:38 +0100
+Subject: [PATCH 189/202] Player: Increase OpenFile timeout to allow playing
+ encrypted isos on a remote FE
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythtv/fileringbuffer.cpp |    4 ++--
+ mythtv/libs/libmythtv/mythplayer.cpp     |    2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/mythtv/libs/libmythtv/fileringbuffer.cpp b/mythtv/libs/libmythtv/fileringbuffer.cpp
+index aff7440..b75df25 100644
+--- a/mythtv/libs/libmythtv/fileringbuffer.cpp
++++ b/mythtv/libs/libmythtv/fileringbuffer.cpp
+@@ -387,9 +387,9 @@ bool FileRingBuffer::OpenFile(const QString &lfilename, uint retry_ms)
+     // to determine type & settings.
+     QString lower = lfilename.toLower();
+     if (lower.endsWith(".img") || lower.endsWith(".iso") || lower.endsWith(".vob"))
+-        rawbitrate = 8000;
++        rawbitrate = 3000;
+     else
+-        rawbitrate = 1000; // Allow for radio
++        rawbitrate = 500; // Allow for radio
+     CalcReadAheadThresh();
+ 
+     bool ok = fd2 >= 0 || remotefile;
+diff --git a/mythtv/libs/libmythtv/mythplayer.cpp b/mythtv/libs/libmythtv/mythplayer.cpp
+index 4617746..b63222b 100644
+--- a/mythtv/libs/libmythtv/mythplayer.cpp
++++ b/mythtv/libs/libmythtv/mythplayer.cpp
+@@ -933,7 +933,7 @@ int MythPlayer::OpenFile(uint retries)
+     int testreadsize = 2048;
+ 
+     MythTimer bigTimer; bigTimer.start();
+-    int timeout = (retries + 1) * 500;
++    int timeout = max((retries + 1) * 500, 15000U);
+     while (testreadsize <= kDecoderProbeBufferSize)
+     {
+         MythTimer peekTimer; peekTimer.start();
+-- 
+1.7.9.5
+

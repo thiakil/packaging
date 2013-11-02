@@ -1,0 +1,43 @@
+From a63d746ef50eb45992ee2fd236982edae8c4a217 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 11 Mar 2013 18:56:55 +0000
+Subject: [PATCH 004/202] Win32: mingw cross compile fixes
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythbase/mythsocket.cpp             |    2 +-
+ .../libs/libmythtv/recorders/rtp/rtpdatapacket.h   |    4 ++++
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythbase/mythsocket.cpp b/mythtv/libs/libmythbase/mythsocket.cpp
+index bb85b92..5ed4348 100644
+--- a/mythtv/libs/libmythbase/mythsocket.cpp
++++ b/mythtv/libs/libmythbase/mythsocket.cpp
+@@ -12,7 +12,7 @@
+ // setsockopt -- has to be after Qt includes for Q_OS_WIN definition
+ #if defined(Q_OS_WIN)
+ #include <winsock2.h>
+-#include <Ws2tcpip.h>
++#include <ws2tcpip.h>
+ #include <stdio.h>
+ #else
+ #include <sys/socket.h>
+diff --git a/mythtv/libs/libmythtv/recorders/rtp/rtpdatapacket.h b/mythtv/libs/libmythtv/recorders/rtp/rtpdatapacket.h
+index e70499b..b5d1092 100644
+--- a/mythtv/libs/libmythtv/recorders/rtp/rtpdatapacket.h
++++ b/mythtv/libs/libmythtv/recorders/rtp/rtpdatapacket.h
+@@ -6,7 +6,11 @@
+ #ifndef _RTP_DATA_PACKET_H_
+ #define _RTP_DATA_PACKET_H_
+ 
++#ifdef _WIN32
++#include <winsock2.h>
++#else
+ #include <arpa/inet.h> // for ntohs()/ntohl()
++#endif
+ 
+ #include "udppacket.h"
+ #include "mythlogging.h"
+-- 
+1.7.9.5
+

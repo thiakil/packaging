@@ -1,0 +1,123 @@
+From cac6d1f9b94500164a230dfdb2a19314946fea25 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 5 Apr 2012 17:36:31 +0200
+Subject: [PATCH 069/124] mytharchive: Fix a race condition in the creation of
+ the progress log
+
+MythArchive delegates DVD writing and ISO image creation to the background
+process mytharchivehelper.  The UI monitors job progress through a log file
+written by mytharchivehelper.
+
+There are 4 places where an existing log file is deleted and then the new
+process is started in the background, redirecting its standard output to
+the log file.
+
+The race condition occurs because the UI doesn't wait for the log file
+to be created and if not found immediately then an error dialog is shown
+to the user.
+
+This patch ensures that a zero length log file exists before mytharchivehelper
+is started.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ .../mytharchive/mytharchive/exportnative.cpp       |   13 +++++++---
+ .../mytharchive/mytharchive/importnative.cpp       |   13 +++++++---
+ mythplugins/mytharchive/mytharchive/mythburn.cpp   |   26 +++++++++++++++-----
+ 3 files changed, 40 insertions(+), 12 deletions(-)
+
+diff --git a/mythplugins/mytharchive/mytharchive/exportnative.cpp b/mythplugins/mytharchive/mytharchive/exportnative.cpp
+index 38c1e89..152f60c 100644
+--- a/mythplugins/mytharchive/mytharchive/exportnative.cpp
++++ b/mythplugins/mytharchive/mytharchive/exportnative.cpp
+@@ -476,9 +476,16 @@ void ExportNative::runScript()
+     QString configDir = tempDir + "config";
+     QString commandline;
+ 
+-    // remove existing progress.log if present
+-    if (QFile::exists(logDir + "/progress.log"))
+-        QFile::remove(logDir + "/progress.log");
++    QDir dir(tempDir);
++    if (!dir.exists("logs"))
++        dir.mkdir("logs");
++
++    // truncate existing progress.log
++    QFile logFile(logDir + "/progress.log");
++    if (logFile.exists())
++        logFile.resize(0);
++    else if (logFile.open(QIODevice::WriteOnly))
++        logFile.close();
+ 
+     // remove cancel flag file if present
+     if (QFile::exists(logDir + "/mythburncancel.lck"))
+diff --git a/mythplugins/mytharchive/mytharchive/importnative.cpp b/mythplugins/mytharchive/mytharchive/importnative.cpp
+index bb1f4ba..56d4704 100644
+--- a/mythplugins/mytharchive/mytharchive/importnative.cpp
++++ b/mythplugins/mytharchive/mytharchive/importnative.cpp
+@@ -446,9 +446,16 @@ void ImportNative::finishedPressed()
+ 
+     QString logDir = tempDir + "logs";
+ 
+-    // remove existing progress.log if prescent
+-    if (QFile::exists(logDir + "/progress.log"))
+-        QFile::remove(logDir + "/progress.log");
++    QDir dir(tempDir);
++    if (!dir.exists("logs"))
++        dir.mkdir("logs");
++
++    // truncate existing progress.log
++    QFile logFile(logDir + "/progress.log");
++    if (logFile.exists())
++        logFile.resize(0);
++    else if (logFile.open(QIODevice::WriteOnly))
++        logFile.close();
+ 
+     commandline = "mytharchivehelper --importarchive --infile \"" + m_xmlFile +
+                   "\" --chanid " + chanID;
+diff --git a/mythplugins/mytharchive/mytharchive/mythburn.cpp b/mythplugins/mytharchive/mytharchive/mythburn.cpp
+index 2d4a524..2023384 100644
+--- a/mythplugins/mytharchive/mytharchive/mythburn.cpp
++++ b/mythplugins/mytharchive/mytharchive/mythburn.cpp
+@@ -940,9 +940,16 @@ void MythBurn::runScript()
+     QString configDir = tempDir + "config";
+     QString commandline;
+ 
+-    // remove existing progress.log if present
+-    if (QFile::exists(logDir + "/progress.log"))
+-        QFile::remove(logDir + "/progress.log");
++    QDir dir(tempDir);
++    if (!dir.exists("logs"))
++        dir.mkdir("logs");
++
++    // truncate existing progress.log
++    QFile logFile(logDir + "/progress.log");
++    if (logFile.exists())
++        logFile.resize(0);
++    else if (logFile.open(QIODevice::WriteOnly))
++        logFile.close();
+ 
+     // remove cancel flag file if present
+     if (QFile::exists(logDir + "/mythburncancel.lck"))
+@@ -1201,9 +1208,16 @@ void BurnMenu::doBurn(int mode)
+     QString configDir = tempDir + "config";
+     QString commandline;
+ 
+-    // remove existing progress.log if present
+-    if (QFile::exists(logDir + "/progress.log"))
+-        QFile::remove(logDir + "/progress.log");
++    QDir dir(tempDir);
++    if (!dir.exists("logs"))
++        dir.mkdir("logs");
++
++    // truncate existing progress.log
++    QFile logFile(logDir + "/progress.log");
++    if (logFile.exists())
++        logFile.resize(0);
++    else if (logFile.open(QIODevice::WriteOnly))
++        logFile.close();
+ 
+     // remove cancel flag file if present
+     if (QFile::exists(logDir + "/mythburncancel.lck"))
+-- 
+1.7.9.5
+

@@ -1,0 +1,15 @@
+# Fix MacOSX x-compile with XCode 2.2.1 SDK
+--- a/include/ogg/os_types.h	2010-10-26 12:56:36.000000000 +0200
++++ b/include/ogg/os_types.h	2011-02-22 15:27:10.586078153 +0100
+@@ -70,9 +70,9 @@
+ 
+ #  include <inttypes.h>
+    typedef int16_t ogg_int16_t;
+-   typedef u_int16_t ogg_uint16_t;
++   typedef uint16_t ogg_uint16_t;
+    typedef int32_t ogg_int32_t;
+-   typedef u_int32_t ogg_uint32_t;
++   typedef uint32_t ogg_uint32_t;
+    typedef int64_t ogg_int64_t;
+ 
+ #elif defined(__HAIKU__)

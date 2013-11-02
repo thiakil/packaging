@@ -1,0 +1,83 @@
+From bc000d917f39cff0f7d5695a88230d01ff7a6cee Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Mon, 18 Jul 2011 20:32:19 +0200
+Subject: [PATCH 050/285] freemheg: Support JPEG bitmaps
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythfreemheg/Bitmap.cpp |    3 +++
+ mythtv/libs/libmythfreemheg/freemheg.h |    1 +
+ mythtv/libs/libmythtv/mhi.cpp          |   16 ++++++++++++++++
+ mythtv/libs/libmythtv/mhi.h            |    3 +++
+ 4 files changed, 23 insertions(+)
+
+diff --git a/mythtv/libs/libmythfreemheg/Bitmap.cpp b/mythtv/libs/libmythfreemheg/Bitmap.cpp
+index 9944833..7f924c7 100644
+--- a/mythtv/libs/libmythfreemheg/Bitmap.cpp
++++ b/mythtv/libs/libmythfreemheg/Bitmap.cpp
+@@ -127,6 +127,9 @@ void MHBitmap::CreateContent(const unsigned char *data, int length, MHEngine *en
+     else if (nCHook == 2 /* ||nCHook == 5 */) { // MPEG I-frame.
+         m_pContent->CreateFromMPEG(data, length);
+     }
++    else if (nCHook == 6) { // JPEG ISO/IEC 10918-1, JFIF file
++        m_pContent->CreateFromJPEG(data, length);
++    }
+     // 1,3,5,8 are reserved. 7= H.264 Intra Frame
+     else MHERROR(QString("Unknown bitmap content hook %1").arg(nCHook));
+ 
+diff --git a/mythtv/libs/libmythfreemheg/freemheg.h b/mythtv/libs/libmythfreemheg/freemheg.h
+index 6421c22..48bb58d 100644
+--- a/mythtv/libs/libmythfreemheg/freemheg.h
++++ b/mythtv/libs/libmythfreemheg/freemheg.h
+@@ -189,6 +189,7 @@ public:
+     // Creation functions
+     virtual void CreateFromPNG(const unsigned char *data, int length) = 0;
+     virtual void CreateFromMPEG(const unsigned char *data, int length) = 0;
++    virtual void CreateFromJPEG(const unsigned char *data, int length) = 0;
+     // Scale the bitmap.  Only used for image derived from MPEG I-frames.
+     virtual void ScaleImage(int newWidth, int newHeight) = 0;
+     // Information about the image.
+diff --git a/mythtv/libs/libmythtv/mhi.cpp b/mythtv/libs/libmythtv/mhi.cpp
+index fe27721..f37206c 100644
+--- a/mythtv/libs/libmythtv/mhi.cpp
++++ b/mythtv/libs/libmythtv/mhi.cpp
+@@ -1501,6 +1501,22 @@ void MHIBitmap::CreateFromPNG(const unsigned char *data, int length)
+     m_opaque = ! m_image.hasAlphaChannel();
+ }
+ 
++// Create a bitmap from JPEG.
++//virtual
++void MHIBitmap::CreateFromJPEG(const unsigned char *data, int length)
++{
++    m_image = QImage();
++
++    if (!m_image.loadFromData(data, length, "JPG"))
++    {
++        m_image = QImage();
++        return;
++    }
++
++    // Assume that if it has an alpha buffer then it's partly transparent.
++    m_opaque = ! m_image.hasAlphaChannel();
++}
++
+ // Convert an MPEG I-frame into a bitmap.  This is used as the way of
+ // sending still pictures.  We convert the image to a QImage even
+ // though that actually means converting it from YUV and eventually
+diff --git a/mythtv/libs/libmythtv/mhi.h b/mythtv/libs/libmythtv/mhi.h
+index 3920ae3..6fd0971 100644
+--- a/mythtv/libs/libmythtv/mhi.h
++++ b/mythtv/libs/libmythtv/mhi.h
+@@ -234,6 +234,9 @@ class MHIBitmap : public MHBitmapDisplay
+     /// Create bitmap from single I frame MPEG
+     virtual void CreateFromMPEG(const unsigned char *data, int length);
+ 
++    /// Create bitmap from JPEG
++    virtual void CreateFromJPEG(const unsigned char *data, int length);
++
+     /** \fn MHIBitmap::Draw(int,int,QRect,bool)
+      *  \brief Draw the completed drawing onto the display.
+      *
+-- 
+1.7.9.5
+

@@ -1,0 +1,59 @@
+From 2f570a74dc6e60bcbad6bda74e64484dfbfd57bd Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Sun, 11 Aug 2013 15:35:10 +0100
+Subject: [PATCH 198/227] UI: Fix Xv painter rendering of OSD menu gradient
+ elements
+
+Commit #xxxxx re-worked and simplified MythPainter.
+MythYUVAPainter::DrawRect is passed a brush to paint the background.
+This brush may be configured to gradient fill - for instance in
+the MythCentre theme to draw the MythPopupBox OSD menu buttons.
+Currently only the basic brush colour is translated to YUVA so the
+OSD menu is incorrectly rendered.
+
+This patch translates the colours in the brush fill gradient from
+RGB to YUV.
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/libs/libmythui/mythpainter_yuva.cpp |   24 +++++++++++++++++++++++-
+ 1 file changed, 23 insertions(+), 1 deletion(-)
+
+diff --git a/mythtv/libs/libmythui/mythpainter_yuva.cpp b/mythtv/libs/libmythui/mythpainter_yuva.cpp
+index db75273..b73af77 100644
+--- a/mythtv/libs/libmythui/mythpainter_yuva.cpp
++++ b/mythtv/libs/libmythui/mythpainter_yuva.cpp
+@@ -56,7 +56,29 @@ void MythYUVAPainter::DrawRect(const QRect &area, const QBrush &fillBrush,
+                                const QPen &linePen, int alpha)
+ {
+     QBrush brush(fillBrush);
+-    brush.setColor(rgb_to_yuv(brush.color()));
++
++    switch (fillBrush.style())
++    {
++    case Qt::LinearGradientPattern:
++    case Qt::RadialGradientPattern:
++    case Qt::ConicalGradientPattern:
++        {
++        QGradient gradient = *fillBrush.gradient();
++        QGradientStops stops = gradient.stops();
++        for (QGradientStops::iterator it = stops.begin(); it != stops.end(); ++it)
++        {
++            it->second = rgb_to_yuv(it->second);
++            it->second.setAlpha(alpha);
++        }
++        gradient.setStops(stops);
++        brush = gradient;
++        }
++        break;
++    default:
++        brush.setColor(rgb_to_yuv(brush.color()));
++        break;
++    }
++
+     QPen pen(linePen);
+     pen.setColor(rgb_to_yuv(pen.color()));
+ 
+-- 
+1.7.9.5
+

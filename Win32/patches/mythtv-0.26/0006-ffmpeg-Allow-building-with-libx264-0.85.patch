@@ -1,0 +1,59 @@
+From 07ae7d28fd8cfe46fa5f4e06e9c6f74aa9302f63 Mon Sep 17 00:00:00 2001
+From: Lawrence Rust <lvr@softsystem.co.uk>
+Date: Thu, 17 May 2012 17:07:00 +0200
+Subject: [PATCH 006/227] ffmpeg: Allow building with libx264 >= 0.85
+
+Signed-off-by: Lawrence Rust <lvr@softsystem.co.uk>
+---
+ mythtv/configure                            |    4 ++--
+ mythtv/external/FFmpeg/libavcodec/libx264.c |    6 ++++++
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/mythtv/configure b/mythtv/configure
+index 329ec04..d8ea318 100755
+--- a/mythtv/configure
++++ b/mythtv/configure
+@@ -4164,8 +4164,8 @@ enabled libvpx     && {
+     enabled libvpx_encoder && { check_lib2 "vpx/vpx_encoder.h vpx/vp8cx.h" "vpx_codec_enc_init_ver VPX_CQ" -lvpx ||
+                                 die "ERROR: libvpx encoder version must be >=0.9.6"; } }
+ enabled libx264    && require  libx264 x264.h x264_encoder_encode -lx264 &&
+-                      { check_cpp_condition x264.h "X264_BUILD >= 118" ||
+-                        die "ERROR: libx264 version must be >= 0.118."; }
++                      { check_cpp_condition x264.h "X264_BUILD >= 85" ||
++                        die "ERROR: libx264 version must be >= 0.85."; }
+ enabled libxavs    && require  libxavs xavs.h xavs_encoder_encode -lxavs
+ enabled libxvid    && require  libxvid xvid.h xvid_global -lxvidcore
+ enabled openal     && { { for al_libs in "${OPENAL_LIBS}" "-lopenal" "-lOpenAL32"; do
+diff --git a/mythtv/external/FFmpeg/libavcodec/libx264.c b/mythtv/external/FFmpeg/libavcodec/libx264.c
+index d56dfe7..bcca57f 100644
+--- a/mythtv/external/FFmpeg/libavcodec/libx264.c
++++ b/mythtv/external/FFmpeg/libavcodec/libx264.c
+@@ -251,11 +251,15 @@ static int convert_pix_fmt(enum PixelFormat pix_fmt)
+     case PIX_FMT_YUVJ420P:
+     case PIX_FMT_YUV420P9:
+     case PIX_FMT_YUV420P10: return X264_CSP_I420;
++#ifdef X264_CSP_I422
+     case PIX_FMT_YUV422P:
+     case PIX_FMT_YUV422P10: return X264_CSP_I422;
++#endif
++#ifdef X264_CSP_I444
+     case PIX_FMT_YUV444P:
+     case PIX_FMT_YUV444P9:
+     case PIX_FMT_YUV444P10: return X264_CSP_I444;
++#endif
+ #ifdef X264_CSP_BGR
+     case PIX_FMT_BGR24:
+         return X264_CSP_BGR;
+@@ -568,7 +572,9 @@ static const AVOption options[] = {
+     { "weightb",       "Weighted prediction for B-frames.",               OFFSET(weightb),       AV_OPT_TYPE_INT,    {-1 }, -1, 1, VE },
+     { "weightp",       "Weighted prediction analysis method.",            OFFSET(weightp),       AV_OPT_TYPE_INT,    {-1 }, -1, INT_MAX, VE, "weightp" },
+     { "none",          NULL, 0, AV_OPT_TYPE_CONST, {X264_WEIGHTP_NONE},   INT_MIN, INT_MAX, VE, "weightp" },
++#ifdef X264_WEIGHTP_SIMPLE
+     { "simple",        NULL, 0, AV_OPT_TYPE_CONST, {X264_WEIGHTP_SIMPLE}, INT_MIN, INT_MAX, VE, "weightp" },
++#endif
+     { "smart",         NULL, 0, AV_OPT_TYPE_CONST, {X264_WEIGHTP_SMART},  INT_MIN, INT_MAX, VE, "weightp" },
+     { "ssim",          "Calculate and print SSIM stats.",                 OFFSET(ssim),          AV_OPT_TYPE_INT,    {-1 }, -1, 1, VE },
+     { "intra-refresh", "Use Periodic Intra Refresh instead of IDR frames.",OFFSET(intra_refresh),AV_OPT_TYPE_INT,    {-1 }, -1, 1, VE },
+-- 
+1.7.9.5
+
