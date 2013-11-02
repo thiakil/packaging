@@ -1972,7 +1972,11 @@ isdebug QT && export CXXFLAGS=$cxxflags_save
 ###############################################################################
 cd "$MYTHDIR"
 name="mythtv"
-[ ! -d $name ] && gitclone ${MYTHBRANCH:+-b $MYTHBRANCH} "$MYTHGIT/$name.git" $name
+cloneurl="$MYTHGIT/$name.git"
+if [ -d $MYTHGIT ]; then
+  cloneurl="$MYTHGIT"
+fi
+[ ! -d $name ] && gitclone ${MYTHBRANCH:+-b $MYTHBRANCH} "$cloneurl" $name
 pushd "$name" >/dev/null
 
 branch=`gitbranch .`
