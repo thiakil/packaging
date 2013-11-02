@@ -2294,14 +2294,15 @@ fi
 case "$MYTHVER" in
     0.23*)        mythlibs="$mythlibs mythdb" ;;
     0.24*)        mythlibs="$mythlibs mythdb mythmetadata" ;;
-    0.25*|0.26*|0.27*|master) mythlibs="$mythlibs mythbase mythmetadata mythservicecontracts mythprotoserver" ;;
-    *)            mythlibs="$mythlibs mythbase mythmetadata mythservicecontracts mythprotoserver"
+    0.25*|0.26*) mythlibs="$mythlibs mythbase mythmetadata mythservicecontracts mythprotoserver" ;;
+    0.27*|master) mythlibs="$mythlibs mythbase mythmetadata mythservicecontracts mythprotoserver mythzmq mythnzmqt mythqjson" ;;
+    *)            mythlibs="$mythlibs mythbase mythmetadata mythservicecontracts mythprotoserver mythzmq mythnzmqt mythqjson"
                   echo "WARNING Installation untested with this version." ;;
 esac
 ffmpeglibs="mythavcodec mythavformat mythavutil mythswscale"
 case "$MYTHVER" in
     0.24*|0.23*)     ffmpeglibs="$ffmpeglibs mythavcore mythpostproc" ;;
-    0.25*|0.26*|0.27*|master|"") ffmpeglibs="$ffmpeglibs mythpostproc" ;;
+    0.25*|0.26*|0.27*|master|"") ffmpeglibs="$ffmpeglibs mythpostproc mythswresample" ;;
 esac
 xtralibs="xml2 xslt freetype mp3lame dvdcss exif ogg vorbis vorbisenc tag cdio cdio_cdda cdio_paranoia udf visual-0.4"
 QTDLLS="QtCore QtGui QtNetwork QtOpenGL QtSql QtSvg QtWebKit QtXml Qt3Support"
