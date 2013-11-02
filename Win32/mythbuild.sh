@@ -1440,7 +1440,7 @@ build LIBXML2 --with-minimum --with-output --with-reader \
 # Required by Python bindings used by mytharchive
 
 CPPFLAGS="-I$incdir $CPPFLAGS" LDFLAGS="-L$libdir $LDFLAGS" \
-build LIBXSLT --without-crypto --without-debug --without-debugger --without-plugins
+build LIBXSLT --without-crypto --without-debug --without-debugger --without-plugins $( isWinTarget && [ "$MSYSTEM" != "MINGW32" ] && echo "--without-python")
 
 
 ###############################################################################
@@ -1866,7 +1866,7 @@ if [ ! -e "$stampconfig.$debug" -o -n "${!compcfg}" -o ! -e Makefile ]; then
     args="-opensource -confirm-license \
         ${qtXplatform:+-xplatform $qtXplatform} \
         -$debug -fast -nomake tools \
-        -nomake examples -nomake demos -nomake docs -nomake translations \
+        -nomake examples -nomake demos -nomake docs -nomake translations -nomake test \
         -no-scripttools -no-declarative -no-multimedia \
         -no-phonon -no-sql-sqlite -no-sql-odbc -plugin-sql-mysql"
 
