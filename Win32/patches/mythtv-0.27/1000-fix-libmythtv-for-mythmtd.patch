@@ -1,7 +1,7 @@
-diff --git a/mythtv/mythtv/programs/mythmtd/mythmtd.pro.orig b/mythtv/mythtv/programs/mythmtd/mythmtd.pro
+diff --git a/mythtv/programs/mythmtd/mythmtd.pro b/mythtv/programs/mythmtd/mythmtd.pro
 index 4dc408b..f279293 100644
---- a/mythtv/mythtv/programs/mythmtd/mythmtd.pro.orig
-+++ b/mythtv/mythtv/programs/mythmtd/mythmtd.pro
+--- a/mythtv/programs/mythmtd/mythmtd.pro
++++ b/mythtv/programs/mythmtd/mythmtd.pro
 @@ -17,6 +17,7 @@ HEADERS += jobthread.h dvdprobe.h fileobs.h threadevents.h
  
  LIBS += -L../../libs/libmythdvdnav
