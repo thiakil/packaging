@@ -2300,8 +2300,8 @@ case "$MYTHVER" in
     0.23*)        mythlibs="$mythlibs mythdb" ;;
     0.24*)        mythlibs="$mythlibs mythdb mythmetadata" ;;
     0.25*|0.26*) mythlibs="$mythlibs mythbase mythmetadata mythservicecontracts mythprotoserver" ;;
-    0.27*|master) mythlibs="$mythlibs mythbase mythmetadata mythservicecontracts mythprotoserver mythzmq mythnzmqt mythqjson" ;;
-    *)            mythlibs="$mythlibs mythbase mythmetadata mythservicecontracts mythprotoserver mythzmq mythnzmqt mythqjson"
+    0.27*|master) mythlibs="$mythlibs mythbase mythmetadata mythservicecontracts mythprotoserver" ;;
+    *)            mythlibs="$mythlibs mythbase mythmetadata mythservicecontracts mythprotoserver"
                   echo "WARNING Installation untested with this version." ;;
 esac
 ffmpeglibs="mythavcodec mythavformat mythavutil mythswscale"
@@ -2309,7 +2309,14 @@ case "$MYTHVER" in
     0.24*|0.23*)     ffmpeglibs="$ffmpeglibs mythavcore mythpostproc" ;;
     0.25*|0.26*|0.27*|master|"") ffmpeglibs="$ffmpeglibs mythpostproc mythswresample" ;;
 esac
+
 xtralibs="xml2 xslt freetype mp3lame dvdcss exif ogg vorbis vorbisenc tag cdio cdio_cdda cdio_paranoia udf visual-0.4"
+
+unversionedlibs=""
+case "$MYTHVER" in
+    0.27*|master|"") unversionedlibs = "mythzmq mythnzmqt mythqjson" ;;
+esac
+
 QTDLLS="QtCore QtGui QtNetwork QtOpenGL QtSql QtSvg QtWebKit QtXml Qt3Support"
 case "$MYTHVER" in
     ""|0.25*|0.26*|0.27*|master) QTDLLS="$QTDLLS QtScript" ;;
@@ -2326,6 +2333,10 @@ if isWinTarget ; then
     [ -r "$bindir/mtd.exe" ] && ln -s $bindir/mtd.exe .
     for lib in $mythlibs ; do
         ln -s $bindir/lib$lib-*.dll .
+    done
+
+    for lib in $unversionedlibs ; do
+        ln -s $bindir/lib$unversionedlibs.dll .
     done
 
     # Mingw runtime
@@ -2370,14 +2381,22 @@ if isWinTarget ; then
     isdebug QT && v="d4" || v="4"
     if [ "$MSYSTEM" == "MINGW32" ]; then
         for dll in $QTDLLS ; do
-            ln -s $MYTHWORK/$QT/bin/$dll$v.dll .
+            if [ -e "$MYTHWORK/$QT/bin/$dll$v.dll" ]; then
+                ln -s $MYTHWORK/$QT/bin/$dll$v.dll .
+            elif [ -e "$MYTHWORK/$QT/bin/lib$dll$v.dll" ]; then
+                ln -s $MYTHWORK/$QT/bin/lib$dll$v.dll .
+            fi
         done
-        ln -s $MYTHWORK/$QT/plugins/* .
+        ln -s $MYTHWORK/$QT/plugins/sqldrivers .
     else
         for dll in $QTDLLS ; do
-            ln -s $bindir/$dll$v.dll .
+            if [ -e "$bindir/$dll$v.dll" ]; then
+                ln -s $bindir/$dll$v.dll .
+            elif [ -e "$bindir/lib$dll$v.dll" ]; then
+                ln -s $bindir/lib$dll$v.dll .
+            fi
         done
-        ln -s $MYTHINSTALL/plugins/* .
+        ln -s $MYTHINSTALL/plugins/sqldrivers .
     fi
 
     # MySQL for QT plugin
