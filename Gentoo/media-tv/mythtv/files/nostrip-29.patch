@@ -1,0 +1,10 @@
+diff --git a/mythtv/settings.pro b/mythtv/settings.pro
+index 7b9b83f1f8..6818926709 100755
+--- settings.pro
++++ settings.pro
+@@ -1,3 +1,5 @@
++QMAKE_STRIP = true
++
+ win32-msvc* {
+ 
+   SRC_PATH_BARE = $$(SRC_PATH_BARE)
